@@ -90,26 +90,54 @@ class ResolutionPolicyInvariantTest {
     }
 
     @Test
-    @DisplayName("the seller is reached from an observed absence, and only for a DECISION")
+    @DisplayName("human authority is reached from an observed absence, and it is a TERMINAL rather than a step")
     void sellerIsNotAFallbackRouter() {
-        // Knowledge RAN and found nothing: a new judgment is genuinely required.
-        var afterAbsence = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.ORGANIZATION),
-                List.of(ran(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER, null)));
-        assertThat(afterAbsence).isInstanceOf(ResolutionPolicy.Run.class);
-        assertThat(((ResolutionPolicy.Run) afterAbsence).resolver()).isEqualTo(Authority.SELLER);
+        // Knowledge RAN and found nothing: a new human judgment is genuinely required, and that is where the goal
+        // ENDS. Before v3 this dispatched CapabilityId.SELLER for a DECISION and settled for everything else — two
+        // spellings of one outcome. The frozen gold had already voted: 35 goals terminate NEEDS_SELLER and 32 reach
+        // it with no seller step, while the seller resolver closes 0 of 72. See RequestedOutcome.
+        for (Referent subject : List.of(Referent.ORGANIZATION, Referent.CURRENT_LISTING)) {
+            CapabilityId knowledge = subject == Referent.ORGANIZATION
+                    ? CapabilityId.KNOWLEDGE_ORG : CapabilityId.KNOWLEDGE_PRODUCT;
+            var afterAbsence = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, subject),
+                    List.of(ran(knowledge, ResolutionState.NEEDS_SELLER, null)));
+            assertThat(afterAbsence).as("%s", subject).isInstanceOf(ResolutionPolicy.Settle.class);
+            assertThat(((ResolutionPolicy.Settle) afterAbsence).state())
+                    .isEqualTo(ResolutionState.NEEDS_SELLER);
+        }
 
         // Knowledge COULD NOT RUN: we do not know whether a policy exists, so we do not claim a judgment is needed.
-        var afterGap = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.ORGANIZATION),
+        // This is the distinction the merge had to leave standing, because it is the one that can lie.
+        var afterGap = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.ORGANIZATION),
                 List.of(ran(CapabilityId.KNOWLEDGE_ORG, ResolutionState.CAPABILITY_GAP, GapReason.UNREADABLE_SOURCE)));
         assertThat(afterGap).isInstanceOf(ResolutionPolicy.Settle.class);
         assertThat(((ResolutionPolicy.Settle) afterGap).state()).isEqualTo(ResolutionState.CAPABILITY_GAP);
+    }
 
-        // An INFORMATION goal whose knowledge is absent does not get a seller appended behind it by this function:
-        // it settles as NEEDS_SELLER, which the runtime records as an outcome and no plan ever contained.
-        var info = ResolutionPolicy.next(goal(RequestedOutcome.INFORMATION, Referent.CURRENT_LISTING),
-                List.of(ran(CapabilityId.KNOWLEDGE_PRODUCT, ResolutionState.NEEDS_SELLER, null)));
-        assertThat(info).isInstanceOf(ResolutionPolicy.Settle.class);
-        assertThat(((ResolutionPolicy.Settle) info).state()).isEqualTo(ResolutionState.NEEDS_SELLER);
+    /**
+     * <b>The merge did not widen the loop, and this is the assertion that says so.</b>
+     *
+     * <p>The other way to merge {@code INFORMATION} and {@code DECISION} was to keep the seller dispatch and key it
+     * on the observed absence instead of the token — which {@link ResolutionPolicy}'s own class comment used to
+     * claim it already did. Measured against the frozen gold that would have added a seller step to <b>30 more</b>
+     * goals and closed none of them. So no dispatch of {@link CapabilityId#SELLER} may come out of this function,
+     * under any outcome, from any absence.
+     */
+    @Test
+    @DisplayName("no observed absence, under any outcome, dispatches the seller")
+    void theLoopNeverDispatchesTheSeller() {
+        for (RequestedOutcome outcome : RequestedOutcome.values()) {
+            for (CapabilityId ran : List.of(CapabilityId.KNOWLEDGE_ORG, CapabilityId.KNOWLEDGE_PRODUCT,
+                    CapabilityId.KNOWLEDGE_CATALOGUE, CapabilityId.ENTITY_ORDER, CapabilityId.ENTITY_LISTING,
+                    CapabilityId.PROCEDURE_ORDER_ACTION)) {
+                var d = ResolutionPolicy.next(goal(outcome, Referent.CURRENT_ORDER),
+                        List.of(ran(ran, ResolutionState.NEEDS_SELLER, null)));
+                assertThat(d).as("%s after %s", outcome, ran).isInstanceOf(ResolutionPolicy.Settle.class);
+                assertThat(((ResolutionPolicy.Settle) d).state()).isEqualTo(ResolutionState.NEEDS_SELLER);
+            }
+        }
+        assertThat(Authority.SELLER).as("the authority still exists; it is simply not something this loop asks")
+                .isNotNull();
     }
 
     @Test
@@ -143,19 +171,21 @@ class ResolutionPolicyInvariantTest {
         List<ResolverOutcome> observed = new ArrayList<>();
         observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER,
                 null, null, null, null, null), CapabilityId.ENTITY_ORDER));
-        var toPrerequisite = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        var toPrerequisite = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.CURRENT_ORDER), observed);
         assertThat(((ResolutionPolicy.Run) toPrerequisite).capability()).isEqualTo(CapabilityId.ENTITY_ORDER);
 
         observed.add(readOrder());
-        var back = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        var back = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.CURRENT_ORDER), observed);
         assertThat(back).as("the loop settled on the prerequisite instead of returning to the decision")
                 .isInstanceOf(ResolutionPolicy.Run.class);
         assertThat(((ResolutionPolicy.Run) back).capability()).isEqualTo(CapabilityId.KNOWLEDGE_ORG);
 
-        // ...and once the waiter has spoken it is not resumed again: the same wait cannot fire twice.
+        // ...and once the waiter has spoken it is not resumed again: the same wait cannot fire twice. It ends where
+        // an observed absence ends — at the terminal, with nothing dispatched behind it.
         observed.add(ran(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER, null));
-        var after = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
-        assertThat(((ResolutionPolicy.Run) after).resolver()).isEqualTo(Authority.SELLER);
+        var after = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.CURRENT_ORDER), observed);
+        assertThat(after).isInstanceOf(ResolutionPolicy.Settle.class);
+        assertThat(((ResolutionPolicy.Settle) after).state()).isEqualTo(ResolutionState.NEEDS_SELLER);
     }
 
     @Test
@@ -185,7 +215,7 @@ class ResolutionPolicyInvariantTest {
             observed.add(ResolverOutcome.of(new Resolution(CapabilityId.ENTITY_ORDER, blocking, null, null,
                     blocking == ResolutionState.NEEDS_CUSTOMER_INPUT
                             ? List.of(com.sellerops.inquiry.authority.CustomerInput.OPTION) : null, null, null)));
-            var next = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+            var next = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.CURRENT_ORDER), observed);
             assertThat(next).as("%s resumed the waiter", blocking).isInstanceOf(ResolutionPolicy.Settle.class);
             assertThat(((ResolutionPolicy.Settle) next).state()).isEqualTo(blocking);
         }
@@ -200,7 +230,7 @@ class ResolutionPolicyInvariantTest {
         observed.add(readOrder());
         // The order read RESOLVED. If that were allowed to settle the goal, a decision would report an answer having
         // evaluated nothing — the defect measured on 2026-09-20.
-        var next = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        var next = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.CURRENT_ORDER), observed);
         assertThat(next).isInstanceOf(ResolutionPolicy.Run.class);
         assertThat(((ResolutionPolicy.Run) next).capability()).isEqualTo(CapabilityId.KNOWLEDGE_ORG);
     }
@@ -240,7 +270,7 @@ class ResolutionPolicyInvariantTest {
         observed.add(ResolverOutcome.needs(new Resolution(CapabilityId.KNOWLEDGE_ORG, ResolutionState.NEEDS_SELLER,
                 null, null, null, null, null), CapabilityId.ENTITY_ORDER));
         observed.add(readOrder());
-        var next = ResolutionPolicy.next(goal(RequestedOutcome.DECISION, Referent.CURRENT_ORDER), observed);
+        var next = ResolutionPolicy.next(goal(RequestedOutcome.ANSWER, Referent.CURRENT_ORDER), observed);
         assertThat(((ResolutionPolicy.Run) next).capability())
                 .as("a different capability of the same authority is a different resolver")
                 .isEqualTo(CapabilityId.KNOWLEDGE_ORG);

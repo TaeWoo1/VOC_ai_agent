@@ -41,7 +41,7 @@ class GoalProvenanceSmokePlanTest {
         assertThat(plan.intended()).containsEntry("fence_measured_in_both_directions", "G15+R:4181864b");
 
         // A targeted plan owes the outcomes it actually relies on, and says so rather than inheriting "all four".
-        assertThat(plan.requiredOutcomes()).containsExactly("INFORMATION", "DECISION", "ACTION");
+        assertThat(plan.requiredOutcomes()).containsExactly("ANSWER", "ACTION");
         assertThat(plan.requiredOutcomes()).doesNotContain("STATE_READ");
         assertThat(GoalSmokeInputs.PLANS).containsKey(plan.name());
     }
@@ -53,7 +53,7 @@ class GoalProvenanceSmokePlanTest {
         assertThat(plan.planned()).isEqualTo(14);
         assertThat(plan.fixtureIds()).isEqualTo(GoalSmokeInputs.CHOSEN).hasSize(13);
         assertThat(plan.storeIds()).containsExactly(GoalSmokeInputs.NO_GOAL_CASE);
-        assertThat(plan.requiredOutcomes()).containsExactly("INFORMATION", "STATE_READ", "DECISION", "ACTION");
+        assertThat(plan.requiredOutcomes()).containsExactly("ANSWER", "STATE_READ", "ACTION");
         assertThat(plan.intended()).isEqualTo(GoalSmokeInputs.INTENDED);
         // Every plan is reachable by the name the operator types, and no plan is registered under another's name.
         assertThat(GoalSmokeInputs.PLANS).hasSize(3);

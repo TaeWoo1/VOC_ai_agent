@@ -200,7 +200,7 @@ final class GoalRunFixtures {
 
     /** Answers {@link #INPUTS}' first row, so its v2 {@code evidence} is a real span of that row's message. */
     static final String GOOD_ANSWER = "{\"goals\":[{\"id\":\"g1\",\"explicit_request\":\"제품 소재가 뭔가요?\","
-            + "\"requested_outcome\":\"INFORMATION\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
+            + "\"requested_outcome\":\"ANSWER\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
             + "\"explicit_constraints\":[],\"evidence\":\"제품 소재가 뭔가요?\"}],\"relations\":[]}";
 
     /** Collects rows, and remembers the order the two sinks were called in. */

@@ -78,7 +78,7 @@ public final class GoalSmokeInputs {
     public static final Plan CONTRACT_SMOKE = new Plan("contract-smoke-v1",
             "the fourteen shapes of §22.11 — the broad contract check",
             CHOSEN, List.of(NO_GOAL_CASE),
-            List.of("INFORMATION", "STATE_READ", "DECISION", "ACTION"), intended());
+            List.of("ANSWER", "STATE_READ", "ACTION"), intended());
 
     /**
      * <b>The v2 goal-provenance smoke</b> (§25): six cases, chosen to be able to fail in both directions.
@@ -96,7 +96,7 @@ public final class GoalSmokeInputs {
      *       through the goal fence untouched.</li>
      *   <li>{@code R:0c582144} — NO_GOAL, the row where inventing is most tempting.</li>
      *   <li>{@code G07} — two {@code STATED} goals in one message: the one-inference cap must not touch it.</li>
-     *   <li>{@code G01} — the plainest {@code STATED} {@code INFORMATION} there is.</li>
+     *   <li>{@code G01} — the plainest {@code STATED} {@code ANSWER} there is.</li>
      * </ul>
      *
      * <p>No {@code STATE_READ} case, and that is a decision rather than an oversight: none of the six shapes needs
@@ -105,7 +105,7 @@ public final class GoalSmokeInputs {
     public static final Plan PROVENANCE_SMOKE = new Plan("provenance-smoke-v2",
             "does the v2 evidence fence refuse the invented ACTION while keeping the legitimate implied one",
             List.of("G15", "G23", "G07", "G01"), List.of("R:4181864b", NO_GOAL_CASE),
-            List.of("INFORMATION", "DECISION", "ACTION"), provenanceIntended());
+            List.of("ANSWER", "ACTION"), provenanceIntended());
 
     /**
      * The frozen gold's own case ids, all 67. <b>Ids only</b>: every message behind them is a real customer's words

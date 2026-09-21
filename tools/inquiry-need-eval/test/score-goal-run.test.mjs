@@ -81,3 +81,32 @@ test('PREPARE rows score to nothing and say why — a dry build is not a result'
   assert.deepEqual(scored.provenance.mode, ['PREPARE']);
   assert.equal(scored.recalled, 0);
 });
+
+// --- the v3 merge, read from both sides -------------------------------------------------------------------------
+//
+// Two recorded runs, two vocabularies, one scorer. This is the property that lets the holdout of §25.13 put a v2 arm
+// and a v3 arm on the same cases: each row is parsed in the token set its own prompt_version names, and neither is
+// retroactively wrong for the words it used.
+
+test('a v1/v2 row keeps its four tokens, and a v3 row keeps its three', () => {
+  const v2row = { ...row('G01'), prompt_version: 'customer-goal-interpreter/v2',
+    goals: [{ ...goal('g1', 'DECISION', 'CURRENT_LISTING'), evidence: '승인 가능한가요' }] };
+  const { predicted, refusals } = predictionsOf([v2row]);
+  assert.equal(predicted.G01.goals.length, 1, 'a recorded v2 answer stays readable after the merge');
+  assert.equal(predicted.G01.goals[0].outcome, 'DECISION');
+  assert.deepEqual(refusals, {});
+
+  // ...and the merged token is not retro-fitted into that older space: v2 could not say ANSWER, so a row claiming
+  // to be v2 while saying it is a row whose provenance and content disagree, and that is a refusal, not a repair.
+  const impossible = { ...row('G01'), prompt_version: 'customer-goal-interpreter/v2',
+    goals: [{ ...goal('g1', 'ANSWER', 'CURRENT_LISTING'), evidence: '소재가' }] };
+  assert.equal(predictionsOf([impossible]).refusals.GOAL_SET, 1);
+
+  // The current contract, in the other direction.
+  const v3row = { ...row('G01'), prompt_version: 'customer-goal-interpreter/v3',
+    goals: [{ ...goal('g1', 'ANSWER', 'CURRENT_LISTING'), evidence: '소재가' }] };
+  assert.equal(predictionsOf([v3row]).predicted.G01.goals[0].outcome, 'ANSWER');
+  const retired = { ...row('G01'), prompt_version: 'customer-goal-interpreter/v3',
+    goals: [{ ...goal('g1', 'DECISION', 'CURRENT_LISTING'), evidence: '소재가' }] };
+  assert.equal(predictionsOf([retired]).refusals.GOAL_SET, 1);
+});

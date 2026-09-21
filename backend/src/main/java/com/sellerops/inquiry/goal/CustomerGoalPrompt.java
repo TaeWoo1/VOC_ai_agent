@@ -14,8 +14,17 @@ import java.util.HexFormat;
  *
  * <p>This replaces {@code ResolutionPlannerPrompt}, and almost everything about it is smaller. The planner's
  * instruction had to teach seven capabilities, a closing authority, execution order, entity fields, customer inputs
- * and a procedure rule, because it was asked to compose a workflow. <b>This one teaches four words and a boundary</b>,
- * because the only question it asks is what the customer requested.
+ * and a procedure rule, because it was asked to compose a workflow. <b>This one teaches three words and a
+ * boundary</b>, because the only question it asks is what the customer requested.
+ *
+ * <h2>What v3 changed, measured as a diff rather than described</h2>
+ *
+ * <p>{@code INFORMATION} and {@code DECISION} became {@code ANSWER} (see {@link RequestedOutcome}). In the
+ * instruction that is <b>four lines</b>: the count word, the two outcome lines folded into one, and the discrimination
+ * rule renamed. <b>No rule was added and none was removed</b> — the judgment examples that used to sit on the
+ * {@code DECISION} line sit in {@code ANSWER}'s parenthesis unchanged, and the sentence that stops a judgment request
+ * from also emitting the execution behind it is byte-identical, because that sentence is the whole safety content of
+ * this section and the merge is precisely what puts more weight on it.
  *
  * <h2>What is deliberately absent from the instruction</h2>
  *
@@ -56,12 +65,22 @@ import java.util.HexFormat;
 public final class CustomerGoalPrompt {
 
     /**
-     * <b>v2 adds {@code evidence} to every goal.</b> The version moves because the contract moved, and moving it is
-     * how the approval machinery finds out: {@link #fingerprint()} covers both halves and {@code GoalRunGuard} binds
-     * the prompt and schema fingerprints, so every manifest granted against v1 is revoked by arithmetic rather than
-     * by anyone remembering to. A run recorded against v1 stays a run of v1.
+     * <b>v2 added {@code evidence} to every goal; v3 merges {@code INFORMATION} and {@code DECISION} into
+     * {@code ANSWER}.</b> The version moves because the contract moved, and moving it is how the approval machinery
+     * finds out: {@link #fingerprint()} covers both halves and {@code GoalRunGuard} binds the prompt and schema
+     * fingerprints, so every manifest granted against an earlier version is revoked by arithmetic rather than by
+     * anyone remembering to. A run recorded against v2 stays a run of v2.
      */
-    public static final String VERSION = "customer-goal-interpreter/v2";
+    public static final String VERSION = "customer-goal-interpreter/v3";
+
+    /**
+     * <b>Every contract this file has shipped</b>, so a recorded run can be read under the one it was produced
+     * against rather than under whatever is current. {@code GoalRunGuard} and the JS scorer both key off these.
+     */
+    public static final String V1 = "customer-goal-interpreter/v1";
+
+    /** v2 added {@code evidence}; v1 rows carry no such field and are scored without it. */
+    public static final String V2 = "customer-goal-interpreter/v2";
 
     /** Three goals of short closed tokens, plus the requests and their quotes. Measured shapes sit far below this. */
     public static final int MAX_OUTPUT_TOKENS = 900;
@@ -80,14 +99,14 @@ public final class CustomerGoalPrompt {
                 - 같은 것을 다른 말로 반복한 것은 하나의 goal입니다. 인사·감사·감정 표현은 goal이 아닙니다.
                 - 요청이 하나도 없으면 goals를 빈 배열로 둡니다. 없는 요청을 만들지 않습니다.
                 - explicit_request는 고객의 표현을 그대로 짧게 옮긴 한국어 문장(140자 이하)입니다. 이름·주소·전화번호·주문번호를 넣지 않습니다.
-                requested_outcome — 이 네 값만 씁니다:
-                - INFORMATION: 사실을 알려 달라(치수·재질·구성·사용법·호환·차이·추천).
+                requested_outcome — 이 세 값만 씁니다:
+                - ANSWER: **알려 달라**. 사실이든 판단이든 마찬가지입니다(치수·재질·구성·사용법·호환·차이·추천,
+                  그리고 해 줄 수 있는지 판단해 달라 — 가능한가요·해 주실 수 있나요·다시 들어오나요·할인되나요).
                 - STATE_READ: 이 주문이나 이 상품의 **지금 상태**를 알려 달라(어디까지 왔는지·발송했는지·품절인지).
-                - DECISION: 해 줄 수 있는지 **판단해 달라**(가능한가요·해 주실 수 있나요·다시 들어오나요·할인되나요).
                 - ACTION: 실제로 **해 달라**(취소해 주세요·환불해 주세요·다시 보내 주세요·변경해 주세요).
                 규칙:
-                - **DECISION과 ACTION은 문장 형태가 아니라 고객이 원한 결과로 가릅니다.** 「~할 수 있나요?」가 판단을 묻는
-                  것이면 DECISION이고, 실제 수행을 요청하는 것이면 ACTION입니다. 둘 다 요청했으면 goal 둘을 적습니다.
+                - **ANSWER와 ACTION은 문장 형태가 아니라 고객이 원한 결과로 가릅니다.** 「~할 수 있나요?」가 답을 묻는
+                  것이면 ANSWER이고, 실제 수행을 요청하는 것이면 ACTION입니다. 둘 다 요청했으면 goal 둘을 적습니다.
                 - **판단을 요청했다고 해서 그 뒤의 실행을 goal로 만들지 않습니다.** 승인해 줄 수 있는지 물은 고객은 승인을
                   요청한 것이고, 승인 뒤의 처리는 이 메시지의 요청이 아닙니다.
                 - **지금 이 시스템이 그것을 할 수 있는지는 고려하지 않습니다.** 고객이 요청한 그대로 적습니다.

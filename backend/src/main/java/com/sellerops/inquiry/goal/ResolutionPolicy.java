@@ -16,33 +16,47 @@ import java.util.List;
  *
  * <h2>The dispatch</h2>
  * <table><caption>first resolver by requested outcome</caption>
- *   <tr><td>{@code INFORMATION}</td><td>Knowledge</td></tr>
+ *   <tr><td>{@code ANSWER}</td><td>Knowledge</td></tr>
  *   <tr><td>{@code STATE_READ}</td><td>Entity State</td></tr>
  *   <tr><td>{@code ACTION}</td><td>Procedure</td></tr>
- *   <tr><td>{@code DECISION}</td><td>Knowledge <b>first</b> — then, only if it ran and found nothing, the seller</td></tr>
  * </table>
  *
- * <p><b>The decision path is the point of §10.</b> "Is this returnable after the window?" is not a seller question
- * because it contains the word decide; it is a seller question only when no written policy decides it. So knowledge is
- * asked first, and the seller is reached from an <b>observed absence</b>, never from the outcome kind alone.
+ * <h2>The seller is a state, not a step</h2>
  *
- * <h2>What a DECISION resolver actually does (§6)</h2>
+ * <p>§10's rule survives the merge of {@code INFORMATION} and {@code DECISION} unchanged, because it never depended
+ * on the token: "is this returnable after the window?" is not a seller question because it contains the word decide;
+ * it is a seller question only when no written policy decides it. Knowledge is asked first, and human authority is
+ * reached from an <b>observed absence</b>, never from the outcome kind. What the merge removed is the belief that
+ * reaching it required <b>dispatching</b> anything.
+ *
+ * <p>The frozen gold settles that. <b>35 of its 72 goals terminate {@link ResolutionState#NEEDS_SELLER}, and 32 of
+ * them do so with no {@code SELLER} step in their trace</b>; the seller resolver closes 0 of 72. So the terminal is
+ * what carries the meaning — a true statement that this seller's written knowledge does not decide this — and the
+ * dispatch was a fourth capability appended to three traces before they ended in exactly the state they would have
+ * ended in anyway. Removing it is what keeps the merge from widening the loop: keying the same dispatch on the
+ * observed absence instead of the token would have added it to <b>30 more</b> goals and closed none of them.
+ *
+ * <p>{@link CapabilityId#SELLER} is therefore not dispatched from this loop. It stays in the registry, which is a
+ * declaration of what authorities exist and is read by {@link ReferentRegistry} and the older planner layer.
+ *
+ * <h2>What an ANSWER resolver actually does (§6)</h2>
  *
  * <p>"Knowledge, and the seller if there is none" was too small a description, and the audit of 2026-09-20 measured
- * how much: of the five DECISION goals in the frozen gold, <b>three require observed entity state</b>, and two of
+ * how much: of the five judgment goals in the frozen gold, <b>three require observed entity state</b>, and two of
  * those carried the entity read in the gold before any of them were re-adjudicated. The corrected account:
  *
- * <p>A DECISION resolver looks for the <b>rule that decides this goal</b>. Knowledge is asked first because a rule is
- * a thing the seller wrote down. Having found the rule, the resolver may discover that applying it needs a fact — an
- * address change depends on whether the order has shipped — and it then names <b>that one capability</b> as a
- * prerequisite. The order read runs, the rule is resumed, and the decision is produced or is found to need the seller.
+ * <p>An {@code ANSWER} resolver looks for the <b>rule or fact that answers this goal</b>. Knowledge is asked first
+ * because a rule is a thing the seller wrote down. Having found it, the resolver may discover that applying it needs
+ * a fact — whether an address may still be changed depends on whether the order has shipped — and it then names
+ * <b>that one capability</b> as a prerequisite. The order read runs, the rule is resumed, and the answer is produced
+ * or is found to need a human.
  *
  * <pre>
- *   DECISION → KNOWLEDGE (find the rule) → [rule names a prerequisite] → ENTITY_STATE → KNOWLEDGE (apply it)
- *            → RESOLVED, or SELLER on an observed absence
+ *   ANSWER → KNOWLEDGE (find the rule) → [rule names a prerequisite] → ENTITY_STATE → KNOWLEDGE (apply it)
+ *          → RESOLVED, or NEEDS_SELLER on an observed absence
  * </pre>
  *
- * <p>Two things this is not. It is not the Customer Goal Interpreter deciding what a decision needs — the interpreter
+ * <p>Two things this is not. It is not the Customer Goal Interpreter deciding what an answer needs — the interpreter
  * never sees a capability. And it is not a planner: the prerequisite is named by a resolver <b>after it has run</b>,
  * one at a time, with nothing written down about what comes after it.
  *
@@ -187,13 +201,9 @@ public final class ResolutionPolicy {
         if (state.closesTheNeed() || state == ResolutionState.NEEDS_CUSTOMER_INPUT || state == ResolutionState.FAILED) {
             return new Settle(state, null);
         }
-        // NEEDS_SELLER: the resolver ran and found nothing written down.
-        if (goal.requestedOutcome() == RequestedOutcome.DECISION
-                && last.resolution().authority() == Authority.KNOWLEDGE
-                && !alreadyRan(observed, CapabilityId.SELLER)) {
-            // §10: no policy decides this, so a new seller judgment is genuinely required — and only now.
-            return new Run(Authority.SELLER, CapabilityId.SELLER);
-        }
+        // NEEDS_SELLER: the resolver ran and found nothing written down, so a new human judgment is genuinely
+        // required. That is where the goal ENDS — see "the seller is a state, not a step" above. Nothing is
+        // dispatched here, and the branch that used to dispatch one only ever added a step to three traces.
         return new Settle(ResolutionState.NEEDS_SELLER, null);
     }
 

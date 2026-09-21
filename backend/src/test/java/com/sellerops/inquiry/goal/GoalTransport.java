@@ -71,7 +71,7 @@ public final class GoalTransport {
             quote = quote.substring(0, cut);
         }
         return "{\"goals\":[{\"id\":\"g1\",\"explicit_request\":\"REHEARSAL — deterministic fake transport\","
-                + "\"requested_outcome\":\"INFORMATION\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
+                + "\"requested_outcome\":\"ANSWER\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
                 + "\"explicit_constraints\":[],\"evidence\":" + quote(quote) + "}],\"relations\":[]}";
     }
 

@@ -72,7 +72,10 @@ class CustomerGoalPromptTest {
     void theWireAndTheContractCannotDrift() {
         JsonNode props = CustomerGoalPrompt.schema().get("properties").get("goals").get("items").get("properties");
         assertThat(tokens(props.get("requested_outcome")))
-                .containsExactly("INFORMATION", "STATE_READ", "DECISION", "ACTION");
+                .containsExactly("ANSWER", "STATE_READ", "ACTION");
+        // Three, not four. v3 merged INFORMATION and DECISION (RequestedOutcome), and the schema is where that has
+        // to be true: a token the model cannot emit is a distinction it cannot be asked to make.
+        assertThat(tokens(props.get("requested_outcome"))).doesNotContain("INFORMATION", "DECISION");
         assertThat(tokens(props.get("subject"))).hasSameElementsAs(names(Referent.values()));
         assertThat(tokens(props.get("basis"))).containsExactly("STATED", "DIRECTLY_IMPLIED");
         // No third basis, and the reason is in RequestBasis: "no goal" is the third state and is observable as a
@@ -92,6 +95,29 @@ class CustomerGoalPromptTest {
         assertThat(relation.get("properties").get("stated_condition").get("maxLength").asInt())
                 .isEqualTo(GoalRelation.MAX_CONDITION);
         assertThat(CustomerGoalPrompt.system()).contains("고객이 조건을 말하지");
+    }
+
+    /**
+     * <b>The sentence the merge leans on, pinned verbatim.</b>
+     *
+     * <p>v3 folded {@code INFORMATION} and {@code DECISION} into {@code ANSWER}, which puts every judgment request on
+     * the answering side of the only line that separates a question from a side effect. The instruction's whole
+     * safety content is the sentence below, and it shipped in v2 in exactly these words. It is asserted rather than
+     * described because a merge that quietly softened it would look, from the outside, like a merge that worked: the
+     * outcome accuracy would rise, and the leak it guards against would not be in that number.
+     */
+    @Test
+    @DisplayName("the ACTION boundary sentence survived the merge byte for byte")
+    void theBoundarySentenceDidNotMove() {
+        String system = CustomerGoalPrompt.system();
+        assertThat(system).as("the C6 rule: asking whether something may be done is not asking for it to be done")
+                .contains("**판단을 요청했다고 해서 그 뒤의 실행을 goal로 만들지 않습니다.** 승인해 줄 수 있는지 물은 고객은 승인을")
+                .contains("요청한 것이고, 승인 뒤의 처리는 이 메시지의 요청이 아닙니다.");
+        // And the discrimination rule still refuses to be a rule about sentence shape.
+        assertThat(system).contains("문장 형태가 아니라 고객이 원한 결과로 가릅니다");
+        // The retired tokens are gone from the instruction as well as from the schema: a word a model is told about
+        // but cannot emit is an invitation to reach for the nearest thing it can.
+        assertThat(system).doesNotContain("INFORMATION").doesNotContain("DECISION");
     }
 
     @Test

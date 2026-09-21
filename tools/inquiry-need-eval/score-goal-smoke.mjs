@@ -24,7 +24,7 @@
 // was designed around", and nothing else.
 
 import { readFileSync } from 'node:fs';
-import { scoreLayerA, asSet, assign } from './customer-goals.mjs';
+import { scoreLayerA, asSet, assign, foldOutcome, MERGED_INTO_ANSWER } from './customer-goals.mjs';
 import { predictionsOf, provenanceOf } from './score-goal-run.mjs';
 
 const lines = (path) => readFileSync(path, 'utf8').trim().split('\n').filter((l) => l.trim());
@@ -120,8 +120,19 @@ export function fingerprintCheck(rows, manifest) {
   return problems;
 }
 
-const tupleOf = (g) => ({
-  outcome: g.outcome ?? g.requested_outcome,
+/**
+ * `fold` reads a v1/v2 four-token outcome in v3's three-token space, and is applied to PREDICTIONS ONLY, and only
+ * when the gold itself is three-token (see `comparison`). Two reasons it is not simply always on:
+ *
+ *   * a four-token gold scored against folded predictions would score a question nobody asked — INFORMATION vs
+ *     DECISION is exactly what such a gold is recording;
+ *   * turning it on unconditionally would silently restate every number already recorded. The 67-case DEV baseline
+ *     is 65.3% outcome accuracy (§25.11) and it stays 65.3% when re-scored, because that run was a run of v2.
+ *
+ * What it buys is the one comparison the holdout needs: a v2 arm and a v3 arm, on the same cases, against one gold.
+ */
+const tupleOf = (g, fold = false) => ({
+  outcome: fold ? foldOutcome(g.outcome ?? g.requested_outcome) : (g.outcome ?? g.requested_outcome),
   subject: g.subject ?? g.referent,
   basis: g.basis,
   constraints: Array.isArray(g.constraints) ? g.constraints.length
@@ -136,6 +147,10 @@ const tupleOf = (g) => ({
  * definition here too.
  */
 export function comparison(plannedIds, goldRows, predicted, sources) {
+  // The gold decides the space, and the gold alone. If no gold row uses a token v3 merged away, this gold is
+  // written in v3's vocabulary and a v2 arm's predictions are read into it. Where it makes no difference — a gold
+  // of only STATE_READ and ACTION — the fold is the identity, so the rule costs nothing to state.
+  const foldPred = !goldRows.some((r) => MERGED_INTO_ANSWER.includes(r.requested_outcome));
   const byCase = new Map();
   for (const row of goldRows) {
     if (!byCase.has(row.q)) byCase.set(row.q, []);
@@ -154,7 +169,7 @@ export function comparison(plannedIds, goldRows, predicted, sources) {
     for (const [g, p] of pairs) {
       if (!p) continue;
       const want = tupleOf(g);
-      const got = tupleOf(p);
+      const got = tupleOf(p, foldPred);
       outcome.of += 1; referent.of += 1; constraints.of += 1;
       if (want.outcome === got.outcome) outcome.matched += 1;
       if (want.subject === got.subject) referent.matched += 1;
@@ -190,27 +205,27 @@ export function comparison(plannedIds, goldRows, predicted, sources) {
     // Kept SEPARATE from `invented_ACTION` rather than folded into it. They are different failures, and widening
     // the old counter would silently reinterpret every number already recorded against it.
     // Adjudication rows are excluded: a gold outcome of null does not disagree with anything.
-    const substitutedAction = pairs.filter(([g, p]) => p && tupleOf(p).outcome === 'ACTION'
+    const substitutedAction = pairs.filter(([g, p]) => p && tupleOf(p, foldPred).outcome === 'ACTION'
       && g.requested_outcome !== null && g.requested_outcome !== undefined
       && tupleOf(g).outcome !== 'ACTION').length;
 
     const blockers = {
       invented_goal: extra.length,
-      invented_ACTION: extra.filter((p) => tupleOf(p).outcome === 'ACTION').length,
+      invented_ACTION: extra.filter((p) => tupleOf(p, foldPred).outcome === 'ACTION').length,
       substituted_ACTION: substitutedAction,
       invented_FALLBACK: Math.max(0, inventedRel),
       lost_stated_FALLBACK: expectedRel - relationsCorrect,
       NO_GOAL_violation: noGoal.length > 0 && expected.length === 0 ? pred.length : 0,
       // A prerequisite is an entity-state read the resolver would perform, never something the customer asked for.
       // Only its STATE_READ form is mechanically separable from an ordinary extra goal — see the report's §5.
-      prerequisite_as_goal: extra.filter((p) => tupleOf(p).outcome === 'STATE_READ').length,
+      prerequisite_as_goal: extra.filter((p) => tupleOf(p, foldPred).outcome === 'STATE_READ').length,
       missing_goal: pairs.filter(([, p]) => !p).length,
     };
     return {
       id,
       gold_source: sources[id],
       expected_goals: expected.map(tupleOf),
-      predicted_goals: pred.map(tupleOf),
+      predicted_goals: pred.map((p) => tupleOf(p, foldPred)),
       expected_relations: expectedRel,
       predicted_relations: (predRel ?? []).length,
       outcome_match: `${outcome.matched}/${outcome.of}`,

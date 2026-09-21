@@ -27,7 +27,7 @@ import java.util.List;
  *
  * <p><b>The invariant.</b> Only what the customer explicitly or directly requested. A goal is never added because it
  * might be needed later: asked whether an exchange can be approved, this contract produces one {@link
- * RequestedOutcome#DECISION} and no {@link RequestedOutcome#ACTION}. Whether the seller, having decided, then wants to
+ * RequestedOutcome#ANSWER} and no {@link RequestedOutcome#ACTION}. Whether the seller, having decided, then wants to
  * run the exchange is the seller's next request and not this customer's current one. {@link RequestBasis} records
  * which of "explicitly" or "directly" applies, so a goal nobody asked for is countable rather than arguable.
  *
@@ -39,7 +39,7 @@ import java.util.List;
  * <p>That last clause was the contract's own statement of its invariant, and until v2 <b>nothing enforced it</b>. The
  * measured failure: on the fixture message <i>"묶음 상품인 줄 알고 샀는데 한 개만 왔어요"</i> — a customer reporting
  * that one item arrived when they expected a bundle, and requesting nothing — the interpreter emitted the expected
- * {@link RequestedOutcome#INFORMATION} goal <i>and</i> an {@link RequestedOutcome#ACTION} goal, "부족한 수량을 처리해
+ * {@link RequestedOutcome#ANSWER} goal <i>and</i> an {@link RequestedOutcome#ACTION} goal, "부족한 수량을 처리해
  * 주세요", which no clause of that message asks for. It arrived on {@link RequestBasis#DIRECTLY_IMPLIED}, carrying no
  * constraints, no relation, and an {@code explicitRequest} the model composed. Nothing on the wire was false, because
  * the wire had no field in which a false claim could be made.

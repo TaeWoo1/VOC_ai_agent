@@ -77,15 +77,15 @@ class GoalEvidenceFenceTest {
     @DisplayName("one message, one inference — a second is the reader choosing a remedy")
     void oneInferencePerMessage() {
         assertThatThrownBy(() -> new CustomerGoalSet(List.of(
-                goal("g1", RequestedOutcome.INFORMATION, RequestBasis.DIRECTLY_IMPLIED, "한 개만 왔어요"),
+                goal("g1", RequestedOutcome.ANSWER, RequestBasis.DIRECTLY_IMPLIED, "한 개만 왔어요"),
                 goal("g2", RequestedOutcome.ACTION, RequestBasis.DIRECTLY_IMPLIED, "묶음 상품인 줄 알고 샀는데")),
                 List.of())).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("one goal");
 
         // Several STATED goals remain ordinary: all five multi-goal messages in the frozen gold are entirely STATED.
         assertThatCode(() -> new CustomerGoalSet(List.of(
-                goal("g1", RequestedOutcome.DECISION, RequestBasis.STATED, "승인해 주실 수 있나요"),
+                goal("g1", RequestedOutcome.ANSWER, RequestBasis.STATED, "승인해 주실 수 있나요"),
                 goal("g2", RequestedOutcome.ACTION, RequestBasis.STATED, "교환 처리도 부탁드립니다"),
-                goal("g3", RequestedOutcome.INFORMATION, RequestBasis.DIRECTLY_IMPLIED, "언제쯤 될까요")), List.of()))
+                goal("g3", RequestedOutcome.ANSWER, RequestBasis.DIRECTLY_IMPLIED, "언제쯤 될까요")), List.of()))
                 .doesNotThrowAnyException();
     }
 
@@ -99,13 +99,13 @@ class GoalEvidenceFenceTest {
         assertThat(invented.unquoted(G15)).containsExactly("g1");
 
         CustomerGoalSet real = CustomerGoalSet.of(
-                goal("g1", RequestedOutcome.INFORMATION, RequestBasis.DIRECTLY_IMPLIED, "한 개만 왔어요"));
+                goal("g1", RequestedOutcome.ANSWER, RequestBasis.DIRECTLY_IMPLIED, "한 개만 왔어요"));
         assertThat(real.unquoted(G15)).isEmpty();
 
         // Whitespace is not a claim about what the customer said; punctuation is.
-        assertThat(CustomerGoalSet.of(goal("g1", RequestedOutcome.INFORMATION, RequestBasis.STATED,
+        assertThat(CustomerGoalSet.of(goal("g1", RequestedOutcome.ANSWER, RequestBasis.STATED,
                 "한 개만   왔어요")).unquoted(G15)).isEmpty();
-        assertThat(CustomerGoalSet.of(goal("g1", RequestedOutcome.INFORMATION, RequestBasis.STATED,
+        assertThat(CustomerGoalSet.of(goal("g1", RequestedOutcome.ANSWER, RequestBasis.STATED,
                 "한 개만 왔어요!")).unquoted(G15)).containsExactly("g1");
 
         // A message that was never held evidences nothing, so it fails closed rather than vacuously passing.
@@ -119,7 +119,7 @@ class GoalEvidenceFenceTest {
         // With only the inference cap, a model wanting a second inferred goal could call it STATED and pass, basis
         // being an assertion nobody could check. It is checkable now: the words have to be there.
         CustomerGoalSet dodge = new CustomerGoalSet(List.of(
-                goal("g1", RequestedOutcome.INFORMATION, RequestBasis.DIRECTLY_IMPLIED, "한 개만 왔어요"),
+                goal("g1", RequestedOutcome.ANSWER, RequestBasis.DIRECTLY_IMPLIED, "한 개만 왔어요"),
                 goal("g2", RequestedOutcome.ACTION, RequestBasis.STATED, "부족한 수량을 처리해 주세요")), List.of());
         assertThat(dodge.unquoted(G15)).containsExactly("g2");
     }
@@ -131,7 +131,7 @@ class GoalEvidenceFenceTest {
     void theRecordedInventedActionIsRefused() {
         // Exactly what v35-goal-smoke-07530e82-b3b0a9c5 returned for G15, quotes added in the model's best case.
         assertThatThrownBy(() -> new CustomerGoalSet(List.of(
-                new CustomerGoal("g1", "한 개만 온 이유를 알려 주세요", RequestedOutcome.INFORMATION,
+                new CustomerGoal("g1", "한 개만 온 이유를 알려 주세요", RequestedOutcome.ANSWER,
                         Referent.CURRENT_ORDER, RequestBasis.DIRECTLY_IMPLIED, List.of(), "한 개만 왔어요"),
                 new CustomerGoal("g2", "부족한 수량을 처리해 주세요", RequestedOutcome.ACTION,
                         Referent.CURRENT_ORDER, RequestBasis.DIRECTLY_IMPLIED, List.of(),
@@ -140,7 +140,7 @@ class GoalEvidenceFenceTest {
 
         // The answer the gold actually wants: one goal, quoting the clause it was inferred from.
         assertThatCode(() -> CustomerGoalSet.of(new CustomerGoal("g1", "한 개만 온 이유를 알려 주세요",
-                RequestedOutcome.INFORMATION, Referent.CURRENT_ORDER, RequestBasis.DIRECTLY_IMPLIED, List.of(),
+                RequestedOutcome.ANSWER, Referent.CURRENT_ORDER, RequestBasis.DIRECTLY_IMPLIED, List.of(),
                 "한 개만 왔어요"))).doesNotThrowAnyException();
     }
 
@@ -162,7 +162,7 @@ class GoalEvidenceFenceTest {
     @DisplayName("KNOWN RESIDUAL: a STATED relabel that quotes another real clause still passes all three rules")
     void theFenceDoesNotCatchEverything() {
         CustomerGoalSet residual = new CustomerGoalSet(List.of(
-                new CustomerGoal("g1", "한 개만 온 이유를 알려 주세요", RequestedOutcome.INFORMATION,
+                new CustomerGoal("g1", "한 개만 온 이유를 알려 주세요", RequestedOutcome.ANSWER,
                         Referent.CURRENT_ORDER, RequestBasis.DIRECTLY_IMPLIED, List.of(), "한 개만 왔어요"),
                 new CustomerGoal("g2", "부족한 수량을 처리해 주세요", RequestedOutcome.ACTION,
                         Referent.CURRENT_ORDER, RequestBasis.STATED, List.of(), "묶음 상품인 줄 알고 샀는데")),

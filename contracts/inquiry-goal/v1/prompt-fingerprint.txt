@@ -9,6 +9,13 @@
 # nobody can look up is a run nobody can identify. Runs: v35-goal-smoke-07530e82-b3b0a9c5.
 # customer-goal-interpreter/v1 system=984fbb8a96857439abd1c17194599c7cf2ffdfcebc929b5922315627fbf4806b schema=47989c9e37dba63d4f4ae00b8001c04a32655dc21f5325a866024a5e84d5f3cb
 #
-# v2 adds the mandatory goal-level `evidence` quote. Both halves moved: the schema gained a required property and
-# the instruction gained the three sentences that describe it.
-customer-goal-interpreter/v2 system=553d8ebb845e4fde937832878b380f4792b7371f8730ca8a9743c8dc459b7e80 schema=42d8495fa86d3127fa1dd43bcff64cc5496724ee1b93b567de05e89acdd2bae7
+# v2 (retired 2026-09-21) added the mandatory goal-level `evidence` quote. Runs: v35-goal-smoke-35baa4c2-44fc582a
+# (provenance-smoke-v2, 6 calls) and v35-goal-smoke-097a53cc-7fdad6fb (dev-diagnostic-v2, 67 calls). Both remain
+# scoreable as v2 runs — see `outcomesFor` in tools/inquiry-need-eval/customer-goals.mjs.
+# customer-goal-interpreter/v2 system=553d8ebb845e4fde937832878b380f4792b7371f8730ca8a9743c8dc459b7e80 schema=42d8495fa86d3127fa1dd43bcff64cc5496724ee1b93b567de05e89acdd2bae7
+#
+# v3 merges INFORMATION and DECISION into ANSWER. Both halves moved and neither moved by much: the schema's outcome
+# enum drops one token, and the instruction folds two lines into one and renames the rule that separates a request
+# to be told something from a request to change the world. That rule's text is otherwise unchanged, deliberately —
+# it is the whole safety content of the section, and the merge is what puts more weight on it.
+customer-goal-interpreter/v3 system=16d93922a2b8a74cf2d79b41309401cb3f692c0a3cfaaac08111c763b187c5b3 schema=0e1afa86f8b0140415b6ef8d2cc4c1391be83929cd58f00ea930938c97faa2d9

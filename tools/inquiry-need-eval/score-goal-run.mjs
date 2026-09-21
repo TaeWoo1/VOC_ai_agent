@@ -11,7 +11,7 @@
 // reported beside the metrics rather than dropped.
 
 import { readFileSync } from 'node:fs';
-import { parseGoal, parseRelation, requiresEvidence, scoreLayerA } from './customer-goals.mjs';
+import { parseGoal, parseRelation, requiresEvidence, outcomesFor, scoreLayerA } from './customer-goals.mjs';
 
 const lines = (path) => readFileSync(path, 'utf8').trim().split('\n').filter((l) => l.trim());
 
@@ -32,8 +32,11 @@ export function predictionsOf(rows) {
     // Each row is read under the contract it was PRODUCED under, which its own prompt_version names. A recorded
     // pre-evidence run stays scoreable; anything that does not say it is one is held to the current contract.
     const evidence = requiresEvidence(row.prompt_version);
+    // The same rule for the outcome vocabulary: v1 and v2 rows say INFORMATION or DECISION and are not wrong for
+    // saying so. Refusing them here would make the v3 merge retroactively unmake our own recorded runs.
+    const outcomes = outcomesFor(row.prompt_version);
     for (const raw of row.goals ?? []) {
-      const parsed = parseGoal(raw, { evidence });
+      const parsed = parseGoal(raw, { evidence, outcomes });
       if (!parsed.goal) {
         refusals[parsed.failure] = (refusals[parsed.failure] ?? 0) + 1;
         continue;

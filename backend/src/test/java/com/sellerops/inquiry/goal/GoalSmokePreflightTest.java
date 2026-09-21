@@ -116,7 +116,7 @@ class GoalSmokePreflightTest {
     void coverageIsMeasuredNotAsserted() throws Exception {
         GoalSmokeInputs.Set set = GoalSmokeInputs.assemble(FIXTURE,
                 GoalInterpreterPreflight.storeRoot(System.getenv()));
-        for (String outcome : List.of("INFORMATION", "STATE_READ", "DECISION", "ACTION")) {
+        for (String outcome : List.of("ANSWER", "STATE_READ", "ACTION")) {
             assertThat(set.coverage().get("outcome:" + outcome)).isEqualTo("covered");
         }
         assertThat(set.coverage().get("multi_goal")).startsWith("covered");

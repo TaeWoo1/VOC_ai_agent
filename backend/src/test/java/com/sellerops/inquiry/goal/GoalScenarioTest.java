@@ -131,7 +131,7 @@ class GoalScenarioTest {
         assertThat(g07.get("goals")).hasSize(2);
         assertThat(g06.get("goals").get(0).get("subject").asText())
                 .isEqualTo(g07.get("goals").get(0).get("subject").asText());
-        assertThat(RequestedOutcome.DECISION.mayReachProcedure()).isFalse();
+        assertThat(RequestedOutcome.ANSWER.mayReachProcedure()).isFalse();
         assertThat(RequestedOutcome.ACTION.mayReachProcedure()).isTrue();
     }
 
@@ -152,9 +152,9 @@ class GoalScenarioTest {
     @DisplayName("an explicit request is a request; a plan does not fit in one")
     void requestIsBounded() {
         assertThatThrownBy(() -> new CustomerGoal("g1", "x".repeat(CustomerGoal.MAX_REQUEST + 1),
-                RequestedOutcome.INFORMATION, Referent.CURRENT_LISTING, RequestBasis.STATED, List.of(), "소재"))
+                RequestedOutcome.ANSWER, Referent.CURRENT_LISTING, RequestBasis.STATED, List.of(), "소재"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CustomerGoal("g1", "소재가 뭔가요?", RequestedOutcome.INFORMATION,
+        assertThatThrownBy(() -> new CustomerGoal("g1", "소재가 뭔가요?", RequestedOutcome.ANSWER,
                 Referent.CURRENT_LISTING, RequestBasis.STATED, List.of("x".repeat(CustomerGoal.MAX_CONSTRAINT + 1)),
                 "소재가 뭔가요?")).isInstanceOf(IllegalArgumentException.class);
     }

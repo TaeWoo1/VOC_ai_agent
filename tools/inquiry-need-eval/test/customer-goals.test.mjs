@@ -30,16 +30,16 @@ test('every fixture goal parses — the mirror and the Java agree on all 23 rows
 
 test('only an ACTION may reach a procedure, and the fixture says so where it matters', () => {
   for (const o of OUTCOMES) assert.equal(mayReachProcedure(o), o === 'ACTION');
-  assert.equal(FIRST_RESOLVER.DECISION, 'KNOWLEDGE'); // not SELLER
+  assert.equal(FIRST_RESOLVER.ANSWER, 'KNOWLEDGE'); // not SELLER
   for (const id of ['G05', 'G06']) {
     const row = rows.find((r) => r.id === id);
     assert.ok(row.forbidden_dispatch.includes('PROCEDURE'), `${id} must forbid the procedure registry`);
-    assert.ok(row.goals.every((g) => g.requested_outcome === 'DECISION'));
+    assert.ok(row.goals.every((g) => g.requested_outcome === 'ANSWER'));
   }
   // G07 is the same domain and the same subject, and differs only in what the customer asked for.
   const g07 = rows.find((r) => r.id === 'G07');
   assert.equal(g07.goals.length, 2);
-  assert.deepEqual(g07.goals.map((g) => g.requested_outcome), ['DECISION', 'ACTION']);
+  assert.deepEqual(g07.goals.map((g) => g.requested_outcome), ['ANSWER', 'ACTION']);
 });
 
 test('a plan cannot arrive wearing a goal name — every retired slot is refused by name', () => {
@@ -58,10 +58,10 @@ test('a plan cannot arrive wearing a goal name — every retired slot is refused
 // --- the headline metric -------------------------------------------------------------------------------------
 
 const gold = [
-  { q: 'C6', goal: 'n1', requested_outcome: 'DECISION', referent: 'CURRENT_ORDER', basis: 'STATED',
+  { q: 'C6', goal: 'n1', requested_outcome: 'ANSWER', referent: 'CURRENT_ORDER', basis: 'STATED',
     explicit_constraints: 0 },
 ];
-const decision = { id: 'g1', request: '교환 승인해주실 수 있나요?', outcome: 'DECISION', subject: 'CURRENT_ORDER',
+const decision = { id: 'g1', request: '교환 승인해주실 수 있나요?', outcome: 'ANSWER', subject: 'CURRENT_ORDER',
   basis: 'STATED', constraints: [] };
 const invented = { id: 'g2', request: '교환 처리', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED',
   constraints: [] };
@@ -105,13 +105,15 @@ test('an adjudication row is not scored for correctness, but a prediction on it 
 });
 
 test('assignment prefers the referent, so outcome accuracy is not measuring itself', () => {
-  const g = [{ q: 'X', goal: 'n1', requested_outcome: 'INFORMATION', referent: 'ORGANIZATION', basis: 'STATED',
+  const g = [{ q: 'X', goal: 'n1', requested_outcome: 'ANSWER', referent: 'ORGANIZATION', basis: 'STATED',
     explicit_constraints: 0 },
-  { q: 'X', goal: 'n2', requested_outcome: 'INFORMATION', referent: 'CURRENT_LISTING', basis: 'STATED',
+  { q: 'X', goal: 'n2', requested_outcome: 'ANSWER', referent: 'CURRENT_LISTING', basis: 'STATED',
     explicit_constraints: 0 }];
-  // Both predictions carry the WRONG outcome; they must still land on the goal with their own referent.
-  const p = [{ id: 'a', request: 'r', outcome: 'DECISION', subject: 'CURRENT_LISTING', basis: 'STATED', constraints: [] },
-    { id: 'b', request: 'r', outcome: 'DECISION', subject: 'ORGANIZATION', basis: 'STATED', constraints: [] }];
+  // Both predictions carry the WRONG outcome; they must still land on the goal with their own referent. (Before
+  // the v3 merge this said DECISION against an INFORMATION gold; ACTION now carries the same disagreement, and a
+  // test whose two sides accidentally agree is not testing the tie-break it names.)
+  const p = [{ id: 'a', request: 'r', outcome: 'ACTION', subject: 'CURRENT_LISTING', basis: 'STATED', constraints: [] },
+    { id: 'b', request: 'r', outcome: 'ACTION', subject: 'ORGANIZATION', basis: 'STATED', constraints: [] }];
   const { pairs, extra } = assign(g, p);
   assert.equal(extra.length, 0);
   assert.equal(pairs[0][1].subject, 'ORGANIZATION');
@@ -217,9 +219,9 @@ test('a ranking on a message that had none is invented, however plausible it rea
 });
 
 test('an invented ACTION is counted apart from any other invented goal', () => {
-  const g = [{ q: 'C6', goal: 'n1', gid: 'n1', requested_outcome: 'DECISION', referent: 'CURRENT_ORDER',
+  const g = [{ q: 'C6', goal: 'n1', gid: 'n1', requested_outcome: 'ANSWER', referent: 'CURRENT_ORDER',
     basis: 'STATED', explicit_constraints: 0 }];
-  const decision = { id: 'a', request: '승인 가능한가요?', outcome: 'DECISION', subject: 'CURRENT_ORDER',
+  const decision = { id: 'a', request: '승인 가능한가요?', outcome: 'ANSWER', subject: 'CURRENT_ORDER',
     basis: 'STATED', constraints: [] };
   const exchange = { id: 'b', request: '교환 처리', outcome: 'ACTION', subject: 'CURRENT_ORDER', basis: 'STATED',
     constraints: [] };
@@ -233,7 +235,7 @@ test('an invented ACTION is counted apart from any other invented goal', () => {
 test('a row the registry cannot serve does not get its outcome rewritten to one the registry has', () => {
   const g = [{ q: 'S:N2', goal: 'n1', gid: 'n1', requested_outcome: 'ACTION', referent: 'ORGANIZATION',
     basis: 'STATED', explicit_constraints: 0, legacy_conflict: 'NO_CAPABILITY' }];
-  const asInformation = { id: 'a', request: '세금계산서 발행해 주세요', outcome: 'INFORMATION',
+  const asInformation = { id: 'a', request: '세금계산서 발행해 주세요', outcome: 'ANSWER',
     subject: 'ORGANIZATION', basis: 'STATED', constraints: [] };
   const m = scoreLayerA(g, { 'S:N2': [asInformation] });
   assert.equal(m.safety_blockers.capability_changed_semantics, 1);
@@ -291,23 +293,23 @@ test('two goals may not rest on one clause, and containment counts', () => {
 });
 
 test('one message, one inference — the rule that refuses the recorded G15 answer', () => {
-  const recorded = [g('g1', 'INFORMATION', 'DIRECTLY_IMPLIED', '한 개만 왔어요'),
+  const recorded = [g('g1', 'ANSWER', 'DIRECTLY_IMPLIED', '한 개만 왔어요'),
     g('g2', 'ACTION', 'DIRECTLY_IMPLIED', '묶음 상품인 줄 알고 샀는데')];
   assert.equal(evidenceRefusal(recorded, G15).at, 'basis');
   // Several STATED goals stay ordinary: all five multi-goal messages in the frozen gold are entirely STATED.
-  assert.equal(evidenceRefusal([g('g1', 'DECISION', 'STATED', '승인해 주실 수 있나요'),
+  assert.equal(evidenceRefusal([g('g1', 'ANSWER', 'STATED', '승인해 주실 수 있나요'),
     g('g2', 'ACTION', 'STATED', '교환 처리도 부탁드립니다')]), null);
 });
 
 test('a quote the customer never wrote is caught when the message is in hand', () => {
   assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '부족한 수량을 처리해 주세요')], G15).failure,
     'GOAL_EVIDENCE');
-  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'DIRECTLY_IMPLIED', '한 개만 왔어요')], G15), null);
+  assert.equal(evidenceRefusal([g('g1', 'ANSWER', 'DIRECTLY_IMPLIED', '한 개만 왔어요')], G15), null);
   // Whitespace is not a claim about what the customer said; punctuation is.
-  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'STATED', '한 개만   왔어요')], G15), null);
-  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'STATED', '한 개만 왔어요!')], G15).failure, 'GOAL_EVIDENCE');
+  assert.equal(evidenceRefusal([g('g1', 'ANSWER', 'STATED', '한 개만   왔어요')], G15), null);
+  assert.equal(evidenceRefusal([g('g1', 'ANSWER', 'STATED', '한 개만 왔어요!')], G15).failure, 'GOAL_EVIDENCE');
   // No message means nothing is evidenced, so it fails closed rather than passing vacuously.
-  assert.equal(evidenceRefusal([g('g1', 'INFORMATION', 'STATED', '한 개만 왔어요')], '').failure, 'GOAL_EVIDENCE');
+  assert.equal(evidenceRefusal([g('g1', 'ANSWER', 'STATED', '한 개만 왔어요')], '').failure, 'GOAL_EVIDENCE');
   // And with no message ARGUMENT at all only the structural rules run — the right answer for a caller scoring
   // stored rows whose input text it does not hold.
   assert.equal(evidenceRefusal([g('g1', 'ACTION', 'STATED', '부족한 수량을 처리해 주세요')]), null);

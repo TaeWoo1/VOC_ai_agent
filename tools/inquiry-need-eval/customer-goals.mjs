@@ -8,12 +8,33 @@
 // wrong answer but an EXTRA one: asked whether an exchange could be approved, the planner also produced the exchange.
 // Recall and accuracy cannot see that — a set with an extra correct-looking goal scores perfectly on both.
 
-export const OUTCOMES = ['INFORMATION', 'STATE_READ', 'DECISION', 'ACTION'];
+export const OUTCOMES = ['ANSWER', 'STATE_READ', 'ACTION'];
 export const BASES = ['STATED', 'DIRECTLY_IMPLIED'];
 export const REFERENTS = ['CURRENT_LISTING', 'SELLER_CATALOGUE', 'CURRENT_ORDER', 'ORGANIZATION', 'UNRESOLVED'];
 export const FIRST_RESOLVER = {
-  INFORMATION: 'KNOWLEDGE', STATE_READ: 'ENTITY_STATE', DECISION: 'KNOWLEDGE', ACTION: 'PROCEDURE',
+  ANSWER: 'KNOWLEDGE', STATE_READ: 'ENTITY_STATE', ACTION: 'PROCEDURE',
 };
+
+/**
+ * The four-token space v1 and v2 spoke, kept so a recorded run stays readable under the contract it was produced
+ * under. v3 merged INFORMATION and DECISION into ANSWER (RequestedOutcome, Inquiry v3.5 §25.13); a row written
+ * before that says INFORMATION or DECISION and is not wrong for saying so.
+ */
+export const OUTCOMES_V2 = ['INFORMATION', 'STATE_READ', 'DECISION', 'ACTION'];
+export const MERGED_INTO_ANSWER = ['INFORMATION', 'DECISION'];
+export const PRE_ANSWER_PROMPTS = ['customer-goal-interpreter/v1', 'customer-goal-interpreter/v2'];
+
+/** Which token set a row may legally use. Fail closed: an absent or unknown version is read as the current one. */
+export const outcomesFor = (promptVersion) =>
+  (PRE_ANSWER_PROMPTS.includes(promptVersion) ? OUTCOMES_V2 : OUTCOMES);
+
+/**
+ * Read a four-token outcome in the three-token space. This is the ONLY place the merge is applied, and it is applied
+ * to predictions and to gold alike — folding one side only would be scoring two different questions against each
+ * other. It never invents the reverse direction: ANSWER does not fold back to INFORMATION or DECISION, because which
+ * of them it was is exactly the fact v3 stopped recording.
+ */
+export const foldOutcome = (outcome) => (MERGED_INTO_ANSWER.includes(outcome) ? 'ANSWER' : outcome);
 export const MAX_REQUEST = 140;
 export const MAX_CONSTRAINT = 40;
 
@@ -36,7 +57,7 @@ export const PRE_EVIDENCE_PROMPT = 'customer-goal-interpreter/v1';
 export const requiresEvidence = (promptVersion) => promptVersion !== PRE_EVIDENCE_PROMPT;
 
 /** GOAL_SET = unknown word · GOAL_SHAPE = known words, impossible object · GOAL_PLAN = a plan wearing a goal's name. */
-export function parseGoal(raw, { evidence: evidenceRequired = true } = {}) {
+export function parseGoal(raw, { evidence: evidenceRequired = true, outcomes: allowedOutcomes = OUTCOMES } = {}) {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { failure: 'GOAL_SHAPE' };
   for (const k of RETIRED) if (k in raw) return { failure: 'GOAL_PLAN', at: k };
   for (const k of Object.keys(raw)) if (!KEYS.includes(k)) return { failure: 'GOAL_SET', at: k };
@@ -45,7 +66,7 @@ export function parseGoal(raw, { evidence: evidenceRequired = true } = {}) {
   if (typeof id !== 'string' || !id.trim()) return { failure: 'GOAL_SHAPE', at: 'id' };
   if (typeof req !== 'string' || !req.trim()) return { failure: 'GOAL_SHAPE', at: 'explicit_request' };
   if (req.length > MAX_REQUEST) return { failure: 'GOAL_SHAPE', at: 'explicit_request' };
-  if (!OUTCOMES.includes(outcome)) return { failure: 'GOAL_SET', at: 'requested_outcome' };
+  if (!allowedOutcomes.includes(outcome)) return { failure: 'GOAL_SET', at: 'requested_outcome' };
   if (!REFERENTS.includes(subject)) return { failure: 'GOAL_SET', at: 'subject' };
   if (!BASES.includes(basis)) return { failure: 'GOAL_SET', at: 'basis' };
   if (!Array.isArray(constraints)) return { failure: 'GOAL_SHAPE', at: 'explicit_constraints' };
