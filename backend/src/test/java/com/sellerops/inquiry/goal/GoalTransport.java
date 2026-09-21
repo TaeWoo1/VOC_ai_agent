@@ -62,7 +62,13 @@ public final class GoalTransport {
     public static String fakeAnswer(String customerMessage) {
         String quote = customerMessage == null || customerMessage.isBlank() ? "REHEARSAL" : customerMessage.strip();
         if (quote.length() > CustomerGoal.MAX_REQUEST) {
-            quote = quote.substring(0, CustomerGoal.MAX_REQUEST);
+            // A prefix of the message is still a span of it. Back off one char rather than split a surrogate pair:
+            // half a code point is not something the customer wrote, and it would fail the quote check.
+            int cut = CustomerGoal.MAX_REQUEST;
+            if (Character.isHighSurrogate(quote.charAt(cut - 1))) {
+                cut--;
+            }
+            quote = quote.substring(0, cut);
         }
         return "{\"goals\":[{\"id\":\"g1\",\"explicit_request\":\"REHEARSAL — deterministic fake transport\","
                 + "\"requested_outcome\":\"INFORMATION\",\"subject\":\"CURRENT_LISTING\",\"basis\":\"STATED\","
@@ -71,16 +77,25 @@ public final class GoalTransport {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** Minimal JSON string escaping: this file builds wire bytes by hand so the fake has no library-shaped magic. */
+    /**
+     * A JSON string literal.
+     *
+     * <p>This escaped only {@code "} and {@code \}, which was enough while the fake's answer was a constant somebody
+     * had checked by eye. Quoting the customer's message back made it a general escaper without anyone deciding it
+     * should be one, and the six-case rehearsal caught it on the first run: the two inputs read from the durable
+     * store are real customer messages, they contain newlines, and a raw newline inside a JSON string is invalid —
+     * both rows came back {@code UNPARSEABLE}, from the <b>fake</b>. The defect was ours and the rehearsal is what
+     * said so, which is the whole argument for rehearsing a plan before an approval is spent on it.
+     *
+     * <p>Jackson is right here and hand-rolling is not: this is the same library the harness reads wire bytes with,
+     * so the fake cannot emit something the parser rejects for a reason no vendor would ever produce.
+     */
     private static String quote(String s) {
-        StringBuilder out = new StringBuilder("\"");
-        for (char c : s.toCharArray()) {
-            if (c == '"' || c == '\\') {
-                out.append('\\');
-            }
-            out.append(c);
+        try {
+            return JSON.writeValueAsString(s);
+        } catch (Exception e) {
+            throw new IllegalStateException("a string would not serialize", e);
         }
-        return out.append('"').toString();
     }
 
     public enum Mode { REAL, FAKE }

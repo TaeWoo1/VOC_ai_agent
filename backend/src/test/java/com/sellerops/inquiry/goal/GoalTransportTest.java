@@ -3,6 +3,7 @@ package com.sellerops.inquiry.goal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.agent.llm.JdkAgentLlmTransport;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -160,5 +161,42 @@ class GoalTransportTest {
             }).toList();
             assertThat(mentions).as("the interpreter harness still has zero production callers").isEmpty();
         }
+    }
+
+    /**
+     * The fake answers a REAL customer message, newlines and all.
+     *
+     * <p>Until v2 the fake returned a constant and its hand-rolled escaper only had to survive a string somebody had
+     * checked by eye. Quoting the message back made that escaper general, and the six-case rehearsal found it the
+     * first time it met the two messages read from the durable store: real text has newlines, a raw newline inside a
+     * JSON string is invalid, and both rows came back UNPARSEABLE from the fake rather than from any model.
+     */
+    @Test
+    @DisplayName("the fake's answer survives a real message — newlines, quotes, backslashes and all")
+    void theFakeAnswerIsAlwaysValidJson() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        for (String message : List.of("한 줄짜리 문의입니다",
+                "배송을 빨리 받고싶습니다\n감사합니다",
+                "따옴표 \" 와 역슬래시 \\ 그리고\t탭",
+                "\r\n앞뒤 공백과 제어문자\u0007가 섞인 문장\n\n")) {
+            var answer = mapper.readTree(GoalTransport.fakeAnswer(message));
+            var goal = answer.get("goals").get(0);
+            String evidence = goal.get("evidence").asText();
+            assertThat(evidence).as("%s", message).isNotBlank();
+
+            // And it is a real span: the contract the parser will hold it to, asked here of the fake itself.
+            CustomerGoalSet set = CustomerGoalSet.of(new CustomerGoal(goal.get("id").asText(),
+                    goal.get("explicit_request").asText(),
+                    RequestedOutcome.valueOf(goal.get("requested_outcome").asText()),
+                    Referent.valueOf(goal.get("subject").asText()),
+                    RequestBasis.valueOf(goal.get("basis").asText()), List.of(), evidence));
+            assertThat(set.unquoted(message)).as("%s", message).isEmpty();
+        }
+
+        // A message longer than a request is quoted as a prefix, which is still a span of it.
+        String longMessage = "가".repeat(CustomerGoal.MAX_REQUEST * 2);
+        var trimmed = mapper.readTree(GoalTransport.fakeAnswer(longMessage)).get("goals").get(0);
+        assertThat(trimmed.get("evidence").asText()).hasSizeLessThanOrEqualTo(CustomerGoal.MAX_REQUEST);
+        assertThat(longMessage).contains(trimmed.get("evidence").asText());
     }
 }
