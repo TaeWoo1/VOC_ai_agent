@@ -2122,19 +2122,52 @@ a run failure, not a score) · referent and constraint accuracy, which should be
 
 **Not a metric:** overall outcome accuracy. The arms have different label spaces and the question is not accuracy.
 
-### 26.7 The open question this package does not decide
+### 26.7 Two arms, decided — and the comparison arm is the shipped contract
 
 **A single arm cannot answer a comparative question.** Running only v3 reports v3's leak rate and says nothing about
-the direction of change, and the DEV numbers cannot stand in — that corpus has roughly a tenth of this one's
-ambiguity density, so the comparison would be between two different questions.
+the direction of change, and the DEV numbers cannot stand in: that corpus has roughly a tenth of this one's ambiguity
+density, so the comparison would be between two different questions. The sitting is therefore **two arms on the same
+75 cases — 150 calls, no retry.**
 
-So the sitting is **two arms on the same 75 cases, 150 calls**, or the question changes to "what is v3's leak rate",
-which is worth measuring but is not what was asked. That is a cost decision and it is the product owner's.
+**`CustomerGoalPrompt.Arm`.** `V2` holds the retired four-token instruction as text; `V3` is what this commit ships.
+The unqualified statics (`system()`, `schema()`, `fingerprint()`, `VERSION`) all answer for `Arm.current()`, so
+production and every existing call site send the byte-identical request they sent before the arm existed, and v3's
+schema is still generated from `RequestedOutcome` rather than from a hand-written list.
 
-Running a v2 arm at this commit also needs one piece of machinery that does not exist yet: the prompt is v3 here, and
-`GoalRunGuard` binds the prompt fingerprint. The arm has to be selectable in-tree, with a test asserting that
-rendering v2 reproduces the **pinned v2 hash** — which would prove the comparison arm is the shipped v2 rather than a
-reconstruction of it. Not built, because whether there is a second arm is not settled.
+**The arm is a property of the run, not of a call.** It is a field on `CustomerGoalRunner`, and `GoalRunLauncher`
+reads it from the **manifest** rather than from whatever this commit ships — so the requests built are the approved
+ones by construction, and an approval for one arm is refused for the other by the ordinary guard, not by a special
+case.
+
+**Why the v2 arm can be trusted.** An arm reconstructed from memory answers a question about the reconstruction. So
+`CustomerGoalPromptTest` renders v2 and hashes it against the **pinned** line in
+`contracts/inquiry-goal/v1/prompt-fingerprint.txt` — a value written before the merge, for a different purpose, which
+already identifies the two recorded v2 runs. It cannot be adjusted to make the test pass without also disowning those
+runs. Measured: deleting one full stop from the v2 text turns it red.
+
+**The paired invariant, measured rather than asserted.** Two preflights at commit `6a1806d2`, same plan, same
+rehearsal transport:
+
+| field | v2 arm | v3 arm | |
+|---|---|---|---|
+| `input_set_fp` | `7c6d8907…` | `7c6d8907…` | **identical** — the same 75 questions, in the same order |
+| `prompt_version` | `…/v2` | `…/v3` | different |
+| `system_fp` | `553d8ebb…` *(the pinned v2 value)* | `16d93922…` | different |
+| `schema_fp` | `42d8495f…` | `0e1afa86…` | different |
+| `request_fp_set` | `2f29516e…` | `55d652aa…` | different |
+| `calls` · `hard_cap` · `retry_policy` · `model` · `reasoning_effort` · `commit` | 75 · 75 · `NONE` · `gpt-5-2025-08-07` · `minimal` | same | identical |
+
+Everything that names a *contract* differs and everything that names the *question* is identical. `request_fp_set`
+must differ because the system prompt sits inside the request body — two arms agreeing there would mean one of them
+is not the contract it claims to be. `GoalSmokePreflightTest` asserts the same properties per request, including that
+each of the 75 `user` payloads is byte-identical across the arms.
+
+**What is still not built:** nothing in the scoring. The gold, the fold, the primary metric and the McNemar decision
+rule of §26.6 are unchanged, and this package adds no way to change them after a result is in hand.
+
+**After the sitting the holdout is spent.** A second use makes it a selection set, and the number it produced stops
+meaning what it said. The result does not reopen the prompt: a pass freezes v3 and the next step is E2E on the
+unchanged execution path; a fail reopens the **merge**, not the wording.
 
 **After the sitting the holdout is spent.** A second use makes it a selection set, and the number it produced stops
 meaning what it said.
