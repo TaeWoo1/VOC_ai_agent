@@ -146,7 +146,8 @@ public final class GoalSmokeInputs {
 
     /** By name, so the operator's command selects a plan rather than edits one. */
     public static final Map<String, Plan> PLANS =
-            Map.of(CONTRACT_SMOKE.name(), CONTRACT_SMOKE, PROVENANCE_SMOKE.name(), PROVENANCE_SMOKE);
+            Map.of(CONTRACT_SMOKE.name(), CONTRACT_SMOKE, PROVENANCE_SMOKE.name(), PROVENANCE_SMOKE,
+                    DEV_DIAGNOSTIC.name(), DEV_DIAGNOSTIC);
 
     private GoalSmokeInputs() {
     }

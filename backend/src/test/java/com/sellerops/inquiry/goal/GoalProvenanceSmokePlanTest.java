@@ -55,6 +55,9 @@ class GoalProvenanceSmokePlanTest {
         assertThat(plan.storeIds()).containsExactly(GoalSmokeInputs.NO_GOAL_CASE);
         assertThat(plan.requiredOutcomes()).containsExactly("INFORMATION", "STATE_READ", "DECISION", "ACTION");
         assertThat(plan.intended()).isEqualTo(GoalSmokeInputs.INTENDED);
+        // Every plan is reachable by the name the operator types, and no plan is registered under another's name.
+        assertThat(GoalSmokeInputs.PLANS).hasSize(3);
+        GoalSmokeInputs.PLANS.forEach((name, p) -> assertThat(p.name()).isEqualTo(name));
     }
 
     @Test
@@ -138,6 +141,9 @@ class GoalProvenanceSmokePlanTest {
         // A baseline owes no fixture shapes: none of these is a fixture row, and their labels live outside git.
         assertThat(plan.intended()).isEmpty();
         assertThat(plan.requiredOutcomes()).isEmpty();
+        // Reachable BY NAME, which is how the operator's command selects it. Asserting the constant alone let a
+        // plan exist that `--plan dev-diagnostic-v2` could not find, and the preflight refused it at the door.
+        assertThat(GoalSmokeInputs.PLANS).containsEntry(plan.name(), plan);
         // The case this corpus is most about is in it.
         assertThat(plan.storeIds()).contains(GoalSmokeInputs.NO_GOAL_CASE, "R:4181864b");
 
