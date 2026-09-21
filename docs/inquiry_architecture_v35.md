@@ -1749,3 +1749,43 @@ So the fork is a product decision:
 **C is the one this audit would recommend if the executor were imminent** — it is the only option that keeps both
 properties — but it is a registry change and not a small one. Nothing was changed here beyond adding the test that
 records the comparison and the window.
+
+### 25.10 Decision — Option B: keep the structure, fix the principle, install tripwires
+
+`§25.9` offered three options. **B is taken.** `PROCEDURE` is not split into read and effectful halves, no executor
+abstraction is introduced, and the resolution loop is unchanged — because there is no executor and no production
+caller, and a registry split bought today would be a large change protecting nothing that exists.
+
+What is fixed instead are four statements, each now held by something other than prose:
+
+1. **`CustomerGoal`'s `ACTION` is not execution authority.** It is a model's reading of a sentence, recorded in
+   `RequestedOutcome.ACTION`'s own contract.
+2. **An effectful capability must pass a separate execution approval/authorization seam** when a real executor is
+   introduced — an approval bound to the specific object, as every other write in this product already is. That seam
+   does not exist yet and is deliberately not invented here.
+3. **The current resolver loop answers for observation and prerequisite discovery only.** It does not, and must not,
+   carry execution.
+4. **`G15`, an explicit `ACTION` and a legitimate implied `ACTION` are indistinguishable downstream**, and that stays
+   a regression rather than a remembered fact.
+
+#### The tripwires
+
+Two, both in `ActionIsNotExecutionAuthorityTest`, and **both verified to fail when violated** rather than assumed to:
+
+| tripwire | what it reads | verified red by |
+|---|---|---|
+| every capability with `effect() != NONE` is `DECLARED_NO_EXECUTOR`, in every snapshot the registry derives | the registry's own declaration, generic over `CapabilityId` | flipping `PROCEDURE_ORDER_ACTION` to `AVAILABLE` |
+| nothing under `src/main` calls `ResolutionPolicy.next(` / `GoalResolution.run(` / `GoalSetResolution.resolve(` / `new CustomerGoalSet(` | the source tree, outside the goal package | adding one such call to a production class |
+
+Neither adds an abstraction. The first is generic over the registry, so a *second* effectful capability inherits the
+tripwire the moment it declares an effect; the second is what keeps `§25.9`'s open window unreachable, since it is
+unreachable only because nothing shipped drives the loop. Both failure messages name this section and say what has
+to exist first, so the person who trips one is not left to guess whether updating the expectation is the fix.
+
+#### Migration option C — for review immediately before an executor is introduced
+
+Recorded, not scheduled. **Split `PROCEDURE` into a read capability that may name prerequisites and an effectful one
+that may not be dispatched from this loop.** It is the only option measured in `§25.9` that keeps *both* properties:
+the waiter/resume state machine (A–I) stays exercised — in `G12`, `G17`, `G20` and `G22` the procedure resolver is
+what names the read prerequisite — while the effectful half becomes structurally unreachable from a goal. Its cost is
+a registry change plus re-adjudicating those four chain fixtures, which is why it is not paid now.

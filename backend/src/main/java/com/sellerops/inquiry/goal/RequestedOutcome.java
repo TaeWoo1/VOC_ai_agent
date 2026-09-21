@@ -39,7 +39,20 @@ public enum RequestedOutcome {
      */
     DECISION(Authority.KNOWLEDGE),
 
-    /** The customer asked for external state to change, and that change is the outcome they want from this message. */
+    /**
+     * The customer asked for external state to change, and that change is the outcome they want from this message.
+     *
+     * <p><b>This token is not execution authority</b> (Inquiry v3.5 §25.10). It records a model's reading of a
+     * sentence, and that reading has been measured wrong in the direction that matters: on a message requesting
+     * nothing, the interpreter returned a single {@code ACTION} goal about the order (§25.7). Nothing downstream
+     * can tell such a goal from a correct one — {@link RequestBasis} is read by no part of the resolution loop, so
+     * an invented {@code ACTION}, a substituted one and a real one are the same object there.
+     *
+     * <p>So the safety property is not "the interpreter gets this right". It is that <b>an effectful capability is
+     * reached only through an execution approval bound to the specific object</b>, and the current resolution loop
+     * — which has no such seam — answers for observation and prerequisite discovery only. No such executor
+     * exists today, and two tripwires in {@code ActionIsNotExecutionAuthorityTest} fail if one arrives without it.
+     */
     ACTION(Authority.PROCEDURE);
 
     private final Authority firstResolver;

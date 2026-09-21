@@ -116,7 +116,84 @@ class ActionIsNotExecutionAuthorityTest {
         assertThat(actedThenDeclined.state()).isEqualTo(ResolutionState.CAPABILITY_GAP);
 
         // The one thing that does hold today: there is no production caller of this loop at all, so the window is
-        // not reachable in a shipped path. GoalSmokeInputs-style structural proof lives in ResolutionPolicyInvariantTest.
+        // not reachable in a shipped path. That is the fact the two tripwires below keep true.
         assertThat(GoalResolution.MAX_STEPS).isPositive();
+    }
+
+    // --- the tripwires -------------------------------------------------------------------------------------------
+    //
+    // Option B (§25.10): the structure stays as it is, because there is no executor and no production caller. The
+    // risk that buys is a quiet one — somebody wires an executor later and the execution-approval seam is simply
+    // never written, because nothing asked for it. These two tests are what asks. Neither invents an abstraction:
+    // one reads the registry's own declaration, the other reads the source tree.
+
+    /**
+     * <b>Tripwire 1 — an effectful capability may not acquire an executor silently.</b>
+     *
+     * <p>Generic over the registry rather than naming the one capability that is effectful today, so a second one
+     * inherits the tripwire the moment it declares an effect.
+     */
+    @Test
+    @DisplayName("TRIPWIRE: every effectful capability is DECLARED_NO_EXECUTOR, in every snapshot the registry derives")
+    void anEffectfulCapabilityCannotQuietlyGainAnExecutor() {
+        List<CapabilityId> effectful = java.util.Arrays.stream(CapabilityId.values())
+                .filter(c -> c.effect() != ExecutionEffect.NONE).toList();
+        assertThat(effectful).as("nothing effectful in the registry would make this tripwire vacuous").isNotEmpty();
+
+        for (String channel : new String[] {"NAVER", "CAFE24", "COUPANG", null}) {
+            for (com.sellerops.order.fact.OrderFactLookup lookup
+                    : com.sellerops.order.fact.OrderFactLookup.values()) {
+                for (boolean bound : new boolean[] {true, false}) {
+                    var snapshot = com.sellerops.inquiry.authority.CapabilityRegistry.derive(
+                            new com.sellerops.inquiry.authority.CapabilityRegistry.Inputs(channel, null, bound,
+                                    lookup, null, com.sellerops.inquiry.decision.DetailCapability.NOT_APPLICABLE,
+                                    false, 0));
+                    for (CapabilityId c : effectful) {
+                        assertThat(snapshot.status(c))
+                                .as("%s changes state outside this system. If it now has an executor, the execution "
+                                        + "approval seam of docs/inquiry_architecture_v35.md §25.10 has to exist "
+                                        + "FIRST — an ACTION goal is a model's reading of a sentence and is not "
+                                        + "authorization. Do not simply update this expectation.", c)
+                                .isEqualTo(CapabilityStatus.DECLARED_NO_EXECUTOR);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * <b>Tripwire 2 — the resolution loop stays out of production until that seam exists.</b>
+     *
+     * <p>The window in {@link #theWindowThatIsStillOpen} is unreachable only because nothing shipped drives this
+     * loop. That is a fact about the source tree, so the source tree is what is read. Javadoc is unaffected: the
+     * existing mentions are {@code {@link com.sellerops.inquiry.goal.ResolutionPolicy}} references, and what is
+     * searched for here is a call.
+     */
+    @Test
+    @DisplayName("TRIPWIRE: nothing in src/main drives the resolution loop — the window stays unreachable")
+    void theLoopHasNoProductionCaller() throws Exception {
+        java.nio.file.Path main = java.nio.file.Path.of("src", "main", "java");
+        List<String> callers = new ArrayList<>();
+        try (var paths = java.nio.file.Files.walk(main)) {
+            for (java.nio.file.Path p : paths.filter(java.nio.file.Files::isRegularFile)
+                    .filter(f -> f.toString().endsWith(".java")).toList()) {
+                if (p.toString().replace('\\', '/').contains("/com/sellerops/inquiry/goal/")) {
+                    continue;   // the package may call itself
+                }
+                String body = java.nio.file.Files.readString(p);
+                for (String call : List.of("ResolutionPolicy.next(", "GoalResolution.run(",
+                        "GoalSetResolution.resolve(", "new CustomerGoalSet(")) {
+                    if (body.contains(call)) {
+                        callers.add(p.getFileName() + " → " + call);
+                    }
+                }
+            }
+        }
+        assertThat(callers)
+                .as("the Customer Goal resolution loop is now driven from production. Before that ships, an ACTION "
+                        + "goal must not be able to reach an effectful capability without an execution approval "
+                        + "bound to the specific object — see docs/inquiry_architecture_v35.md §25.10 and the "
+                        + "migration option C recorded there.")
+                .isEmpty();
     }
 }
