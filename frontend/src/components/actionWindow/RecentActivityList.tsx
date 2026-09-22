@@ -8,7 +8,7 @@ import { shortDate } from "../../lib/format";
  */
 export function RecentActivityList({ items }: { items: RecentRunItem[] }) {
   return (
-    <section aria-label={SECTION_TITLE.recentActivity} className="rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label={SECTION_TITLE.recentActivity} className="rounded-2xl bg-surface p-5 border border-line">
       <h2 className="mb-1 text-lg font-semibold text-ink">{SECTION_TITLE.recentActivity}</h2>
       <p className="mb-3 text-sm text-muted">완료되거나 실패한 작업이 여기에 보여요.</p>
       {items.length === 0 ? (

@@ -31,7 +31,7 @@ export function ActiveRunCard({
   const terminal = canStartNewRun(run);
 
   return (
-    <section aria-label="현재 작업" className="rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label="현재 작업" className="rounded-2xl bg-surface p-5 border border-line">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="min-w-0 break-keep text-lg font-semibold text-ink">
           {resolveCopy(run.runCopyKey, run.runCopyParams)}
@@ -66,7 +66,7 @@ export function ActiveRunCard({
           className={
             "rounded-xl px-4 py-2.5 font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
             (needsHuman
-              ? "bg-brand text-white hover:bg-brand-600"
+              ? "bg-brand-700 text-white hover:bg-brand-800"
               : "border border-line bg-surface text-ink hover:bg-canvas")
           }
         >
@@ -76,7 +76,7 @@ export function ActiveRunCard({
           <button
             type="button"
             onClick={onStartNew}
-            className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+            className="hidden rounded-xl bg-brand-700 px-4 py-2.5 font-medium text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
           >
             {START_NEW_RUN_LABEL}
           </button>

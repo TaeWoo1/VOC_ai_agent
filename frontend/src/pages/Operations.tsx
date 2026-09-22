@@ -214,7 +214,7 @@ export function Operations() {
       />
 
       {!liveActions ? (
-        <p role="note" className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted">
+        <p role="note" className="break-keep text-sm text-muted">
           reviewnary 도우미가 필요합니다. 도우미가 연결되어 있지 않아 지금은 작업을 시작하거나 조작할 수 없어요.
         </p>
       ) : null}
@@ -277,7 +277,7 @@ export function Operations() {
                 {canStartNewRun(run) ? (
                   <section
                     aria-label={SECTION_TITLE.nextRun}
-                    className="rounded-2xl bg-surface p-5 shadow-card"
+                    className="rounded-2xl bg-surface p-5 border border-line"
                   >
                     <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.nextRun}</h2>
                     <p className="mt-1 text-ink">
@@ -288,7 +288,7 @@ export function Operations() {
                         <button
                           type="button"
                           onClick={() => handleCommand("START_RUN")}
-                          className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+                          className="hidden rounded-xl bg-brand-700 px-4 py-2.5 font-medium text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
                         >
                           {START_NEW_RUN_LABEL}
                         </button>

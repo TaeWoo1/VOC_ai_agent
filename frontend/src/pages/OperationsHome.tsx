@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { HOME_SCENARIO_NAMES, type HomeScenarioName } from "../lib/actionWindow/homeFixtures";
 import {
   dispatchOperationsCommand,
@@ -13,8 +12,8 @@ import {
 } from "../hooks/useOperationsStore";
 import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
-import { PageHeader } from "../components/PageHeader";
-import { WorkbenchLayout } from "../components/WorkbenchLayout";
+import { PageHead } from "../components/ui/PageHead";
+import { BtnLink } from "../components/ui/Btn";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
 import { ReviewWorkCard } from "../components/actionWindow/ReviewWorkCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
@@ -64,17 +63,14 @@ export function OperationsHome() {
   const connected = connection === "connected" && liveActions;
 
   return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
+    <div className="flex flex-col gap-6">
+      <PageHead
         title="네이버 리뷰 기간별 가져오기"
-        description="판매자센터에서 리뷰 파일을 내려받는 작업을 단계별로 안내하고, 지금까지 가져온 기록을 보여 줍니다. 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
+        description="판매자센터에서 리뷰 파일을 내려받는 작업을 단계별로 안내합니다. 리뷰를 읽고 답변하는 일은 리뷰 화면에서 합니다."
         action={
-          <Link
-            to="/reviews"
-            className="rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-          >
+          <BtnLink to="/reviews" size="sm" variant="ghost">
             리뷰 화면으로
-          </Link>
+          </BtnLink>
         }
       />
 
@@ -159,7 +155,7 @@ export function OperationsHome() {
       />
 
       {!liveActions ? (
-        <p role="note" className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted">
+        <p role="note" className="break-keep text-sm text-muted">
           reviewnary 도우미가 필요합니다. 도우미가 연결되어 있지 않아 지금은 수집을 시작할 수 없어요. 지금까지 가져온 기록은 아래에서 볼 수 있어요.
         </p>
       ) : null}
@@ -172,30 +168,19 @@ export function OperationsHome() {
           memory, so it starts empty and vanishes on reload — yesterday's import left no trace
           anywhere the seller looks. The session list is kept as what it always was, a DEV
           fixture-preview affordance, and is shown only under the fixture-preview gate. */}
-      <WorkbenchLayout
-        body={
-          run === null ? (
-            <ReviewWorkCard
-              connected={connected}
-              onStart={() => dispatchOperationsCommand("START_RUN")}
-            />
-          ) : (
-            <ActiveRunCard
-              run={run}
-              onStartNew={() => dispatchOperationsCommand("START_RUN")}
-              actionsEnabled={connected}
-            />
-          )
-        }
-        rail={
-          <div className="flex flex-col gap-4">
-            <ImportHistoryList />
-            {isFixturePreviewEnabled() && sourceMode === "fixture" ? (
-              <RecentActivityList items={recentRuns} />
-            ) : null}
-          </div>
-        }
-      />
+      {/* One column (Phase 4): the work, then its record. The side rail made a ten-row history the tallest thing
+          on a page whose one job is the next step. */}
+      {run === null ? (
+        <ReviewWorkCard connected={connected} onStart={() => dispatchOperationsCommand("START_RUN")} />
+      ) : (
+        <ActiveRunCard
+          run={run}
+          onStartNew={() => dispatchOperationsCommand("START_RUN")}
+          actionsEnabled={connected}
+        />
+      )}
+      <ImportHistoryList />
+      {isFixturePreviewEnabled() && sourceMode === "fixture" ? <RecentActivityList items={recentRuns} /> : null}
     </div>
   );
 }

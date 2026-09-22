@@ -359,18 +359,17 @@ export function ReviewCaseView({
               reply flow, no write this page owns, and the approval boundary untouched. */}
           {showDraft && replyWork ? (
             <DecisionCard primary>
-              <Section title="답변 준비" ariaLabel="답변 준비 영역">
-                <VocItemReplyPrep
-                  key={`prep-${replyWork.actionRef}`}
-                  accountId={replyAccountId}
-                  actionRef={replyWork.actionRef}
-                  disposition={decision}
-                  onPrepared={() => setPrepared(true)}
-                  onOutcomeRecorded={bump}
-                  onLocalWork={setLocalWork}
-                  headingLevel={3}
-                />
-              </Section>
+              {/* The panel names itself 「답변 준비」 — a Section around it said the same word twice (Phase 4). */}
+              <VocItemReplyPrep
+                key={`prep-${replyWork.actionRef}`}
+                accountId={replyAccountId}
+                actionRef={replyWork.actionRef}
+                disposition={decision}
+                onPrepared={() => setPrepared(true)}
+                onOutcomeRecorded={bump}
+                onLocalWork={setLocalWork}
+                headingLevel={2}
+              />
               {/* 작업에서 제외 lived only on the 리뷰 screen's 「내 답변 작업」 list; that list is gone and its rows are
                   확인할 일's now, so the one exit from the to-do stands with the work it takes out. */}
               {detail.sellerAccountId ? (

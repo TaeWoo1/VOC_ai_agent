@@ -101,11 +101,11 @@ export function NextActionPanel({
 }) {
   const { tone, title, guidance, detail, cta } = action;
   return (
-    <section className="card">
+    <section aria-label="다음 조치" className="rounded-2xl border border-line bg-surface p-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <p className="text-sm font-semibold text-muted">다음 조치</p>
-          <p className={`text-xl font-bold ${TITLE_CLS[tone]}`}>{title}</p>
+          <p className={`text-lg font-bold ${TITLE_CLS[tone]}`}>{title}</p>
           <p className="text-base text-ink">{guidance}</p>
           {detail ? <p className="text-sm text-muted">{detail}</p> : null}
         </div>
@@ -113,7 +113,8 @@ export function NextActionPanel({
           <button
             type="button"
             onClick={() => onCta(cta.target)}
-            className="btn-ghost shrink-0"
+            // The page's one primary action when something needs the seller; a quiet check when nothing does.
+            className={`shrink-0 ${tone === "warn" || tone === "bad" ? "btn-primary" : "btn-ghost"}`}
           >
             {cta.label}
           </button>

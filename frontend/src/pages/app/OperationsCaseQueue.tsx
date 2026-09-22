@@ -6,7 +6,8 @@ import { MasterDetail, useWideLayout } from "../../components/workspace/MasterDe
 import { WorkRows, selectedRow } from "../../components/workspace/WorkRows";
 import { WorkItemPane } from "../../components/workspace/WorkItemPane";
 import { api } from "../../lib/apiClient";
-import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
+import { mergeHomeWork, reasonCounts, WORK_FILTERS, workFilterOf, type HomeWork } from "../../lib/homeWork";
+import { SegmentBtn } from "../../components/reviews/recordParts";
 import { HOME_QUEUE_SIZE } from "../../components/customerOperations/CustomerOpsHome";
 import { COPY } from "../../lib/copy/customerOps";
 import { ReplyWorkHistory } from "../../components/customerOperations/ReplyWorkHistory";
@@ -53,7 +54,7 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
   const [reloadKey, setReloadKey] = useState(0);
   const wide = useWideLayout();
   const location = useLocation();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
 
   useEffect(() => {
     let live = true;
@@ -86,8 +87,22 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
     };
   }, [now, reloadKey]);
 
-  const rows = work?.rows ?? [];
+  const allRows = work?.rows ?? [];
+  // A view of the one list (UI/UX v2 Phase 4): the same rows in the same order, narrowed by a fact each row carries.
+  const filter = workFilterOf(params.get("filter"));
+  const rows = allRows.filter(WORK_FILTERS.find((f) => f.key === filter)!.test);
   const selected = wide ? selectedRow(rows, params.get("item")) : null;
+  const setFilter = (key: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (key === "all") next.delete("filter");
+        else next.set("filter", key);
+        next.delete("item");
+        return next;
+      },
+      { replace: true },
+    );
 
   const list = (
     <>
@@ -95,13 +110,13 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
         title={TITLE}
         description={DESCRIPTION}
         meta={
-          work && rows.length > 0 ? (
+          work && allRows.length > 0 ? (
             <Facts className="text-sm text-muted">
               <span className="font-semibold text-ink">
-                {rows.length.toLocaleString("ko-KR")}
+                {allRows.length.toLocaleString("ko-KR")}
                 {work.truncated ? "+" : ""}건
               </span>
-              {reasonCounts(rows).map((part) => (
+              {reasonCounts(allRows).map((part) => (
                 <span key={part}>{part}</span>
               ))}
               <span>{COPY.listOrder}</span>
@@ -134,8 +149,21 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
         </p>
       ) : null}
 
-      {work && rows.length === 0 ? (
+      {work && allRows.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-0.5 self-start rounded-lg bg-canvas p-0.5" role="group" aria-label="확인할 일 보기">
+          {WORK_FILTERS.map((f) => (
+            <SegmentBtn key={f.key} pressed={filter === f.key} onClick={() => setFilter(f.key)}>
+              {f.label} {allRows.filter(f.test).length.toLocaleString("ko-KR")}
+            </SegmentBtn>
+          ))}
+        </div>
+      ) : null}
+
+      {work && allRows.length === 0 ? (
         <p className="break-keep leading-relaxed text-ink">지금 확인이 필요한 문의나 리뷰가 없습니다.</p>
+      ) : null}
+      {work && allRows.length > 0 && rows.length === 0 ? (
+        <p className="break-keep text-sm text-muted">이 보기에 해당하는 일이 없습니다.</p>
       ) : null}
 
       {work && rows.length > 0 ? (
@@ -151,7 +179,7 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
           {/* A read that reported more than it returned. The shortfall means this list is deeper than one read
               reaches — not that the rest is somewhere else — so it says so instead of passing its length off as
               the total. How many more it cannot say: the reads that overflowed count different populations. */}
-          {work.truncated ? (
+          {work.truncated && filter === "all" ? (
             <p className="mt-3 break-keep text-sm text-muted">
               한 번에 {rows.length.toLocaleString("ko-KR")}건까지 보여 드립니다. 처리하시면 다음 건이 올라옵니다.
             </p>

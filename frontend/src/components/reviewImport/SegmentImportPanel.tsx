@@ -68,7 +68,7 @@ export function SegmentImportPanel({
           type="checkbox"
           checked={scopeConfirmed}
           onChange={(e) => setScopeConfirmed(e.target.checked)}
-          className="mt-0.5 h-4 w-4 rounded border-line text-brand focus-visible:ring-2 focus-visible:ring-brand"
+          className="mt-0.5 h-4 w-4 rounded border-line text-brand-700 focus-visible:ring-2 focus-visible:ring-brand"
           aria-describedby={`scope-confirm-help-${segment.id}`}
         />
         <span id={`scope-confirm-help-${segment.id}`} className="break-keep">
@@ -93,7 +93,7 @@ export function SegmentImportPanel({
           type="button"
           onClick={submit}
           disabled={!canSubmit}
-          className="rounded-xl bg-brand px-4 py-2 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-brand-700 px-4 py-2 font-medium text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? "가져오는 중…" : "이 구간 가져오기"}
         </button>

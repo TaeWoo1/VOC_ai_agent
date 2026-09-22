@@ -124,7 +124,7 @@ export function ImportRangeChooser({ accountId, onCreated, today }: ImportRangeC
         // Nothing is created until a preview has come back: the seller confirms a period they have actually seen.
         disabled={busy || preview === null}
         data-testid="range-confirm"
-        className="self-start rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        className="self-start rounded-xl bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
       >
         {busy ? RANGE_CHOICE_COPY.confirming : RANGE_CHOICE_COPY.confirm}
       </button>

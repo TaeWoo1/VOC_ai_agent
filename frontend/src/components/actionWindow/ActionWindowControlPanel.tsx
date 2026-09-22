@@ -26,7 +26,7 @@ export function ActionWindowControlPanel({
   function commandButton(type: CommandType, variant: "primary" | "secondary" | "destructive") {
     const style =
       variant === "primary"
-        ? "bg-brand text-white hover:bg-brand-600"
+        ? "bg-brand-700 text-white hover:bg-brand-800"
         : variant === "destructive"
           ? "border border-bad/40 bg-surface text-bad hover:bg-bad/5"
           : "border border-line bg-surface text-ink hover:bg-canvas";
@@ -46,7 +46,7 @@ export function ActionWindowControlPanel({
   }
 
   return (
-    <section aria-label={SECTION_TITLE.controls} className="rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label={SECTION_TITLE.controls} className="rounded-2xl bg-surface p-5 border border-line">
       <h2 className="mb-3 text-lg font-semibold text-ink">{SECTION_TITLE.controls}</h2>
       {commands.length === 0 ? (
         <p className="text-muted">지금은 할 수 있는 동작이 없어요.</p>

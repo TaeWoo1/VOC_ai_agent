@@ -60,7 +60,7 @@ export function dataStateLabel(state: ChannelDataState): string {
 export function DataStateBadge({ state, label }: { state: ChannelDataState; label?: string }) {
   return (
     <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-sm font-medium ${TONE[state]}`}>
-      {label ? <span className="font-normal opacity-80">{label}</span> : null}
+      {label ? <span className="font-normal">{label}</span> : null}
       {LABEL[state]}
     </span>
   );

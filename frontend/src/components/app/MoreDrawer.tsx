@@ -67,9 +67,9 @@ export function MoreDrawer({ open, onClose }: { open: boolean; onClose: () => vo
         <nav aria-label="전체 메뉴 항목">
           {NAV_GROUPS.map((group) => (
             <div key={group.heading} className="mb-5 last:mb-0">
-              <p className="pb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                {group.heading}
-              </p>
+              {group.heading ? (
+                <p className="pb-2 text-xs font-semibold uppercase tracking-wide text-muted">{group.heading}</p>
+              ) : null}
               <ul className="space-y-1">
                 {group.items.map((item) => (
                   <li key={item.to}>

@@ -161,7 +161,7 @@ export function AgentDock() {
                 onClick={action.onClick}
                 disabled={view.retrying}
                 data-testid="agent-dock-reconnect"
-                className="rounded-xl bg-brand px-3 py-1.5 text-sm font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+                className="rounded-xl bg-brand-700 px-3 py-1.5 text-sm font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
               >
                 {action.label}
               </button>

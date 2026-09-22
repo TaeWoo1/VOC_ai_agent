@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
 import type { CustomerOperationsDecisionRow } from "../../lib/customerOperationsTypes";
 import { expectNoAxeViolations } from "../../test/axe";
 
@@ -275,9 +276,12 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
     draw();
 
-    await screen.findByRole("list", { name: "확인할 일" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     // Every row is a link to the screen that owns the decision; nothing here resolves, dismisses or sends.
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(within(list).queryAllByRole("button")).toHaveLength(0);
+    // The only buttons on the page choose a view of the list (Phase 4) — none of them decides anything.
+    const views = screen.getByRole("group", { name: "확인할 일 보기" });
+    for (const button of screen.queryAllByRole("button")) expect(views).toContainElement(button);
   });
 
   it("접근성 위반 0", async () => {
@@ -341,5 +345,55 @@ describe("OperationsCaseQueue — the seller's own reply work (UI/UX v2 Phase 3)
     expect(row).toHaveTextContent("승인 대기");
     expect(row).toHaveAttribute("href", "/reviews/reply/r-1?from=work");
     expect(screen.getByTestId("reply-work-coverage-uncertain")).toHaveTextContent("안전하게 판단할 수 없어요");
+  });
+});
+
+describe("OperationsCaseQueue — views of the one list (UI/UX v2 Phase 4)", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  function replyItem(reviewId: string, state: "AWAITING_APPROVAL" | "DRAFT_NEEDED", preview: string) {
+    return {
+      channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", sourceType: "REVIEW", productName: "선바로",
+      rating: 3, replyStatus: "PENDING", sourceCreatedDate: "2026-08-28", collectedDate: "2026-08-29",
+      signalType: "LOW_RATING_REVIEW", safePreview: preview, actionRef: `review:${reviewId}`, reviewId,
+      triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: state === "AWAITING_APPROVAL", replyWorkState: state,
+      category: null, hasReportedSubmission: false,
+    };
+  }
+
+  it("narrows by a fact each row carries, keeps the order, and never counts past the list", async () => {
+    reads();
+    api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
+    api.getReviewWorkStrict.mockResolvedValue({
+      attentionTotal: 0,
+      attention: [],
+      committed: [
+        {
+          accountId: "acc-nv", channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", coverage: "COVERED",
+          todo: [replyItem("r-7", "AWAITING_APPROVAL", "승인을 기다리는 답변"), replyItem("r-8", "DRAFT_NEEDED", "초안이 필요한 답변")],
+          recentlyReported: [],
+        },
+      ],
+    });
+    draw();
+
+    const views = await screen.findByRole("group", { name: "확인할 일 보기" });
+    // Every view says how many rows it holds, out of the same four.
+    expect(within(views).getByRole("button", { name: "전체 4" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(views).getByRole("button", { name: "문의 답변 1" })).toBeInTheDocument();
+    expect(within(views).getByRole("button", { name: "리뷰 확인 1" })).toBeInTheDocument();
+    expect(within(views).getByRole("button", { name: "승인 대기 1" })).toBeInTheDocument();
+    expect(within(views).getByRole("button", { name: "초안 필요 1" })).toBeInTheDocument();
+
+    await userEvent.click(within(views).getByRole("button", { name: "승인 대기 1" }));
+    const list = screen.getByRole("list", { name: "확인할 일" });
+    expect(within(list).getAllByRole("link")).toHaveLength(1);
+    expect(within(list).getByRole("link", { name: /승인을 기다리는 답변/ })).toBeInTheDocument();
+
+    await userEvent.click(within(views).getByRole("button", { name: "문의 답변 1" }));
+    expect(within(screen.getByRole("list", { name: "확인할 일" })).getByRole("link", { name: /교환 신청/ })).toBeInTheDocument();
+
+    // The header still counts the whole list: a view never passes itself off as the total.
+    expect(screen.getByText("4건")).toBeInTheDocument();
   });
 });

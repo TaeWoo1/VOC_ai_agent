@@ -28,8 +28,8 @@
 // 설정's overflow. It answers 운영's question for the patterns rather than the items: what keeps coming back.
 // 홈 became 오늘 in the same decision: the first screen is named for the question it answers.
 //
-// Deliberately absent from the menu: `/agent` (an action offered inside the operations screens,
-// not a destination — kept as a route, never deleted), `/reports` (kept as a route, reached from 설정), and every per-channel page
+// Deliberately absent from the menu: `/agent` (an internal route — kept, never deleted), `/customer-operations`
+// (the control for the handed-over job, reached from 오늘's status pill — Phase 4 audit), and every per-channel page
 // (`/connect/channels/:accountId`, the connect wizards) — those are reached from 채널 연결.
 
 export interface NavItem {
@@ -49,26 +49,39 @@ export interface NavGroup {
 }
 
 export const NAV_GROUPS: NavGroup[] = [
+  // UI/UX v2 Phase 4 (product-owner decision): the final IA. 오늘 stands alone — it is the answer, not a category —
+  // and the rest is sorted by what the seller comes to do: 일 (work waiting for a decision), 기록 (find what happened),
+  // 준비 (what reviewnary needs from them). The heading-less group renders no label.
   {
-    heading: "운영",
+    heading: "",
+    items: [{ to: "/", label: "오늘", short: "오늘", icon: "home", end: true }],
+  },
+  {
+    heading: "일",
     items: [
-      { to: "/", label: "오늘", short: "오늘", icon: "home", end: true },
       { to: "/customer-operations/cases", label: "확인할 일", short: "확인", icon: "inbox" },
       { to: "/memory", label: "반복 문제", short: "반복", icon: "memory" },
-      { to: "/products", label: "상품", short: "상품", icon: "product" },
-      { to: "/reviews", label: "리뷰", short: "리뷰", icon: "review" },
-      { to: "/inquiries", label: "문의", short: "문의", icon: "mail" },
-      { to: "/orders", label: "주문", short: "주문", icon: "orders" },
     ],
   },
   {
-    heading: "연결·설정",
+    heading: "기록",
+    items: [
+      { to: "/reviews", label: "리뷰", short: "리뷰", icon: "review" },
+      { to: "/inquiries", label: "문의", short: "문의", icon: "mail" },
+      { to: "/products", label: "상품", short: "상품", icon: "product" },
+      { to: "/orders", label: "주문", short: "주문", icon: "orders" },
+      // 리포트 joins the menu with Phase 4: it is a record of a period, and 설정 was never its home.
+      { to: "/reports", label: "리포트", short: "리포트", icon: "report" },
+    ],
+  },
+  {
+    heading: "준비",
     items: [
       // Knowledge Sources & Acquisition v1: what reviewnary knows is SETUP, not a daily destination —
       // a seller visits it when they have material to hand over or something to confirm, and the rest
       // of the time the knowledge reaches them inside the draft that used it.
-      { to: "/knowledge", label: "지식", short: "지식", icon: "settings" },
-      { to: "/connect", label: "채널 연결", short: "연결", icon: "link" },
+      { to: "/knowledge", label: "지식", short: "지식", icon: "list" },
+      { to: "/connect", label: "연결", short: "연결", icon: "link" },
       { to: "/settings", label: "설정", short: "설정", icon: "settings" },
     ],
   },

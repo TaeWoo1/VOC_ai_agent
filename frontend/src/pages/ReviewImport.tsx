@@ -1,4 +1,5 @@
 import { ReviewImportPage } from "../components/reviewImport/ReviewImportPage";
+import { PageHead } from "../components/ui/PageHead";
 
 /**
  * 과거 리뷰 가져오기 — the onboarding historical review backfill. Choose a connected seller account and a
@@ -9,7 +10,7 @@ import { ReviewImportPage } from "../components/reviewImport/ReviewImportPage";
 export function ReviewImport() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">과거 리뷰 가져오기</h1>
+      <PageHead title="과거 리뷰 가져오기" />
       <ReviewImportPage />
     </div>
   );

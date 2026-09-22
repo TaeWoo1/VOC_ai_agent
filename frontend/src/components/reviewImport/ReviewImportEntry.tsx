@@ -44,7 +44,7 @@ export function ReviewImportEntry({
   }
 
   return (
-    <section aria-label="과거 리뷰 가져오기 시작" className="rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label="과거 리뷰 가져오기 시작" className="rounded-2xl bg-surface p-5 border border-line">
       <h2 className="text-lg font-semibold text-ink">과거 리뷰 가져오기</h2>
       <p className="mt-1 text-sm text-muted break-keep">
         {account.alias ?? account.channelNameKo} 계정의 과거 리뷰를 기간별로 가져와요. 선택한 기간은 월 단위 구간으로
@@ -76,7 +76,7 @@ export function ReviewImportEntry({
           type="button"
           onClick={create}
           disabled={invalid || busy}
-          className="rounded-xl bg-brand px-5 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-brand-700 px-5 py-2.5 font-medium text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? "만드는 중…" : "가져오기 계획 만들기"}
         </button>

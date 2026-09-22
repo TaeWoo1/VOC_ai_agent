@@ -14,7 +14,7 @@ import { SegmentAttemptsList } from "./SegmentAttemptsList";
 
 const PILL_CLASS: Record<SegmentTone, string> = {
   idle: "bg-surface text-muted",
-  active: "bg-brand/10 text-brand",
+  active: "bg-brand/10 text-brand-700",
   done: "bg-good/10 text-good",
   retry: "bg-bad/10 text-bad",
   blocked: "bg-surface text-muted line-through",
@@ -117,7 +117,7 @@ export function SegmentCard({
                 checked={mergeSelected}
                 onChange={() => onToggleMerge(segment.id)}
                 aria-label={`${rangeText} 합치기 선택`}
-                className="h-4 w-4 rounded border-line text-brand focus-visible:ring-2 focus-visible:ring-brand"
+                className="h-4 w-4 rounded border-line text-brand-700 focus-visible:ring-2 focus-visible:ring-brand"
               />
             ) : null}
             <span className="font-medium text-ink break-keep">{rangeText}</span>

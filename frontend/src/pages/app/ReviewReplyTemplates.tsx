@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../../components/ui/PageHead";
 import { Panel } from "../../components/ui/Panel";
+import { Disclosure } from "../../components/ui/Disclosure";
 import { Btn } from "../../components/ui/Btn";
 import { api } from "../../lib/apiClient";
 import { backendMessage } from "../../components/connect/channelShared";
@@ -62,17 +63,20 @@ export function ReviewReplyTemplates() {
         </Panel>
       ) : (
         <div className="space-y-4">
-          <Panel title="어떻게 쓰이나요">
-            <ul className="space-y-1.5 break-keep text-sm text-muted">
+          <Disclosure label="어떻게 쓰이나요">
+            <ul className="mt-2 space-y-1.5 break-keep text-sm text-muted">
               <li>리뷰를 열면 아래 문구가 답변 초안에 먼저 채워집니다. 보내기 전에 언제든 고치실 수 있습니다.</li>
               <li>말투와 표현만 정합니다. 배송일·환불·교환 같은 약속은 문구가 대신 정하지 않습니다.</li>
               <li>저장하면 <strong className="font-semibold text-ink">다음에 만드는 초안부터</strong> 반영됩니다. 이미 승인한 답변은 그대로입니다.</li>
             </ul>
-          </Panel>
+          </Disclosure>
 
-          {labelledTemplates(templates).map(({ template, label }) => (
-            <TemplateEditor key={template.key} template={template} label={label} onChanged={replace} />
-          ))}
+          {/* One list of seven rows, not seven cards (Phase 4). */}
+          <ul aria-label="리뷰 답변 문구" className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
+            {labelledTemplates(templates).map(({ template, label }) => (
+              <TemplateEditor key={template.key} template={template} label={label} onChanged={replace} />
+            ))}
+          </ul>
         </div>
       )}
     </>
@@ -121,17 +125,15 @@ function TemplateEditor({
   };
 
   return (
-    <Panel
-      title={label.name}
-      description={label.when}
-      action={
-        <span className="text-xs text-muted">
-          {template.customized ? "직접 정한 문구" : "기본 문구"}
-        </span>
-      }
-    >
+    <li>
+      <section aria-label={label.name} className="px-5 py-5">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h2 className="break-keep text-base font-semibold text-ink">{label.name}</h2>
+        <span className="text-sm text-muted">{template.customized ? "직접 정한 문구" : "기본 문구"}</span>
+      </div>
+      <p className="mb-1 break-keep text-sm text-muted">{label.when}</p>
       {template.matchWords.length > 0 ? (
-        <p className="mb-3 break-keep text-xs text-muted">
+        <p className="mb-3 break-keep text-sm text-muted">
           이런 낱말이 있을 때: {template.matchWords.join(" · ")}
         </p>
       ) : null}
@@ -164,6 +166,7 @@ function TemplateEditor({
           <span className="text-sm text-good">기본 문구로 되돌렸습니다.</span>
         ) : null}
       </div>
-    </Panel>
+      </section>
+    </li>
   );
 }

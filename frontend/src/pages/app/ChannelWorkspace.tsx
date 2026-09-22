@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
+import { Disclosure } from "../../components/ui/Disclosure";
 import { BtnLink } from "../../components/ui/Btn";
 import { CapabilityBadges } from "../../components/CapabilityBadges";
 import { ChannelSummaryCards } from "../../components/ChannelSummaryCards";
@@ -19,7 +20,7 @@ import { CoupangChannelView } from "../../components/connect/coupang/CoupangChan
 import { ReviewRecordPanel } from "../../components/connect/ReviewRecordPanel";
 import { nextActionFor, type ScrollTarget } from "../../components/connect/channelShared";
 import { api } from "../../lib/apiClient";
-import { hasReviewRecord, reviewEntryLabel, reviewRecordPath } from "../../lib/reviewRecord";
+import { hasReviewRecord } from "../../lib/reviewRecord";
 import type {
   CapabilityView,
   ChannelResponse,
@@ -88,10 +89,14 @@ export function ChannelWorkspace() {
   const collectSettingsRef = useRef<HTMLDivElement>(null);
   const runsRef = useRef<HTMLDivElement>(null);
   const credentialRef = useRef<HTMLDivElement>(null);
+  // Which fold is open, so a 다음 조치 button can open the one it points into (Phase 4).
+  const [openFold, setOpenFold] = useState<"info" | "runs" | null>(null);
   const scrollToSection = useCallback((target: ScrollTarget) => {
+    if (target === "info" || target === "runs") setOpenFold(target);
     const ref =
       target === "collect" ? collectSettingsRef : target === "info" ? credentialRef : runsRef;
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // After the fold has opened, so the scroll lands on content rather than on a closed summary.
+    requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, []);
 
   // Account + channel metadata via strict reads: no silent mock fallback, so a
@@ -264,29 +269,22 @@ export function ChannelWorkspace() {
     );
   }
 
+  /*
+   * UI/UX v2 Phase 4 — the same sections, sorted by what the seller came for. On top: the state and its one next
+   * step, the reviews this channel holds, and the collection controls. Below, folded: the connection's credentials,
+   * the run log, a dated collection, this channel's numbers and articles — everything is still here, one click
+   * away, and none of it stands between the seller and the two questions this page answers first. The 다음 조치
+   * buttons open the fold they point into before scrolling to it.
+   */
   return (
-    <>
+    <div className="space-y-6">
       <PageHead
         title={account?.alias ?? account?.channelNameKo ?? "채널"}
-        description="이 채널의 연결 상태와 자료 수집을 관리합니다."
         meta={status ? <HealthBadge state={status.state} /> : undefined}
         action={
-          <div className="flex flex-wrap gap-2">
-            {/* Which channels have a record is decided in one place, shared with the channel list, so
-                the two surfaces cannot disagree about whether this channel offers one.
-
-                Solid, and named for what it opens. It was an outline control labelled 상품평 sitting
-                between page chrome, and it read as a filter or a section heading rather than as the
-                way to the seller's own review record. */}
-            {hasReviewRecord(channel?.code) ? (
-              <BtnLink to={reviewRecordPath(accountId)} size="sm">
-                {reviewEntryLabel(null, channel?.code)}
-              </BtnLink>
-            ) : null}
-            <BtnLink to="/connect" size="sm" variant="outline">
-              채널 목록
-            </BtnLink>
-          </div>
+          <BtnLink to="/connect" size="sm" variant="ghost">
+            채널 목록
+          </BtnLink>
         }
       />
 
@@ -301,8 +299,8 @@ export function ChannelWorkspace() {
       ) : null}
       {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
 
-      {/* Above the connection sections, because it is what the seller came for. Everything below is
-          about keeping the collection running; this is the collection. */}
+      {/* Above the connection sections, because it is what the seller came for. It is the page's one way to the
+          review record — the header no longer repeats it. */}
       {accountId && hasReviewRecord(channel?.code) ? (
         <ReviewRecordPanel
           accountId={accountId}
@@ -310,35 +308,6 @@ export function ChannelWorkspace() {
           refreshKey={refreshKey}
         />
       ) : null}
-
-      {accountId ? (
-        <>
-          {channel?.code ? <CapabilityBadges channelCode={channel.code} /> : null}
-          <ChannelSummaryCards accountId={accountId} refreshKey={refreshKey} />
-        </>
-      ) : null}
-
-      <ChannelStatusSection
-        accountId={accountId}
-        status={status}
-        loading={loadingCollection}
-        error={collectionError}
-      />
-
-      <div ref={credentialRef}>
-        <ConnectionInfoSection
-          accountId={accountId}
-          info={connectionInfo}
-          loading={loadingInfo}
-          error={infoError}
-          channelCode={channel?.code}
-          template={credentialTemplate}
-          templateError={templateError}
-          onViewRuns={() => scrollToSection("runs")}
-          onReport={report}
-          onChanged={reload}
-        />
-      </div>
 
       <div ref={collectSettingsRef}>
         <CollectionSettingsSection
@@ -351,28 +320,71 @@ export function ChannelWorkspace() {
         />
       </div>
 
+      <div ref={credentialRef}>
+        <Disclosure label="연결 정보" note="인증 · 연결 상태" open={openFold === "info"} onOpenChange={(o) => setOpenFold(o ? "info" : null)}>
+          <div className="mt-3 space-y-6">
+            <ChannelStatusSection
+              accountId={accountId}
+              status={status}
+              loading={loadingCollection}
+              error={collectionError}
+            />
+            <ConnectionInfoSection
+              accountId={accountId}
+              info={connectionInfo}
+              loading={loadingInfo}
+              error={infoError}
+              channelCode={channel?.code}
+              template={credentialTemplate}
+              templateError={templateError}
+              onViewRuns={() => scrollToSection("runs")}
+              onReport={report}
+              onChanged={reload}
+            />
+          </div>
+        </Disclosure>
+      </div>
+
       <div ref={runsRef}>
-        <CollectionHistorySection
-          runs={runs}
-          loading={loadingCollection}
-          error={collectionError}
-          onChanged={reload}
-          onReport={report}
-        />
+        <Disclosure label="수집 이력" note={runs.length > 0 ? `${runs.length}회` : undefined} open={openFold === "runs"} onOpenChange={(o) => setOpenFold(o ? "runs" : null)}>
+          <div className="mt-3">
+            <CollectionHistorySection
+              runs={runs}
+              loading={loadingCollection}
+              error={collectionError}
+              onChanged={reload}
+              onReport={report}
+            />
+          </div>
+        </Disclosure>
       </div>
 
-      {/* 기간 수집 — the backfill panel, mounted unchanged. */}
-      {accountId ? <BackfillPanel accountId={accountId} onCompleted={reload} /> : null}
+      {accountId ? (
+        <Disclosure label="기간 지정 수집">
+          <div className="mt-3">
+            {/* 기간 수집 — the backfill panel, mounted unchanged. */}
+            <BackfillPanel accountId={accountId} onCompleted={reload} />
+          </div>
+        </Disclosure>
+      ) : null}
 
-      {accountId ? <CommunityArticleList accountId={accountId} refreshKey={refreshKey} /> : null}
+      {accountId ? (
+        <Disclosure label="이 채널의 자료" note="수집 가능 데이터 · 숫자 · 수집된 글">
+          <div className="mt-3 space-y-6">
+            {channel?.code ? <CapabilityBadges channelCode={channel.code} /> : null}
+            <ChannelSummaryCards accountId={accountId} refreshKey={refreshKey} />
+            <CommunityArticleList accountId={accountId} refreshKey={refreshKey} />
+          </div>
+        </Disclosure>
+      ) : null}
 
-      <div className="rounded-xl bg-canvas px-4 py-3 text-base text-muted">
+      <p className="break-keep text-sm text-muted">
         연결로 가져오기 어려운 자료는{" "}
-        <BtnLink to={`/connect/upload?channelId=${account?.channelId ?? ""}`} size="sm" variant="ghost">
-          정기 자료 가져오기
-        </BtnLink>
+        <Link to={`/connect/upload?channelId=${account?.channelId ?? ""}`} className="font-semibold text-ink underline underline-offset-4">
+          자료 업로드
+        </Link>
         로 채울 수 있습니다. 같은 자료를 다시 넘겨도 중복은 건너뜁니다.
-      </div>
-    </>
+      </p>
+    </div>
   );
 }

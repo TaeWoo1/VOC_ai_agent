@@ -18,7 +18,7 @@ export function CompletedResult({ run }: { run: ActionWindowRunView }) {
   return (
     <section
       aria-label="완료 결과"
-      className="rounded-2xl border border-good/30 bg-good/5 p-5 shadow-card"
+      className="rounded-2xl border border-good/30 bg-good/5 p-5 border border-line"
     >
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="text-xl">

@@ -242,8 +242,8 @@ export function AnswerStyle() {
                     />
                   </label>
                   <p className="mt-1 break-keep text-sm text-muted">
-                    배송·환불·재고처럼 사실을 단정하는 문장은 넣을 수 없습니다. 그런 내용은 「운영 정책
-                    / 답변 기준」에 등록하시면, 해당하는 문의에서 근거로 인용됩니다.
+                    배송·환불·재고처럼 사실을 단정하는 문장은 넣을 수 없습니다. 그런 내용은 「운영 기준」에
+                    등록하시면, 해당하는 문의에서 근거로 인용됩니다.
                   </p>
                 </div>
                 <div>
@@ -305,7 +305,7 @@ export function AnswerStyle() {
             >
               <div className="flex flex-wrap gap-2">
                 <BtnLink to="/settings/policies" size="sm" variant="outline">
-                  운영 정책 관리
+                  운영 기준 관리
                 </BtnLink>
                 <BtnLink to="/products" size="sm" variant="outline">
                   상품별 답변 기준

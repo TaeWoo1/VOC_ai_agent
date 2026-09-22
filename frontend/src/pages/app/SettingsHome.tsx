@@ -74,13 +74,17 @@ export function SettingsHome() {
         </ul>
       </ListBox>
 
-      <ListBox ariaLabel="더 보기">
+      {/* 반복 문제 and 리포트 lived here as 「더 보기」 until the menu held them (Phase 4) — a second door to a menu
+          entry is a second name for one place. What this screen gained instead is the one control the menu does not
+          carry: the handed-over job itself — start, pause, stop — which until now only 오늘's status pill reached. */}
+      <ListBox ariaLabel="자동 운영">
         <ul className="divide-y divide-line/70">
           <li>
-            <ObjectRow name="반복 문제" facets="반복되는 고객 문제와 그 근거" action={<BtnLink to="/memory" size="sm" variant="outline">열기</BtnLink>} />
-          </li>
-          <li>
-            <ObjectRow name="리포트" facets="수집된 자료로 만든 기간 요약" action={<BtnLink to="/reports" size="sm" variant="outline">열기</BtnLink>} />
+            <ObjectRow
+              name="고객 운영 관리"
+              facets={<span className="break-keep">reviewnary가 주기적으로 확인하는 일 — 확인 대상·주기, 시작·일시정지·중지</span>}
+              action={<BtnLink to="/customer-operations" size="sm" variant="outline">관리</BtnLink>}
+            />
           </li>
         </ul>
       </ListBox>

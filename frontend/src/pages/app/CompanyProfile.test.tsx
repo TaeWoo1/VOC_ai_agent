@@ -88,7 +88,8 @@ describe("회사 정보", () => {
     const { container } = renderScreen();
     await screen.findByLabelText("회사 소개");
     expect(screen.getByText(/사실의 근거로는 쓰이지 않습니다/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "운영 정책 / 답변 기준" })).toHaveAttribute("href", "/settings/policies");
+    // The rules screen by its one name (Phase 4: this link was the last to still say 「운영 정책 / 답변 기준」).
+    expect(screen.getByRole("link", { name: "운영 기준" })).toHaveAttribute("href", "/settings/policies");
     expect(container.textContent).not.toMatch(/prompt|system|temperature|model/i);
     await expectNoAxeViolations(container);
   });

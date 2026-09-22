@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Section } from "../components/Section";
+import { PageHead } from "../components/ui/PageHead";
+import { SegmentBtn } from "../components/reviews/recordParts";
 import { UploadResult } from "../components/UploadResult";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
@@ -136,47 +138,30 @@ export function Upload() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">자료 업로드</h1>
-        <p className="mt-1 text-lg text-muted">
-          리뷰·문의·주문/매출 파일을 올리면 대시보드와 인박스에 반영됩니다.
-        </p>
-      </div>
+      <PageHead title="자료 업로드" description="리뷰·문의·주문/매출 파일을 올리면 리뷰·문의·주문 화면에 반영됩니다." />
 
-      <Section title="업로드">
+      {/* The form is the page — a section titled 「업로드」 under a page titled 「자료 업로드」 said it twice. */}
+      <section aria-label="업로드" className="rounded-2xl border border-line bg-surface p-5">
         <div className="space-y-6">
           <div>
             <StepLabel n={1}>무엇을 업로드하나요?</StepLabel>
-            <div className="flex flex-wrap gap-2">
+            {/* A choice, drawn as one — the page's one solid control is 업로드. */}
+            <div className="inline-flex flex-wrap gap-0.5 rounded-lg bg-canvas p-0.5" role="group" aria-label="자료 종류">
               {TYPES.map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => setUploadType(t.value)}
-                  className={`rounded-xl px-4 py-2.5 text-base font-semibold ${
-                    uploadType === t.value ? "bg-brand text-white" : "bg-canvas text-muted"
-                  }`}
-                >
+                <SegmentBtn key={t.value} pressed={uploadType === t.value} onClick={() => setUploadType(t.value)}>
                   {t.label}
-                </button>
+                </SegmentBtn>
               ))}
             </div>
           </div>
 
           <div>
             <StepLabel n={2}>어느 채널 자료인가요?</StepLabel>
-            <div className="flex flex-wrap gap-2">
+            <div className="inline-flex flex-wrap gap-0.5 rounded-lg bg-canvas p-0.5" role="group" aria-label="채널">
               {channelList.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setChannelId(c.id)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                    channelId === c.id ? "bg-ink text-white" : "bg-canvas text-muted"
-                  }`}
-                >
+                <SegmentBtn key={c.id} pressed={channelId === c.id} onClick={() => setChannelId(c.id)}>
                   {c.nameKo}
-                </button>
+                </SegmentBtn>
               ))}
             </div>
           </div>
@@ -250,7 +235,7 @@ export function Upload() {
             {busy ? "업로드 중…" : "업로드"}
           </button>
         </div>
-      </Section>
+      </section>
 
       {result ? (
         <Section title="업로드 결과">
@@ -270,9 +255,10 @@ export function Upload() {
             {jobs.map((j) => (
               <li key={j.id} className="flex items-center justify-between py-3">
                 <div className="flex items-center gap-3">
-                  <span className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold">
-                    {jobLabel(j.uploadType)}
-                  </span>
+                  {/* A job whose type was not recorded says nothing, rather than a lone 「-」 chip. */}
+                  {jobLabel(j.uploadType) ? (
+                    <span className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold">{jobLabel(j.uploadType)}</span>
+                  ) : null}
                   <span className={`text-sm font-semibold ${jobStatusColor(j.status)}`}>
                     {jobStatusLabel(j.status)}
                   </span>
@@ -290,7 +276,7 @@ export function Upload() {
   );
 }
 
-function jobLabel(type: string | null): string {
+function jobLabel(type: string | null): string | null {
   switch (type) {
     case "REVIEW":
       return "리뷰";
@@ -299,7 +285,7 @@ function jobLabel(type: string | null): string {
     case "ORDER_SUMMARY":
       return "주문·매출";
     default:
-      return type ?? "-";
+      return type;
   }
 }
 

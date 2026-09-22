@@ -8,7 +8,7 @@ export function OperationRunTimeline({ run }: { run: ActionWindowRunView }) {
   const currentNumber = run.currentStep?.stepNumber;
 
   return (
-    <section aria-label={SECTION_TITLE.timeline} className="rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label={SECTION_TITLE.timeline} className="rounded-2xl bg-surface p-5 border border-line">
       <div className="mb-4 flex items-baseline justify-between">
         <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.timeline}</h2>
         <span className="text-muted" aria-hidden="true">
@@ -31,7 +31,7 @@ export function OperationRunTimeline({ run }: { run: ActionWindowRunView }) {
           // Marker: filled brand for the current step, a good/green check once done,
           // an empty ring while upcoming — so the three states are unmistakable.
           const markerTone = isCurrent
-            ? "bg-brand text-white"
+            ? "bg-brand-700 text-white"
             : isDone
               ? "bg-good/15 text-good"
               : "border border-line bg-surface text-muted";

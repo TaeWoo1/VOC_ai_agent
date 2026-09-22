@@ -358,7 +358,7 @@ function CoverageChip({ row }: { row: KnowledgeCoverageView }) {
         : "bg-warn/10 text-warn";
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${tone}`}>
-      <span className="font-normal opacity-80">{FACET_KO[row.facet] ?? row.facet}</span>
+      <span className="font-normal">{FACET_KO[row.facet] ?? row.facet}</span>
       {COVERAGE_KO[row.coverage] ?? row.coverage}
     </span>
   );

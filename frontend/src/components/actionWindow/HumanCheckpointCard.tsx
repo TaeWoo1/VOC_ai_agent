@@ -36,7 +36,7 @@ export function HumanCheckpointCard({
   return (
     <section
       aria-label="확인이 필요한 작업"
-      className="rounded-2xl border-2 border-brand/40 bg-brand-50/60 p-5 shadow-card"
+      className="rounded-2xl border-2 border-brand/40 bg-brand-50/60 p-5 border border-line"
     >
       <h2 className="text-lg font-semibold text-brand-700">{CHECKPOINT_PROMPT_TITLE}</h2>
 
@@ -63,7 +63,7 @@ export function HumanCheckpointCard({
           <button
             type="button"
             onClick={() => onCommand("REQUEST_STEP_RECHECK")}
-            className="rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            className="rounded-xl bg-brand-700 px-4 py-2.5 font-medium text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
           >
             {commandLabel("REQUEST_STEP_RECHECK")}
           </button>

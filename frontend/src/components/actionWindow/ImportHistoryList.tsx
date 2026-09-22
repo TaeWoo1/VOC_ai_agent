@@ -40,11 +40,11 @@ export function ImportHistoryList() {
   const { data, loading, error } = useApiData(() => api.getReviewImportsStrict(RECENT_LIMIT), []);
 
   return (
-    <section aria-label="최근 가져오기 기록" className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="mb-1 text-lg font-semibold text-ink">최근 가져오기 기록</h2>
-      <p className="mb-3 text-sm text-muted">
-        파일 업로드와 셀러센터 내보내기로 가져온 리뷰 내역이에요.
-      </p>
+    <section aria-label="최근 가져오기 기록" className="space-y-3">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h2 className="text-base font-semibold text-ink">최근 가져오기 기록</h2>
+        <span className="text-sm text-muted">파일 업로드와 셀러센터 내보내기로 가져온 리뷰 내역이에요.</span>
+      </div>
       {loading ? (
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error || !data ? (
@@ -55,14 +55,14 @@ export function ImportHistoryList() {
       ) : data.length === 0 ? (
         <p className="text-base text-muted">아직 가져온 리뷰가 없어요.</p>
       ) : (
-        <ol className="flex flex-col gap-2">
+        <ol className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
           {data.map((item) => {
             const outcome = importOutcome(item);
             return (
               <li
                 key={item.id}
                 data-testid="import-history-row"
-                className="flex flex-col gap-1 rounded-xl border border-line bg-canvas px-4 py-3 sm:flex-row sm:items-center sm:gap-3"
+                className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:gap-3"
               >
                 <span className="min-w-0 flex-1 break-keep">
                   <span className={`block font-medium ${TONE_CLASS[outcome.tone]}`}>

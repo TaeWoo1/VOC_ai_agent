@@ -156,7 +156,7 @@ function ScheduleRow({
   return (
     <li className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-3">
-        <span className="w-24 text-lg font-semibold">{label}</span>
+        <span className="w-24 text-base font-semibold">{label}</span>
         {unsupported ? (
           // 자동 수집, not 이 채널: this row is about a cadence, and saying the CHANNEL does not
           // support the data type overstated it — Coupang 상품평 sat under this chip while the panel
@@ -189,6 +189,7 @@ function ScheduleRow({
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <select
+            aria-label={`${label} 수집 주기`}
             value={cadence}
             onChange={(e) => setCadence(Number(e.target.value))}
             disabled={rowBusy}

@@ -2,6 +2,8 @@ import { recoveredNote } from "../lib/connectorAlerts";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
+import { PageHead } from "../components/ui/PageHead";
+import { Btn } from "../components/ui/Btn";
 import { useApiData } from "../lib/useApiData";
 import { useOpenAlerts } from "../lib/openAlerts";
 import { api } from "../lib/apiClient";
@@ -130,16 +132,10 @@ export function AlertSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">연결 알림</h1>
-        <p className="mt-1 text-lg text-muted">
-          채널 연결·수집에서 발생한 알림입니다. 점검이 필요한 항목은 채널에서 재연결하거나 테스트할
-          수 있습니다.
-        </p>
-        <p className="mt-1 text-sm text-muted">
-          확인 처리는 알림을 봤다는 표시이며, 연결 문제 해결을 의미하지 않습니다.
-        </p>
-      </div>
+      <PageHead
+        title="연결 알림"
+        description="확인 처리는 알림을 봤다는 표시이며, 연결 문제 해결을 의미하지 않습니다."
+      />
 
       {ackError ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{ackError}</div>
@@ -154,7 +150,8 @@ export function AlertSettings() {
       ) : list.length === 0 ? (
         <EmptyState message="현재 확인할 연결 알림이 없습니다." />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        // One list, open first — the rows of a log, not a wall of posters (Phase 4).
+        <ul aria-label="연결 알림" className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
           {list.map((alert) => (
             <AlertCard
               key={alert.id}
@@ -163,7 +160,7 @@ export function AlertSettings() {
               onAcknowledge={() => acknowledge(alert)}
             />
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
@@ -188,48 +185,32 @@ function AlertCard({
   const recovered = recoveredNote(alert);
 
   return (
-    <div className={`card flex flex-col gap-3 p-5 ${acknowledged || recovered ? "opacity-70" : ""}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <span
-            className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${TONE_CLS[meta.tone]}`}
-          >
+    <li className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <div className="min-w-0 space-y-1">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-semibold ${TONE_CLS[meta.tone]}`}>
             {meta.label}
           </span>
-          {acknowledged ? (
-            <span className="ml-2 inline-flex items-center rounded-full bg-ink/5 px-3 py-1 text-sm font-semibold text-muted">
-              확인됨 · {relativeTime(alert.acknowledgedAt!)}
-            </span>
-          ) : null}
-          {recovered ? (
-            <span className="ml-2 inline-flex items-center rounded-full bg-ink/5 px-3 py-1 text-sm font-semibold text-muted">
-              해결됨
-            </span>
-          ) : null}
-          <p className="mt-2 text-lg font-bold text-ink">{where}</p>
-        </div>
-        <span className="shrink-0 text-sm text-muted">{relativeTime(alert.createdAt)}</span>
+          {acknowledged ? <span className="text-muted">확인됨 · {relativeTime(alert.acknowledgedAt!)}</span> : null}
+          {recovered ? <span className="text-muted">해결됨</span> : null}
+          <span className="text-muted">{relativeTime(alert.createdAt)}</span>
+        </p>
+        <p className="break-keep font-semibold text-ink">{where}</p>
+        <p className="break-keep text-sm text-ink">{alert.message}</p>
+        {/* Once collection has worked again, telling the seller to go fix the connection is asking for
+            work that is already done — so the recovery replaces the instruction rather than joining it. */}
+        <p className="break-keep text-sm text-muted">{recovered ?? meta.action}</p>
       </div>
-
-      <p className="text-base text-ink">{alert.message}</p>
-      {/* Once collection has worked again, telling the seller to go fix the connection is asking for
-          work that is already done — so the recovery replaces the instruction rather than joining it. */}
-      <p className="text-sm text-muted">{recovered ?? meta.action}</p>
-
-      <div className="mt-auto flex justify-end gap-2">
+      <div className="flex shrink-0 gap-2">
         {!acknowledged ? (
-          <button type="button" disabled={busy} onClick={onAcknowledge} className="btn-ghost">
+          <Btn variant="ghost" size="sm" disabled={busy} onClick={onAcknowledge}>
             {busy ? "확인 중…" : "확인"}
-          </button>
+          </Btn>
         ) : null}
-        <button
-          type="button"
-          onClick={() => navigate(`/settings/channels/${alert.sellerAccountId}`)}
-          className="btn-ghost"
-        >
+        <Btn variant="outline" size="sm" onClick={() => navigate(`/connect/channels/${alert.sellerAccountId}`)}>
           재연결·테스트
-        </button>
+        </Btn>
       </div>
-    </div>
+    </li>
   );
 }

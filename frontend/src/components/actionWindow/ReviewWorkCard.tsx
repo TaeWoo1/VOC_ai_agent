@@ -27,9 +27,9 @@ export function ReviewWorkCard({
   const taskTitle = resolveCopy("actionWindow.review.run");
   return (
     <section aria-label={SECTION_TITLE.reviewWork} className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.reviewWork}</h2>
+      <h2 className="text-base font-semibold text-ink">{SECTION_TITLE.reviewWork}</h2>
 
-      <div className="rounded-2xl bg-surface p-5 shadow-card">
+      <div className="rounded-2xl border border-line bg-surface p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="min-w-0 break-keep text-lg font-semibold text-ink">{taskTitle}</h3>
           <span className="shrink-0 rounded-full bg-canvas px-3 py-1 text-sm text-muted">
@@ -39,7 +39,7 @@ export function ReviewWorkCard({
 
         {/* Current step — the only actionable step at this state. Later steps and results are
             revealed by <ActiveRunCard> once a run exists; nothing is previewed before then. */}
-        <div className="mt-3 rounded-xl border border-line bg-canvas p-4">
+        <div className="mt-3">
           <p className="text-sm font-medium text-muted">{REVIEW_WORK_COPY.currentStepLabel}</p>
           <p className="mt-1 break-keep text-ink">{REVIEW_WORK_COPY.currentStepText}</p>
         </div>
@@ -48,7 +48,7 @@ export function ReviewWorkCard({
           <button
             type="button"
             onClick={onStart}
-            className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+            className="mt-4 hidden rounded-xl bg-brand-700 px-5 py-3 font-medium text-white transition hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
           >
             {REVIEW_WORK_COPY.actionLabel}
           </button>

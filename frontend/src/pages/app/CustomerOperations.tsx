@@ -81,7 +81,16 @@ export function CustomerOperations({ now }: { now?: Date }) {
 
   return (
     <div className="space-y-6">
-      <PageHead title={RESPONSIBILITY_NAME} />
+      <PageHead
+        title={RESPONSIBILITY_NAME}
+        meta={
+          view && view.available ? (
+            <Status variant="word" tone={statusWord(view.status).tone}>
+              {statusWord(view.status).label}
+            </Status>
+          ) : undefined
+        }
+      />
       {view === undefined ? <p className="text-sm text-muted">불러오는 중입니다.</p> : null}
       {view === null ? (
         <p className="text-sm text-bad" role="alert">
@@ -94,12 +103,7 @@ export function CustomerOperations({ now }: { now?: Date }) {
       {view && view.available ? (
         <>
           <section aria-label="맡긴 일" className="space-y-5 rounded-2xl border border-line bg-surface p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-bold text-ink">{RESPONSIBILITY_NAME}</h2>
-              <Status variant="word" tone={statusWord(view.status).tone}>
-                {statusWord(view.status).label}
-              </Status>
-            </div>
+            {/* The page title already names this; the card no longer says it a second time (Phase 4). */}
             <p className="break-keep leading-relaxed text-ink">{RESPONSIBILITY_DESCRIPTION}</p>
 
             <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-3">
@@ -269,7 +273,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 function Duty({ title, items }: { title: string; items: string[] }) {
   return (
     <div>
-      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <h2 className="text-sm font-semibold text-ink">{title}</h2>
       <ul className="mt-1 space-y-0.5">
         {items.map((item) => (
           <li key={item} className="break-keep text-sm text-muted">

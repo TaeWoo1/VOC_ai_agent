@@ -116,7 +116,7 @@ export function ReviewImportPage() {
   }
   if (visibleAccounts.length === 0) {
     return (
-      <p className="rounded-2xl bg-surface p-5 text-base text-muted shadow-card">
+      <p className="rounded-2xl bg-surface p-5 text-base text-muted border border-line">
         먼저 판매 채널 계정을 연결해 주세요.
       </p>
     );
@@ -131,7 +131,7 @@ export function ReviewImportPage() {
             setPlanId(null);
             setPlansKey((k) => k + 1);
           }}
-          className="self-start text-sm text-brand underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="self-start text-sm text-brand-700 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           ← 가져오기 목록으로
         </button>
@@ -197,7 +197,7 @@ export function ReviewImportPage() {
 
       {/* Diagnostics, not the workflow. Collapsed by default: this is where an operator inspects segments,
           attempt history, split/merge, and the manual file fallback when a guided run cannot happen. */}
-      <details className="rounded-2xl bg-surface p-5 shadow-card">
+      <details className="rounded-2xl bg-surface p-5 border border-line">
         <summary className="cursor-pointer text-base font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
           자세히 보기 (구간·이력·직접 가져오기)
         </summary>

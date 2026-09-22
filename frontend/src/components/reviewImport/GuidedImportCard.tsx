@@ -323,7 +323,7 @@ export function GuidedImportCard({
   startRef.current = start;
 
   return (
-    <section aria-label="과거 리뷰 연동" className="flex flex-col gap-4 rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label="과거 리뷰 연동" className="flex flex-col gap-4 rounded-2xl bg-surface p-5 border border-line">
       <header className="flex flex-col gap-1">
         <h3 className="text-base font-semibold text-ink">과거 리뷰 연동</h3>
         {/* The channel is named even when the account has an alias: every step after this is specific to one
@@ -336,7 +336,7 @@ export function GuidedImportCard({
       </header>
 
       {hasPlan ? (
-        <dl className="flex flex-col gap-2 rounded-xl bg-canvas px-4 py-3">
+        <dl className="flex flex-col gap-2 border-t border-line pt-3">
           <div className="flex items-baseline justify-between gap-3">
             <dt className="text-sm text-muted">진행</dt>
             <dd className="text-base font-semibold text-ink" data-testid="import-progress">
@@ -365,12 +365,12 @@ export function GuidedImportCard({
       ) : null}
 
       {finished && !running ? (
-        <div className="flex flex-col gap-3 rounded-xl bg-good/5 px-4 py-3" data-testid="completion-summary">
+        <div className="flex flex-col gap-3 border-t border-line pt-3" data-testid="completion-summary">
           <p className="text-sm text-ink break-keep">{completionSummaryText(progress)}</p>
           {summary ? (
             <>
               {/* Honest scope: these are the account's running totals, not this one run's numbers. */}
-              <p className="text-xs text-muted">{LOOP_COLLECTED_CAPTION}</p>
+              <p className="text-sm text-muted">{LOOP_COLLECTED_CAPTION}</p>
               <dl className="flex flex-col gap-1" data-testid="loop-collected">
                 {loopCollectedLines(summary).map((line) => (
                   <div key={line.label} className="flex items-baseline justify-between gap-3">
@@ -396,7 +396,7 @@ export function GuidedImportCard({
                   onClick={() => void extendForward()}
                   disabled={extendBusy}
                   data-testid="loop-extend-cta"
-                  className="self-start rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  className="self-start rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand-700 transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                   {extendBusy ? "확인하는 중…" : "새로 들어온 기간 가져오기"}
                 </button>
@@ -536,7 +536,7 @@ export function GuidedImportCard({
             onClick={() => void start()}
             disabled={busy || !availability.canGuide}
             data-testid="guided-import-cta"
-            className="rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            className="rounded-xl bg-brand-700 px-4 py-3 text-base font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             {busy ? "여는 중…" : primaryActionLabel(hasPlan)}
           </button>
@@ -546,7 +546,7 @@ export function GuidedImportCard({
               type="button"
               onClick={onUseFileFallback}
               data-testid="file-fallback-link"
-              className="self-start text-sm text-brand underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              className="self-start text-sm text-brand-700 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               파일로 가져오기
             </button>

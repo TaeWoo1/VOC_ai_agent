@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../../components/ui/PageHead";
 import { Panel } from "../../components/ui/Panel";
-import { Btn, BtnLink } from "../../components/ui/Btn";
+import { Link } from "react-router-dom";
+import { Btn } from "../../components/ui/Btn";
+import { Disclosure } from "../../components/ui/Disclosure";
+import { KNOWLEDGE_NOUN } from "../../lib/knowledgeWords";
 import { api } from "../../lib/apiClient";
 import { backendMessage } from "../../components/connect/channelShared";
 import type { SellerProfileView } from "../../lib/types";
@@ -80,15 +83,17 @@ export function CompanyProfile() {
           <p className="text-muted">불러오는 중…</p>
         </Panel>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <Panel
-            title="회사 소개"
-            description={loaded.configured ? "저장된 소개입니다." : "아직 적지 않으셨습니다. 비워 두어도 답변은 지금처럼 작성됩니다."}
-          >
+        // One column (Phase 4): the form, and under it — folded — what it is for. The explanation stood as a
+        // second card beside the form, as tall as it, on a screen whose only job is one paragraph.
+        <div className="max-w-[720px] space-y-4">
+          <section aria-label="회사 소개 작성" className="rounded-2xl border border-line bg-surface p-5">
             <dl className="mb-4">
               <dt className="text-sm text-muted">회사 이름</dt>
               <dd className="mt-0.5 font-medium text-ink">{loaded.name ?? "내 스토어"}</dd>
             </dl>
+            <p className="mb-3 break-keep text-sm text-muted">
+              {loaded.configured ? "저장된 소개입니다." : "아직 적지 않으셨습니다. 비워 두어도 답변은 지금처럼 작성됩니다."}
+            </p>
             <label className="block">
               <span className="text-sm font-medium text-ink">회사 소개</span>
               <textarea
@@ -113,19 +118,23 @@ export function CompanyProfile() {
                 {saving ? "저장하는 중…" : "저장"}
               </Btn>
             </div>
-          </Panel>
+          </section>
 
-          <Panel title="이 소개는 어디에 쓰이나요">
-            <ul className="space-y-2 break-keep text-sm text-ink">
+          <Disclosure label="이 소개는 어디에 쓰이나요">
+            <ul className="mt-2 space-y-2 break-keep text-sm text-ink">
               <li>문의 답변 초안을 쓸 때, 말투와 관점을 고르는 참고 자료로 씁니다. 예를 들어 기업 고객 비중이 높다고 적어 두면 그에 맞는 어조로 씁니다.</li>
               <li>AI 담당자에게 「우리 회사는 어떤 곳으로 등록돼 있어?」라고 물으면 이 글을 그대로 읽어 줍니다.</li>
               <li>
                 배송 기간·환불·교환·A/S·상품 규격 같은 <strong>사실의 근거로는 쓰이지 않습니다.</strong> 그런
-                내용은 <BtnLink to="/settings/policies" size="sm" variant="ghost">운영 정책 / 답변 기준</BtnLink>에 등록해 주세요.
+                내용은{" "}
+                <Link to="/settings/policies" className="font-semibold text-brand-700 underline underline-offset-4">
+                  {KNOWLEDGE_NOUN.operatingRules}
+                </Link>
+                에 등록해 주세요.
               </li>
               <li>AI가 이 글을 대신 쓰거나 고치지 않습니다.</li>
             </ul>
-          </Panel>
+          </Disclosure>
         </div>
       )}
     </>

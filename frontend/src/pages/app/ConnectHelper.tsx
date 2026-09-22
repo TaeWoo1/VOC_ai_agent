@@ -85,7 +85,7 @@ export function ConnectHelper() {
       </Disclosure>
 
       <p className="text-sm text-muted">
-        연결 상태는 <Link to="/connect" className="text-brand-700 underline-offset-2 hover:underline">채널 연결</Link>에서 확인할 수 있습니다.
+        연결 상태는 <Link to="/connect" className="font-semibold text-brand-700 underline underline-offset-2">채널 연결</Link>에서 확인할 수 있습니다.
       </p>
     </div>
   );

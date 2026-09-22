@@ -82,7 +82,7 @@ export function ReviewImportPlanDetail({
 
   return (
     <section aria-label="과거 리뷰 가져오기" className="flex flex-col gap-4">
-      <header className="rounded-2xl bg-surface p-5 shadow-card">
+      <header className="rounded-2xl bg-surface p-5 border border-line">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-ink">
             과거 리뷰 가져오기 · {plan.requestedStart} ~ {plan.requestedEnd}
@@ -94,7 +94,7 @@ export function ReviewImportPlanDetail({
         {remaining > 0 ? (
           <p
             data-testid="remaining-banner"
-            className="mt-3 rounded-xl bg-brand/5 px-4 py-2 text-sm text-brand break-keep"
+            className="mt-3 rounded-xl bg-brand/5 px-4 py-2 text-sm text-brand-700 break-keep"
           >
             남은 구간 {remaining}개 — 중단된 지점부터 이어서 가져올 수 있어요.
           </p>
@@ -108,14 +108,14 @@ export function ReviewImportPlanDetail({
       <SummaryCard title="커버 현황" lines={coverageSummary(coverage)} />
       {health.data ? <SummaryCard title="가져오기 상태" lines={healthSummary(health.data)} /> : null}
 
-      <div className="rounded-2xl bg-surface p-5 shadow-card">
+      <div className="rounded-2xl bg-surface p-5 border border-line">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-semibold text-ink">구간</h3>
           {selected.size >= 2 ? (
             <button
               type="button"
               onClick={merge}
-              className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+              className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
             >
               선택한 {selected.size}개 합치기
             </button>
@@ -155,7 +155,7 @@ function SummaryCard({
   lines: { label: string; value: string }[];
 }) {
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
+    <div className="rounded-2xl bg-surface p-5 border border-line">
       <h3 className="mb-3 text-base font-semibold text-ink">{title}</h3>
       <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
         {lines.map((l) => (

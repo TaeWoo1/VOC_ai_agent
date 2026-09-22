@@ -43,6 +43,11 @@ export interface HomeWorkRow {
    * `to`: parsing our own URLs back into ids is the kind of second source that drifts.
    */
   kind: "CASE" | "REVIEW" | "INQUIRY";
+  /**
+   * What the row is ABOUT — a case's stored `subjectKind`, or the item itself. Carried for the 확인할 일 filter
+   * (UI/UX v2 Phase 4), which must not parse `owner` back into a noun.
+   */
+  subject: "INQUIRY" | "REVIEW";
   /** The id the pane opens: the case, the review, or the inquiry. */
   subjectId: string;
   /** For an inquiry row, the work item its response panel is addressed by. */
@@ -90,6 +95,7 @@ export function caseWorkRow(row: CustomerOperationsDecisionRow): HomeWorkRow {
     caseId: row.caseId,
     verb: reason === REASON.info ? "정보 입력" : "검토",
     kind: "CASE",
+    subject: row.subjectKind,
     subjectId: row.caseId,
     workItemId: null,
   };
@@ -133,6 +139,7 @@ export function mergeHomeWork(
       caseId: null,
       verb: "검토",
       kind: "REVIEW",
+      subject: "REVIEW",
       subjectId: row.reviewId,
       workItemId: null,
     });
@@ -162,6 +169,7 @@ export function mergeHomeWork(
         caseId: null,
         verb: "검토",
         kind: "REVIEW",
+        subject: "REVIEW",
         subjectId: item.reviewId,
         workItemId: null,
       });
@@ -183,6 +191,7 @@ export function mergeHomeWork(
       caseId: null,
       verb: "검토",
       kind: "INQUIRY",
+      subject: "INQUIRY",
       subjectId: row.inquiryId,
       workItemId: row.workItemId,
     });
@@ -223,4 +232,27 @@ export function reasonCounts(rows: HomeWorkRow[]): string[] {
     .map((reason) => [reason.tag, rows.filter((r) => r.reason.tag === reason.tag).length] as const)
     .filter(([, n]) => n > 0)
     .map(([tag, n]) => `${tag} ${n}`);
+}
+
+/**
+ * <b>확인할 일's filters</b> (UI/UX v2 Phase 4) — views of the one list, never a second list. Each is a predicate over
+ * facts the row already carries (what it is about, and the reason tag it was given); none of them ranks, and the
+ * order inside a filter is the list's own.
+ */
+export const WORK_FILTERS = [
+  { key: "all", label: "전체", test: () => true },
+  { key: "inquiry", label: "문의 답변", test: (r: HomeWorkRow) => r.subject === "INQUIRY" },
+  {
+    key: "review",
+    label: "리뷰 확인",
+    test: (r: HomeWorkRow) => r.subject === "REVIEW" && r.reason !== REASON.approve && r.reason !== REASON.draft,
+  },
+  { key: "approve", label: "승인 대기", test: (r: HomeWorkRow) => r.reason === REASON.approve },
+  { key: "draft", label: "초안 필요", test: (r: HomeWorkRow) => r.reason === REASON.draft },
+] as const;
+
+export type WorkFilterKey = (typeof WORK_FILTERS)[number]["key"];
+
+export function workFilterOf(value: string | null): WorkFilterKey {
+  return WORK_FILTERS.find((f) => f.key === value)?.key ?? "all";
 }
