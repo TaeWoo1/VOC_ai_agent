@@ -165,3 +165,64 @@ run `ae8d0d3c` RESUME · window 02:00–04:00 · 02:08:15–02:08:32 · `SUCCESS
    않았으므로 문단은 그 앞 단계에서 사라졌다. 원인 미확정 — 후속 trace에서 닫는다.
 2. **근거 없는 gap 낱말** — knowledge gap의 `missingSubject`가 고객이 쓰지 않은 「드립니다」였다. 이 값은 판매자에게
    「무엇이 부족한가」로 보이는 문장의 재료다.
+
+### 2-4. 결함 1 종결 — 왜 근거가 사라졌는가 (승인 `apr-retr-diag-1d83874393b6129d`, 2026-09-23)
+
+모델 없이 재현 가능한 단계를 먼저 전부 확인했다. **candidate 생성 · topic 필터 · remedy 필터 · lexical ranking은
+두 질문 모두 통과**했고(lexical 경로는 이번 질문에도 `FOUND`, coverage 1.0), eligibility는 호출된 적이 없다.
+남은 미지수는 질문 벡터 하나뿐이었고 그것만 bounded diagnostic으로 샀다 — **벤더 8회**(intent 2 + QUESTION
+embedding 6), PASSAGE embedding 0(문단 벡터 36행 전부 캐시 적중), marketplace 0 · WRITE 0 · DB write 0 · run 0.
+
+측정 (`text-embedding-3-large`/1024, 문서 2건 · 비교 단위 5개):
+
+| 질문 | best | runner-up = 배경 평균 | margin | 판정 |
+|---|---|---|---|---|
+| Stage 2 실제 문의 | 0.6639 (교환·반품 기준) | 0.5670 (배송교환정책) | **0.0969** | 부재 |
+| 기존 「성공」 교환 질문 | 0.6109 (배송교환정책) | 0.6064 (교환·반품 기준) | **0.0045** | 부재 |
+
+**두 질문 모두 부재로 판정된다.** 「기존 성공 질문」이 성공이었던 것은 semantic lane이 꺼진 replay(=lexical)
+에서였고, semantic이 켜진 production에서는 그 질문도 근거를 받지 못한다. 즉 이것은 이번 문의의 특성이 아니라
+이 코퍼스에 대한 일반 결함이다.
+
+**사라진 지점은 `KnowledgeRetriever`의 semantic 부재 게이트이고, 원인은 corroboration이다.** 이 org는 같은
+교환 기한을 두 문서에 적어 두었다(국문 정책 1문장, 영문 배송 노트의 "Exchanges are accepted within 7 days of
+delivery when the product is unused."). 게이트는 「best가 나머지로부터 얼마나 떨어져 있나」를 묻는데, 여기서
+**나머지가 곧 두 번째 답**이므로 떨어질 수 없다 — 판매자의 문서가 서로 일치할수록 corpus가 침묵한다고 판정된다.
+두 문장의 상호 유사도는 **0.750**이다.
+
+부수 확인(가설 2): 검색용 질문 텍스트에 제목 「문의 드립니다」와 편집기가 남긴 `<meta charset="utf-8">`가 섞여
+있었고 실제로 점수를 깎았다 — 태그 리터럴 제거만으로 margin 0.0969 → **0.1228**, 제목까지 빼면 0.1414. 다만
+production 조합(원문+재진술)에서는 0.0640이라 **이 정리만으로는 닫히지 않는다**. 두 수정이 모두 필요하고,
+결정적인 쪽은 corroboration이다.
+
+### 2-5. 수정 (generic, 교환/반품 전용 hardcode 0)
+
+1. **동의는 배경이 아니다** — `KnowledgeSemantics.agreementOf(a, b)`: 두 문단이 **이 질문에 답한 문장끼리**
+   얼마나 가까운가. 배경 평균에서 best와 동의하는 문단을 빼고 계산하고, 남는 것이 없으면 「한 문서짜리 corpus」와
+   같은 약한 규칙(`SOLO_MIN_SEMANTIC_COSINE`)으로 떨어진다. 문단↔문단 비교는 이미 메모리에 있는 벡터라 **추가 벤더
+   호출 0**. 측정하지 못하는 lane은 `OptionalDouble.empty()`를 받아 **이전 게이트 그대로**다(기본 구현).
+   문서 전체가 아니라 *답한 문장*을 비교하는 것이 topic 검사로 변질되지 않게 막는다 — 배송을 말하는 두 문서가 배송에
+   대해 다른 말을 하면 여기서 갈린다.
+2. **임계값은 골라진 것이 아니라 측정된 것** — `MIN_SEMANTIC_AGREEMENT = 0.70`. benchmark에서 **둘 다 질문에
+   답하지 않는** 문단쌍 1,235개(=이 게이트가 지키려는 배경)의 분포는 median 0.254 · p95 0.448 · p99 0.514 ·
+   **max 0.611**이고, 실제 corroboration 쌍은 **0.750**이다. 0.70은 관측된 모든 배경쌍 위, corroboration 아래다.
+   sweep: 0.50~0.90 구간에서 benchmark 세 수치가 **전혀 움직이지 않고** 첫 열화는 0.45(부재 정확도 0.952)다.
+3. **retrieval 질문 텍스트의 markup 리터럴 정리** — `RetrievalQuery.clean()`에서 여는 괄호 바로 뒤에 요소 이름이
+   오는 좁은 형태만 제거한다. **표시 경로의 `MarkupText`는 무변경**(디코딩된 태그를 «보이는 글자»로 남기는 것은
+   의도된 계약이다). 「두께가 2 < 3 인가요?」 같은 문장은 그대로 남는 것을 테스트가 고정한다.
+
+**benchmark는 이 결함을 볼 수 없었다** — 114 질문 중 두 문서가 함께 답하는 질문이 **0건**이다. 그래서 임계값을
+「점수를 올리는 값」이 아니라 「배경 분포 위」로 정했고, `AgreementBackgroundTest`가 그 분포와 임계값의 관계를
+영구히 고정한다(벤더 호출 0).
+
+### 2-6. Regression
+
+| 대상 | 결과 |
+|---|---|
+| 114질문 benchmark (semantic, 벤더 0) | recall **92.5%** · top1-wrong **0** · any-wrong **0** · 부재 정확도 **100%** — shipped와 동일 |
+| lexical baseline | 43.0% — 불변 |
+| 기존 성공 교환 질문 / 이번 실제 질문 / knowledge 없는 질문 | `LiveExchangeQuestionReplayTest` 통과 |
+| 실제 Demo Org 재측정 (같은 8회 벤더 호출 안에서) | 두 질문 모두 근거 회복 — 이번 질문 `[교환·반품 기준 0.6667, 배송교환정책 0.6027]`, 기존 질문 `[배송교환정책 0.6109, 교환·반품 기준 0.6064]` |
+| backend 전체 | **4,800 tests · 실패 0** |
+
+marketplace 호출 **0** · WRITE **0** · DB write **0** · 마이그레이션 **0** · Stage 2 재실행 **없음**.

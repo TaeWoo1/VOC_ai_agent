@@ -233,8 +233,26 @@ public final class RetrievalQuery {
         out.add(new Candidate(text, origin));
     }
 
+    /**
+     * A markup element written out as visible characters — {@code <meta charset="utf-8">}, a stray
+     * {@code </div>} — with no space inside the angle brackets before the first one.
+     *
+     * <p><b>Not an HTML stripper.</b> {@code MarkupText} already removed this inquiry's real tags and
+     * then decoded its entities, which is what turns {@code &lt;meta&gt;} into characters the customer
+     * appears to have typed. That decoding is deliberate and stays: on a screen those characters are
+     * the honest rendering of what the channel sent, and never an element. Here they are something
+     * else — words in a question, counted by the absence ratio and embedded with it — and nobody
+     * asked about them. The shape is kept tight (no whitespace before the element name, a bounded
+     * length) so a customer writing 「2 < 3 인가요」 or 「a<b」 keeps their sentence.
+     */
+    private static final java.util.regex.Pattern MARKUP_LITERAL =
+            java.util.regex.Pattern.compile("</?[A-Za-z][A-Za-z0-9-]{0,20}(\\s[^<>]{0,200})?/?>");
+
     private static String clean(String text) {
-        return text == null ? "" : text.replaceAll("\\s+", " ").strip();
+        if (text == null) {
+            return "";
+        }
+        return MARKUP_LITERAL.matcher(text).replaceAll(" ").replaceAll("\\s+", " ").strip();
     }
 
     private static String bound(String text, int max) {

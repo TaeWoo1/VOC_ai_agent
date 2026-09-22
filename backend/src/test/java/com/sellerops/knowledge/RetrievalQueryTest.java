@@ -93,4 +93,26 @@ class RetrievalQueryTest {
     void blankYieldsNothing() {
         assertThat(RetrievalQuery.of(null, null, "  ").candidates()).isEmpty();
     }
+
+    @Test
+    @DisplayName("an element written out as visible characters is not something the customer asked about")
+    void markupLiteralsLeaveTheQuestion() {
+        // Live (2026-09-23): a Cafe24 post whose body had been escaped twice arrived, correctly, as
+        // the characters <meta charset="utf-8"> in front of the question. On a screen that is the
+        // honest rendering of what the channel sent; in a query it is words nobody asked about,
+        // counted by the absence ratio and embedded with the sentence.
+        RetrievalQuery q = RetrievalQuery.ofCustomer("문의 드립니다",
+                "<meta charset=\"utf-8\">교환이나 반품은 언제까지 가능한가요?");
+        assertThat(q.full()).isEqualTo("문의 드립니다 교환이나 반품은 언제까지 가능한가요?");
+        assertThat(q.candidates()).noneMatch(c -> c.text().contains("meta"));
+    }
+
+    @Test
+    @DisplayName("a customer comparing two numbers keeps their sentence")
+    void arithmeticIsNotMarkup() {
+        // The rule is a tight shape — an element name straight after the bracket — precisely so a
+        // question is never silently rewritten into a different question.
+        assertThat(RetrievalQuery.ofText("두께가 2 < 3 인가요?").full()).isEqualTo("두께가 2 < 3 인가요?");
+        assertThat(RetrievalQuery.ofText("<3 처럼 보이는 기호").full()).isEqualTo("<3 처럼 보이는 기호");
+    }
 }

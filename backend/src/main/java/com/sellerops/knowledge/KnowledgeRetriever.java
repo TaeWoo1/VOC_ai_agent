@@ -95,6 +95,34 @@ public final class KnowledgeRetriever {
      */
     public static final double SOLO_MIN_SEMANTIC_COSINE = 0.25;
 
+    /**
+     * How close two passages' answering sentences must be before the second one stops counting as
+     * BACKGROUND for the first.
+     *
+     * <p><b>The corroboration defect, and why the margin alone could not see it.</b> The background
+     * is meant to be what this corpus scores on this question by coincidence. A passage that states
+     * the same fact as the best passage is not coincidence — it is a second answer, and averaging it
+     * in measures the best answer against another answer. A seller who writes one rule in two places
+     * is then told their corpus is silent about it, while a seller whose documents contradict each
+     * other is not. Measured on the reference deployment (2026-09-23): one exchange deadline written
+     * in a Korean policy page and in an English shipping note scored 0.664 and 0.567 for the
+     * customer's question — a margin of 0.097 against a floor of 0.10 — and the two sentences agree
+     * with each other at 0.750.
+     *
+     * <p><b>The value is measured, not picked.</b> Over the benchmark's 1,235 passage pairs where
+     * NEITHER passage answers the query — the background this gate is built to keep — agreement runs
+     * median 0.254, p99 0.514 and <b>max 0.611</b>; the live corroborating pair sits at 0.750. Any
+     * value inside that gap separates them, and 0.70 is above every background pair observed and
+     * below the corroboration. The sweep confirms it: from 0.50 to 0.90 the benchmark's recall,
+     * wrong-source and no-evidence numbers do not move at all, and the first degradation is at 0.45.
+     *
+     * <p><b>The benchmark contains no corroboration case at all</b> — not one of its 114 questions is
+     * answered by two documents — which is exactly why 114 questions and a 44-question holdout could
+     * not see this defect. That absence is the reason the threshold is justified by the background
+     * distribution rather than by a score it moves.
+     */
+    public static final double MIN_SEMANTIC_AGREEMENT = 0.70;
+
     /** Passages within this share of the best one are offered beside it. */
     public static final double SEMANTIC_BAND = 0.90;
 
@@ -179,7 +207,8 @@ public final class KnowledgeRetriever {
         if (semantics == null) {
             return rank(query, candidates, discountedSubject);
         }
-        List<Hit<T>> scored = new ArrayList<>(candidates.size());
+        List<Candidate<T>> scored = new ArrayList<>(candidates.size());
+        List<Double> similarities = new ArrayList<>(candidates.size());
         for (Candidate<T> candidate : candidates) {
             OptionalDouble similarity = candidate.quotable() == null
                     ? OptionalDouble.empty() : semantics.similarityOf(candidate.quotable());
@@ -188,25 +217,51 @@ public final class KnowledgeRetriever {
                 // is silent, so the whole search reverts to the scorer that has read all of them.
                 return rank(query, candidates, discountedSubject);
             }
-            scored.add(new Hit<>(candidate.ref(), similarity.getAsDouble(), 0));
+            scored.add(candidate);
+            similarities.add(similarity.getAsDouble());
         }
         if (scored.isEmpty()) {
             return List.of();
         }
-        scored.sort((a, b) -> Double.compare(b.coverage(), a.coverage()));
-        double best = scored.get(0).coverage();
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < scored.size(); i++) {
+            order.add(i);
+        }
+        order.sort((a, b) -> Double.compare(similarities.get(b), similarities.get(a)));
+        int top = order.get(0);
+        double best = similarities.get(top);
+        // The background: the rest of the corpus MINUS whatever answered this question the same way
+        // the best passage did. A corroborating document is a second answer, not the noise floor.
+        double sum = 0;
+        int counted = 0;
+        for (int i = 1; i < order.size(); i++) {
+            int index = order.get(i);
+            OptionalDouble agreement =
+                    semantics.agreementOf(scored.get(top).quotable(), scored.get(index).quotable());
+            if (agreement.isPresent() && agreement.getAsDouble() >= MIN_SEMANTIC_AGREEMENT) {
+                continue;
+            }
+            sum += similarities.get(index);
+            counted++;
+        }
         boolean admitted;
-        if (scored.size() < 2) {
+        if (counted == 0) {
+            // Nothing left to stand out from — either a one-passage corpus, or a corpus that agrees
+            // with itself about this question. Both are the SOLO case, and both are answerable.
             admitted = best >= SOLO_MIN_SEMANTIC_COSINE;
         } else {
-            double rest = scored.stream().skip(1).mapToDouble(Hit::coverage).average().orElse(0);
+            double rest = sum / counted;
             admitted = best >= MIN_SEMANTIC_COSINE && best - rest >= MIN_SEMANTIC_MARGIN;
         }
         if (!admitted) {
             return List.of();
         }
+        List<Hit<T>> ranked = new ArrayList<>(order.size());
+        for (int index : order) {
+            ranked.add(new Hit<>(scored.get(index).ref(), similarities.get(index), 0));
+        }
         List<Hit<T>> hits = new ArrayList<>();
-        for (Hit<T> hit : scored) {
+        for (Hit<T> hit : ranked) {
             if (hit.coverage() < best * SEMANTIC_BAND) {
                 break;
             }

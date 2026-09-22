@@ -102,32 +102,56 @@ public final class RetrievalArm {
                     candidates.add(new KnowledgeRetriever.Candidate<>(passage, passage.searchable(),
                             quotable));
                 }
-                KnowledgeSemantics semantics = quotable -> {
-                    Passage passage = byQuotable.get(quotable);
-                    List<String> units = new ArrayList<>(KnowledgeText.comparableUnits(quotable));
-                    if (passage != null) {
-                        String key = BenchmarkArms.keyOf(passage);
-                        if (passageRep == PassageRep.PLUS_SUMMARY || passageRep == PassageRep.PLUS_BOTH) {
-                            String summary = arms.summaryOf(key);
-                            if (summary != null) {
-                                units.add(summary);
+                Map<String, String> answeredWith = new LinkedHashMap<>();
+                KnowledgeSemantics semantics = new KnowledgeSemantics() {
+                    @Override
+                    public OptionalDouble similarityOf(String quotable) {
+                        Passage passage = byQuotable.get(quotable);
+                        List<String> units = new ArrayList<>(KnowledgeText.comparableUnits(quotable));
+                        if (passage != null) {
+                            String key = BenchmarkArms.keyOf(passage);
+                            if (passageRep == PassageRep.PLUS_SUMMARY
+                                    || passageRep == PassageRep.PLUS_BOTH) {
+                                String summary = arms.summaryOf(key);
+                                if (summary != null) {
+                                    units.add(summary);
+                                }
+                            }
+                            if (passageRep == PassageRep.PLUS_SYNTHETIC
+                                    || passageRep == PassageRep.PLUS_BOTH) {
+                                units.addAll(arms.syntheticOf(key));
                             }
                         }
-                        if (passageRep == PassageRep.PLUS_SYNTHETIC || passageRep == PassageRep.PLUS_BOTH) {
-                            units.addAll(arms.syntheticOf(key));
+                        double best = -1;
+                        String bestUnit = null;
+                        for (String unit : units) {
+                            if (!vectors.has(unit)) {
+                                continue;
+                            }
+                            float[] vector = vectors.of(unit);
+                            for (float[] question : askedVectors) {
+                                double score = BenchmarkVectors.cosine(question, vector);
+                                if (score > best) {
+                                    best = score;
+                                    bestUnit = unit;
+                                }
+                            }
                         }
+                        if (bestUnit != null) {
+                            answeredWith.put(quotable, bestUnit);
+                        }
+                        return best < 0 ? OptionalDouble.empty() : OptionalDouble.of(best);
                     }
-                    double best = -1;
-                    for (String unit : units) {
-                        if (!vectors.has(unit)) {
-                            continue;
+
+                    @Override
+                    public OptionalDouble agreementOf(String quotableA, String quotableB) {
+                        String a = answeredWith.get(quotableA);
+                        String b = answeredWith.get(quotableB);
+                        if (a == null || b == null || !vectors.has(a) || !vectors.has(b)) {
+                            return OptionalDouble.empty();
                         }
-                        float[] vector = vectors.of(unit);
-                        for (float[] question : askedVectors) {
-                            best = Math.max(best, BenchmarkVectors.cosine(question, vector));
-                        }
+                        return OptionalDouble.of(BenchmarkVectors.cosine(vectors.of(a), vectors.of(b)));
                     }
-                    return best < 0 ? OptionalDouble.empty() : OptionalDouble.of(best);
                 };
                 Set<KnowledgeTopic> topics = KnowledgeTopic.of(query.text());
                 List<Passage> found = new ArrayList<>();

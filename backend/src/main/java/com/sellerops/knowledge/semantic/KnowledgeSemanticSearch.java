@@ -129,18 +129,43 @@ public class KnowledgeSemanticSearch {
             }
         }
         Map<String, Double> best = new HashMap<>();
+        // Which sentence each passage answered WITH, so two passages can be compared on the claim
+        // each of them made rather than on the subject they happen to share. The retriever's
+        // background rule needs it — see KnowledgeSemantics#agreementOf.
+        Map<String, String> answeredWith = new HashMap<>();
         sentencesOf.forEach((quotable, sentences) -> {
             double top = -1;
+            String topSentence = null;
             for (String sentence : sentences) {
                 for (float[] phrasing : phrasings) {
-                    top = Math.max(top, Vectors.cosine(phrasing, vectors.get(sentence)));
+                    double score = Vectors.cosine(phrasing, vectors.get(sentence));
+                    if (score > top) {
+                        top = score;
+                        topSentence = sentence;
+                    }
                 }
             }
             best.put(quotable, top);
+            if (topSentence != null) {
+                answeredWith.put(quotable, topSentence);
+            }
         });
-        return quotable -> {
-            Double value = best.get(quotable);
-            return value == null ? OptionalDouble.empty() : OptionalDouble.of(value);
+        return new KnowledgeSemantics() {
+            @Override
+            public OptionalDouble similarityOf(String quotable) {
+                Double value = best.get(quotable);
+                return value == null ? OptionalDouble.empty() : OptionalDouble.of(value);
+            }
+
+            @Override
+            public OptionalDouble agreementOf(String quotableA, String quotableB) {
+                String a = answeredWith.get(quotableA);
+                String b = answeredWith.get(quotableB);
+                if (a == null || b == null) {
+                    return OptionalDouble.empty();
+                }
+                return OptionalDouble.of(Vectors.cosine(vectors.get(a), vectors.get(b)));
+            }
         };
     }
 }
