@@ -38,6 +38,15 @@ export interface HomeWorkRow {
   owner: string;
   caseId: string | null;
   verb: string;
+  /**
+   * What the row is, so the master-detail pane can draw it in place (UI/UX v2 Phase 1). Carried, never derived from
+   * `to`: parsing our own URLs back into ids is the kind of second source that drifts.
+   */
+  kind: "CASE" | "REVIEW" | "INQUIRY";
+  /** The id the pane opens: the case, the review, or the inquiry. */
+  subjectId: string;
+  /** For an inquiry row, the work item its response panel is addressed by. */
+  workItemId: string | null;
 }
 
 export interface HomeWork {
@@ -80,6 +89,9 @@ export function caseWorkRow(row: CustomerOperationsDecisionRow): HomeWorkRow {
     owner: row.to,
     caseId: row.caseId,
     verb: reason === REASON.info ? "정보 입력" : "검토",
+    kind: "CASE",
+    subjectId: row.caseId,
+    workItemId: null,
   };
 }
 
@@ -112,6 +124,9 @@ export function mergeHomeWork(
       owner,
       caseId: null,
       verb: "검토",
+      kind: "REVIEW",
+      subjectId: row.reviewId,
+      workItemId: null,
     });
   }
 
@@ -129,6 +144,9 @@ export function mergeHomeWork(
       owner,
       caseId: null,
       verb: "검토",
+      kind: "INQUIRY",
+      subjectId: row.inquiryId,
+      workItemId: row.workItemId,
     });
   }
   if (queue && queue.totalElements > queue.content.length) truncated = true;
@@ -156,7 +174,7 @@ export function mergeHomeWork(
  *
  * <p>A row with no timestamp is not backlog: absence of a date is not evidence of age.
  */
-function isOldBacklog(row: HomeWorkRow, now: Date): boolean {
+export function isOldBacklog(row: HomeWorkRow, now: Date): boolean {
   return row.since != null && isOldInquiryBacklog({ receivedAt: row.since }, now);
 }
 

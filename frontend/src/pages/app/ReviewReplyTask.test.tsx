@@ -252,7 +252,7 @@ describe("리뷰 처리 — the decision workspace", () => {
     renderTask();
 
     const step = await screen.findByLabelText("조치 선택");
-    await userEvent.click(within(step).getByRole("button", { name: /지켜보기/ }));
+    await userEvent.click(within(step).getByRole("button", { name: /두고 보기/ }));
     await waitFor(() => expect(recordReviewDecision).toHaveBeenCalled());
     expect(recordReviewDecision.mock.calls[0][0]).toBe(REVIEW);
   });
@@ -446,7 +446,7 @@ describe("리뷰 처리 — the decision workspace", () => {
     renderTask();
 
     const step = await screen.findByLabelText("조치 선택");
-    await userEvent.click(within(step).getByRole("button", { name: /지켜보기/ }));
+    await userEvent.click(within(step).getByRole("button", { name: /두고 보기/ }));
 
     await waitFor(() => expect(recordReviewDecision).toHaveBeenCalled());
     expect(recordReviewDecision.mock.calls[0][0]).toBe(REVIEW);
@@ -683,7 +683,7 @@ describe("리뷰 처리 — a review with no seller account", () => {
 
     expect(await screen.findByText("괜찮긴한데 자꾸 떨어져요")).toBeInTheDocument();
     const step = await screen.findByLabelText("조치 선택");
-    await userEvent.click(within(step).getByRole("button", { name: /지켜보기/ }));
+    await userEvent.click(within(step).getByRole("button", { name: /두고 보기/ }));
     await waitFor(() => expect(recordReviewDecision).toHaveBeenCalled());
     expect(recordReviewDecision.mock.calls[0][0]).toBe(REVIEW);
   });

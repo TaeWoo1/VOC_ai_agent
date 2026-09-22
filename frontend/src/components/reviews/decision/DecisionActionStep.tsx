@@ -38,6 +38,7 @@ export function DecisionActionStep({
   replyUnavailableReason,
   onDecided,
   onRecorded,
+  title = "무엇을 하시겠어요?",
 }: {
   reviewId: string;
   /** The decision that stands, as the last read saw it. */
@@ -53,6 +54,8 @@ export function DecisionActionStep({
   onDecided: (next: TriageDisposition) => void;
   /** An act was recorded, so the log below can re-read. */
   onRecorded: () => void;
+  /** The step's heading — the Decision Workspace numbers its two judgments so they cannot be read as one. */
+  title?: string;
 }) {
   const [done, setDone] = useState<DecisionDoneKind | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,7 +81,7 @@ export function DecisionActionStep({
   };
 
   return (
-    <Section title="무엇을 하시겠어요?" ariaLabel="조치 선택">
+    <Section title={title} ariaLabel="조치 선택">
       <div className="space-y-3">
         <VocItemTriageControl
           key={`decide-${reviewId}`}

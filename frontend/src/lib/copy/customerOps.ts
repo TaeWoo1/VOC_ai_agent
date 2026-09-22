@@ -17,10 +17,10 @@
 export const DRAFT_UNSENT = "미발송";
 
 export const COPY = {
-  homeTitle: "홈",
+  homeTitle: "오늘",
   checkedLabel: "자동 확인 · 24시간",
-  mineLabel: "내 확인 필요",
-  listTitle: "확인 필요",
+  mineLabel: "내가 확인할 일",
+  listTitle: "확인할 일",
   listOrder: "오래된 순",
   none: "없음",
   firstCheck: "첫 확인 중",

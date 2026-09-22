@@ -36,7 +36,7 @@ export function IssueDecision({
   const waiting = waitingNoteKo(state);
 
   return (
-    <section aria-label="판단과 조치" className="border-t border-line pt-5">
+    <section aria-label="판단과 조치">
       <h3 className="text-base font-bold text-ink">판단과 조치</h3>
 
       {waiting ? (

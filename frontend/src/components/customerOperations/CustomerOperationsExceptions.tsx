@@ -49,6 +49,16 @@ export function CustomerOperationsExceptions({
     <div className="space-y-5">
       <Area title="내 결정 필요" level={headingLevel}>
         <p className="break-keep leading-relaxed text-ink">{decisionsLine(home.decisions.total)}</p>
+        {/* Scope label (UI/UX v2 Phase 1): this counts the cases 고객 운영 관리 opened, and 오늘's 「확인할 일」 counts
+            those plus the reviews and inquiries waiting on the seller. Two different numbers under two different
+            names, said so where the smaller one is read. */}
+        <p className="mt-1 break-keep text-sm text-muted">
+          고객 운영 관리가 조사해서 연 건만 셉니다. 판매자님이 확인할 문의·리뷰 전체는{" "}
+          <Link to="/customer-operations/cases" className="font-semibold text-brand-700 hover:underline">
+            확인할 일
+          </Link>
+          에 있습니다.
+        </p>
         {home.decisions.rows.length > 0 ? (
           <ul className="mt-3 divide-y divide-line rounded-xl border border-line bg-surface">
             {home.decisions.rows.map((row) => (

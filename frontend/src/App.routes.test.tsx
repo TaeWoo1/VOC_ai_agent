@@ -59,7 +59,7 @@ describe("v2 app routes", () => {
     ["/inquiries", "문의"],
     // The mixed queue is absorbed: its bare path lands on 문의.
     ["/inbox", "문의"],
-    ["/memory", "고객운영 메모리"],
+    ["/memory", "반복 문제"],
     ["/reports", "운영 리포트"],
     ["/connect", "채널 연결"],
     ["/settings", "설정"],
@@ -80,7 +80,7 @@ describe("v2 app routes", () => {
 
 describe("legacy routes — live behaviour", () => {
   for (const [from, heading] of [
-    ["/issues", "고객운영 메모리"],
+    ["/issues", "반복 문제"],
     ["/settings/channels", "채널 연결"],
     // The separate channel list folded into the hub in Slice 6.
     ["/connect/channels", "채널 연결"],

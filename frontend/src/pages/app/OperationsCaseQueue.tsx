@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
-import { DecisionList, DecisionRow } from "../../components/ui/DecisionRow";
+import { Facts } from "../../components/ui/ObjectRow";
+import { MasterDetail, useWideLayout } from "../../components/workspace/MasterDetail";
+import { WorkRows, selectedRow } from "../../components/workspace/WorkRows";
+import { WorkItemPane } from "../../components/workspace/WorkItemPane";
 import { api } from "../../lib/apiClient";
-import { mergeHomeWork, type HomeWork } from "../../lib/homeWork";
+import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import { HOME_QUEUE_SIZE } from "../../components/customerOperations/CustomerOpsHome";
-import { COPY, waitLabel } from "../../lib/copy/customerOps";
-import type { CaseQueueState } from "./OperationsCase";
+import { COPY } from "../../lib/copy/customerOps";
 
-const TITLE = "확인 필요";
-const DESCRIPTION = "문의와 리뷰를 함께, 기다린 순서대로 봅니다.";
+/** One name for one list: the nav entry, this page's title and the Home's section all say 확인할 일 (UI/UX v2). */
+const TITLE = COPY.listTitle;
+/** The scope label: what this count counts, so it is not read against the 리뷰 or 문의 screens' own numbers. */
+const DESCRIPTION = "판매자님의 결정을 기다리는 문의와 리뷰입니다. 오래 기다린 것부터 봅니다.";
 
 /**
  * <b>The queue</b> — everything waiting for the seller's decision, in one list.
@@ -33,9 +38,16 @@ const DESCRIPTION = "문의와 리뷰를 함께, 기다린 순서대로 봅니�
  *
  * <p><b>Nothing here decides anything.</b> No control on this screen resolves, dismisses or sends; the case screen
  * and the inquiry/review screens it links to still own every write.
+ *
+ * <p><b>Master-detail (UI/UX v2 Phase 1).</b> On a wide screen the selected row opens beside the list — drawn by the
+ * very screen that owns it ({@link WorkItemPane}) — so the morning is worked without leaving the list. The first row
+ * is selected when nothing is, because an empty right half is a page waiting for a click.
  */
 export function OperationsCaseQueue({ now }: { now?: Date }) {
   const [work, setWork] = useState<HomeWork | null | undefined>(undefined);
+  const wide = useWideLayout();
+  const location = useLocation();
+  const [params] = useSearchParams();
 
   useEffect(() => {
     let live = true;
@@ -62,11 +74,29 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
     };
   }, [now]);
 
-  const caseIds = (work?.rows ?? []).map((r) => r.caseId).filter((id): id is string => id !== null);
+  const rows = work?.rows ?? [];
+  const selected = wide ? selectedRow(rows, params.get("item")) : null;
 
-  return (
-    <div className="space-y-5">
-      <PageHead title={TITLE} description={DESCRIPTION} />
+  const list = (
+    <>
+      <PageHead
+        title={TITLE}
+        description={DESCRIPTION}
+        meta={
+          work && rows.length > 0 ? (
+            <Facts className="text-sm text-muted">
+              <span className="font-semibold text-ink">
+                {rows.length.toLocaleString("ko-KR")}
+                {work.truncated ? "+" : ""}건
+              </span>
+              {reasonCounts(rows).map((part) => (
+                <span key={part}>{part}</span>
+              ))}
+              <span>{COPY.listOrder}</span>
+            </Facts>
+          ) : undefined
+        }
+      />
 
       {work === undefined ? <p className="text-sm text-muted">불러오는 중입니다.</p> : null}
 
@@ -74,50 +104,43 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
           them is good news. */}
       {work === null ? (
         <p className="text-sm text-bad" role="alert">
-          확인 필요 목록을 불러오지 못했습니다.
+          확인할 일 목록을 불러오지 못했습니다.
         </p>
       ) : null}
 
-      {work && work.rows.length === 0 ? (
+      {work && rows.length === 0 ? (
         <p className="break-keep leading-relaxed text-ink">지금 확인이 필요한 문의나 리뷰가 없습니다.</p>
       ) : null}
 
-      {work && work.rows.length > 0 ? (
+      {work && rows.length > 0 ? (
         <section aria-label={TITLE}>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">
-              {COPY.listOrder}
-            </span>
-            <span className="text-sm text-muted">{work.rows.length.toLocaleString("ko-KR")}건</span>
-          </div>
-          <DecisionList ariaLabel={TITLE}>
-            {work.rows.map((row, i) => (
-              <DecisionRow
-                key={row.key}
-                tone={row.reason.tone}
-                icon={row.reason.icon}
-                tag={row.reason.tag}
-                source={row.source}
-                title={row.title}
-                line={row.line}
-                wait={waitLabel(row.since, now)}
-                verb={row.verb}
-                primary={i === 0}
-                to={row.to}
-                state={row.caseId ? ({ caseIds } satisfies CaseQueueState) : undefined}
-              />
-            ))}
-          </DecisionList>
+          <WorkRows
+            rows={rows}
+            selectedKey={selected?.key ?? null}
+            wide={wide}
+            search={location.search}
+            now={now}
+            ariaLabel={TITLE}
+          />
           {/* A read that reported more than it returned. The shortfall means this list is deeper than one read
               reaches — not that the rest is somewhere else — so it says so instead of passing its length off as
               the total. How many more it cannot say: the reads that overflowed count different populations. */}
           {work.truncated ? (
             <p className="mt-3 break-keep text-sm text-muted">
-              한 번에 {work.rows.length.toLocaleString("ko-KR")}건까지 보여 드립니다. 처리하시면 다음 건이 올라옵니다.
+              한 번에 {rows.length.toLocaleString("ko-KR")}건까지 보여 드립니다. 처리하시면 다음 건이 올라옵니다.
             </p>
           ) : null}
         </section>
       ) : null}
-    </div>
+    </>
+  );
+
+  return (
+    <MasterDetail
+      wide={wide}
+      list={list}
+      detailLabel="선택한 확인할 일"
+      detail={selected ? <WorkItemPane row={selected} now={now} /> : null}
+    />
   );
 }

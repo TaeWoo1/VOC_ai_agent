@@ -107,6 +107,9 @@ export function MyReplyWork({
         !loading && !uncertainty && waiting > 0 ? (
           <span className="text-sm font-semibold text-brand-700" data-testid="reply-work-waiting">
             승인 대기 {waiting}건
+            {/* Scope label (UI/UX v2 Phase 1): 승인 대기 is BEFORE approval; 오늘's 실행 대기 is AFTER it. One letter
+                apart and, on the demo org, the same count — so the difference is said beside the number. */}
+            <span className="ml-1.5 font-normal text-muted">· 승인 전 · 승인한 답변은 오늘의 실행 대기에 있습니다</span>
           </span>
         ) : undefined
       }

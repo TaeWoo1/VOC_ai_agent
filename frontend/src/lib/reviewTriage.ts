@@ -75,7 +75,7 @@ export const TRIAGE_CORRECTION_LABEL: Record<ReviewTriageTier, string> = TRIAGE_
 
 /** What the correction block asks, and what it says once the seller has answered. */
 export const TRIAGE_CORRECTION_COPY = {
-  prompt: "판매자님 판단은 어떠신가요?",
+  prompt: "중요도를 판매자님은 어떻게 보시나요?",
   withdraw: "수정 되돌리기",
   systemPrefix: "시스템 판단",
   sellerPrefix: "판매자 수정",
@@ -84,7 +84,7 @@ export const TRIAGE_CORRECTION_COPY = {
    * list stay exactly as it was deserves to know that is the design, not a failure.
    */
   disclosure:
-    "판매자님 판단은 시스템 판단을 덮어쓰지 않고 함께 기록됩니다. 목록 순서는 바뀌지 않으며, 다음 분류 기준을 검토할 때 근거로 씁니다. 마켓플레이스에는 아무것도 전송되지 않습니다.",
+    "판매자님 판단은 시스템 판단을 덮어쓰지 않고 함께 기록됩니다. 목록 순서는 바뀌지 않으며, 다음 분류 기준을 검토할 때 근거로 씁니다.",
 } as const;
 
 /** The action controls' words. Unchanged — these are statements about what the seller did off-screen. */

@@ -23,7 +23,19 @@ import type { ChannelReviewDetailView } from "../../../lib/types";
  * (`ReviewTriageNote`), the recommended action is null for 참고 and renders as nothing rather than as
  * a reassuring filler, and the body is the server's redacted full text.
  */
-export function ReviewProblemCard({ detail, word }: { detail: ChannelReviewDetailView; word: string }) {
+export function ReviewProblemCard({
+  detail,
+  word,
+  showBody = true,
+}: {
+  detail: ChannelReviewDetailView;
+  word: string;
+  /**
+   * False when the screen already prints the customer's sentence as its title (CaseLayout, UI/UX v2 Phase 1): a
+   * one-line review would otherwise be read twice, one block apart, and the second copy is the one that is skipped.
+   */
+  showBody?: boolean;
+}) {
   const body = detail.body ? plainText(detail.body) : "";
   return (
     <section aria-label="고객이 남긴 내용" className="space-y-3">
@@ -36,7 +48,7 @@ export function ReviewProblemCard({ detail, word }: { detail: ChannelReviewDetai
       {/* The customer's own words. `lg` — larger than the page's prose, because this is the object the
           seller opened the screen to read. A textless review says what it is rather than implying that
           reviewnary lost something. */}
-      {detail.textless || body.length === 0 ? (
+      {!showBody ? null : detail.textless || body.length === 0 ? (
         <p className="break-keep text-base leading-relaxed text-muted">별점만 남긴 {word}입니다.</p>
       ) : (
         <p className="whitespace-pre-wrap break-keep text-lg leading-relaxed text-ink">{body}</p>

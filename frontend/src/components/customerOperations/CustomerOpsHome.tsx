@@ -1,17 +1,20 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Btn } from "../ui/Btn";
-import { DecisionList, DecisionRow } from "../ui/DecisionRow";
-import { WorkFlowCard } from "../ui/WorkFlowCard";
 import { RepeatedProblemList } from "../home/RepeatedProblemList";
+import { MasterDetail, selectionHref, useWideLayout } from "../workspace/MasterDetail";
+import { WorkRows, selectedRow } from "../workspace/WorkRows";
+import { WorkItemPane } from "../workspace/WorkItemPane";
+import { IssueDetailPanel } from "../memory/IssueDetailPanel";
+import { ReviewCaseView } from "../../pages/app/ReviewReplyTask";
 import { PreparedWorkList } from "../home/PreparedWorkList";
 import { api } from "../../lib/apiClient";
 import { problemLine } from "../../lib/operationsHome";
 import { dataTypeKo, kstClock } from "../../lib/customerOperations";
-import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate, waitLabel } from "../../lib/copy/customerOps";
+import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
-import type { InquiryQueueResponse, OperationsHome } from "../../lib/types";
+import type { HomePreparedItem, InquiryQueueResponse, OperationsHome } from "../../lib/types";
 
 /** How many rows the list shows before 「+N」. */
 export const HOME_ROWS = 5;
@@ -41,34 +44,32 @@ export function CustomerOpsHome({
   ops,
   now = new Date(),
   onChanged,
+  sharedQueue,
+  selection,
 }: {
   co: CustomerOperationsHome;
   ops: OperationsHome | null | undefined;
   now?: Date;
   onChanged: () => void;
+  /** The queue read, when the page around this list already made it (the 오늘 workspace needs the same rows). */
+  sharedQueue?: { value: InquiryQueueResponse | null | undefined };
+  /** Master-detail selection. Absent: every row opens its own screen, as on a narrow page. */
+  selection?: HomeSelection;
 }) {
-  const [queue, setQueue] = useState<InquiryQueueResponse | null | undefined>(undefined);
-  const [expanded, setExpanded] = useState(false);
+  const ownQueue = useHomeQueue(sharedQueue === undefined);
+  const queue = sharedQueue ? sharedQueue.value : ownQueue;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let live = true;
-    api
-      .getInquiryQueueStrict({ size: HOME_QUEUE_SIZE })
-      .then((r) => live && setQueue(r))
-      .catch(() => live && setQueue(null));
-    return () => {
-      live = false;
-    };
-  }, []);
-
   const work = mergeHomeWork(co, ops, queue, now);
-  const shown = expanded ? work.rows : work.rows.slice(0, HOME_ROWS);
+  const shown = work.rows.slice(0, HOME_ROWS);
   const hidden = work.rows.length - shown.length;
-  const caseIds = work.rows.map((r) => r.caseId).filter((id): id is string => id !== null);
   const next = co.status === "ACTIVE" ? kstClock(co.nextCheckAt, now) : null;
   const running = co.status === "ACTIVE" || co.status === "PAUSED";
+  const wide = selection?.wide ?? false;
+  const search = selection?.search ?? "";
+  const awaiting = awaitingRows(ops, work);
+  const reviewScope = ops?.reviews ?? null;
 
   async function act(run: () => Promise<unknown>) {
     setBusy(true);
@@ -89,6 +90,8 @@ export function CustomerOpsHome({
       : co.status === "PAUSED"
         ? { label: COPY.paused, cls: "bg-[#FFF3E4] text-warn", dot: "bg-[#D97706]" }
         : { label: COPY.off, cls: "bg-[#F1F3F5] text-muted", dot: "bg-[#8B95A1]" };
+
+  const warnings = [...lastRunLines(co, now), ...warningLines(co, now), ...failedReads(ops, queue)];
 
   return (
     <div className="space-y-5 pb-2">
@@ -113,21 +116,27 @@ export function CustomerOpsHome({
       </header>
 
       {running && co.status === "ACTIVE" ? (
-        <WorkFlowCard
-          ariaLabel="자동 확인과 내 확인 필요"
-          done={doneCell(co)}
-          mine={
-            work.rows.length > 0
-              ? {
-                  label: COPY.mineLabel,
-                  value: `${work.rows.length}${work.truncated ? "+" : ""}`,
-                  unit: "건",
-                  line: <Items parts={reasonCounts(work.rows)} />,
-                }
-              : { label: COPY.mineLabel, value: COPY.none, line: next ? <span>다음 확인 {next}</span> : undefined }
-          }
-          warnings={[...lastRunLines(co, now), ...warningLines(co, now), ...failedReads(ops, queue)]}
-        />
+        <div className="space-y-3" data-testid="today-summary">
+          {/* The top of the morning is only what the seller can act on (UI/UX v2 Phase 1): three counts, each one
+              press from its list. What Reviewnary checked is context, so it is one quiet line under them — it used to
+              be the left half of the first card, the largest number on the page and none of it the seller's work. */}
+          <TodaySummary
+            work={work}
+            awaiting={awaiting.count}
+            problems={ops?.problems ?? null}
+            next={next}
+          />
+          <CheckedLine co={co} />
+          {warnings.length > 0 ? (
+            <ul className="space-y-1.5 rounded-xl bg-[#FFF8EF] px-4 py-3 text-sm text-warn" aria-label="집계에서 빠진 곳">
+              {warnings.map((line, i) => (
+                <li key={i} className="flex flex-wrap items-center gap-x-2">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : (
         <section
           aria-label={pill.label}
@@ -166,52 +175,229 @@ export function CustomerOpsHome({
             <h2 className="text-[17px] font-bold tracking-tight text-ink">{COPY.listTitle}</h2>
             <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">{COPY.listOrder}</span>
           </div>
-          <DecisionList ariaLabel={COPY.listTitle}>
-            {shown.map((row, i) => (
-              <DecisionRow
-                key={row.key}
-                tone={row.reason.tone}
-                icon={row.reason.icon}
-                tag={row.reason.tag}
-                source={row.source}
-                title={row.title}
-                line={row.line}
-                wait={waitLabel(row.since, now)}
-                verb={row.verb}
-                primary={i === 0}
-                to={row.to}
-                state={row.caseId ? { caseIds } : undefined}
-              />
-            ))}
-          </DecisionList>
-          {hidden > 0 ? (
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-muted hover:bg-canvas hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              +{hidden.toLocaleString("ko-KR")}
-            </button>
-          ) : null}
-          {/* The Home is a briefing, so it is read short on purpose — but 「더 있다」 with nowhere to go is the one
-              thing it must not say. The queue is the same list, unbriefed. */}
-          {work.truncated && hidden === 0 ? (
-            <p className="mt-2 text-sm">
+          <WorkRows
+            rows={shown}
+            selectedKey={selection?.selectedKey ?? null}
+            wide={wide}
+            search={search}
+            now={now}
+            ariaLabel={COPY.listTitle}
+            showBacklogDivider={false}
+          />
+          {/* The Home is a briefing, so it is read short on purpose — the rest is the same list, unbriefed, one
+              press away. 「+22」 said there was more without saying more of what. */}
+          {hidden > 0 || work.truncated ? (
+            <p className="mt-2.5 text-sm">
               <Link
                 to="/customer-operations/cases"
-                className="font-medium text-brand-700 underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                className="font-semibold text-brand-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
               >
-                전체 목록 보기
+                {hidden > 0 ? `나머지 ${hidden.toLocaleString("ko-KR")}건 모두 보기` : "전체 목록 보기"} →
               </Link>
+            </p>
+          ) : null}
+          {/* The scope label for the one number a seller will compare with another screen: 리뷰 counts the 확인 필요
+              reviews nobody has decided yet; the 리뷰 화면's 확인 필요 tab counts decided ones too. */}
+          {reviewScope && reviewScope.needsAttentionTotal > reviewScope.needsAttentionUndecided ? (
+            <p className="mt-1.5 break-keep text-sm text-muted">
+              리뷰는 확인 필요 리뷰 {reviewScope.needsAttentionTotal.toLocaleString("ko-KR")}건 중 아직 판단하지 않은{" "}
+              {reviewScope.needsAttentionUndecided.toLocaleString("ko-KR")}건만 셉니다.
             </p>
           ) : null}
         </section>
       ) : null}
 
-      <AwaitingExecution ops={ops} work={work} />
-      <RepeatedProblems ops={ops} />
+      <AwaitingExecution awaiting={awaiting} selection={selection} />
+      <RepeatedProblems ops={ops} selection={selection} />
     </div>
   );
+}
+
+/** What the 오늘 list can select: a row of 확인할 일, an approved reply waiting to be posted, or a repeated problem. */
+export interface HomeSelection {
+  wide: boolean;
+  selectedKey: string | null;
+  search: string;
+}
+
+/** The queue read the Home's list needs. `enabled` false when the page around it already made the same read. */
+export function useHomeQueue(enabled = true): InquiryQueueResponse | null | undefined {
+  const [queue, setQueue] = useState<InquiryQueueResponse | null | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    api
+      .getInquiryQueueStrict({ size: HOME_QUEUE_SIZE })
+      .then((r) => live && setQueue(r))
+      .catch(() => live && setQueue(null));
+    return () => {
+      live = false;
+    };
+  }, [enabled]);
+  return queue;
+}
+
+/**
+ * <b>오늘 — the Home as a work list with the selected item beside it</b> (UI/UX v2 Phase 1).
+ *
+ * <p>The same sections, the same reads and the same counts as before; what changed is where an item opens. A row of
+ * 확인할 일, an approved reply and a repeated problem each open in the pane on the right, drawn by the screen that owns
+ * it, and the conversation box is docked under the list. With nothing chosen the first row of 확인할 일 is open —
+ * the item the list itself says to look at first.
+ */
+export function TodayWorkspace({
+  co,
+  ops,
+  now = new Date(),
+  onChanged,
+  dock,
+}: {
+  co: CustomerOperationsHome;
+  ops: OperationsHome | null | undefined;
+  now?: Date;
+  onChanged: () => void;
+  dock: ReactNode;
+}) {
+  const wide = useWideLayout();
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const queue = useHomeQueue();
+  const work = mergeHomeWork(co, ops, queue, now);
+  const key = params.get("item");
+
+  let detail: ReactNode = null;
+  let selectedKey: string | null = null;
+  if (wide) {
+    const prepared = key?.startsWith(PREPARED) ? ops?.prepared.rows.find((r) => `${PREPARED}${r.id}` === key) : undefined;
+    const problem = key?.startsWith(PROBLEM) ? ops?.problems.rows.find((r) => `${PROBLEM}${r.issue.id}` === key) : undefined;
+    if (prepared && prepared.kind === "REVIEW_REPLY") {
+      selectedKey = key;
+      detail = <ReviewCaseView key={key} reviewId={prepared.id} variant="pane" />;
+    } else if (problem) {
+      selectedKey = key;
+      detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={() => undefined} />;
+    } else {
+      const row = selectedRow(work.rows.slice(0, HOME_ROWS), key) ?? null;
+      const any = key ? work.rows.find((r) => r.key === key) : undefined;
+      const chosen = any ?? row;
+      if (chosen) {
+        selectedKey = chosen.key;
+        detail = <WorkItemPane row={chosen} now={now} />;
+      }
+    }
+  }
+
+  return (
+    <MasterDetail
+      wide={wide}
+      detailLabel="선택한 항목"
+      detail={detail}
+      footer={dock}
+      list={
+        <CustomerOpsHome
+          co={co}
+          ops={ops}
+          now={now}
+          onChanged={onChanged}
+          sharedQueue={{ value: queue }}
+          selection={{ wide, selectedKey, search: location.search }}
+        />
+      }
+    />
+  );
+}
+
+const PREPARED = "prepared:";
+const PROBLEM = "problem:";
+
+/**
+ * Three counts, each the size of a list one press away — and only counts the seller can act on. 확인할 일 counts what
+ * waits for their decision, 실행 대기 what they approved and have not posted, 반복 문제 the problems that need a
+ * judgement; the observed ones are named beside it and never added.
+ */
+function TodaySummary({
+  work,
+  awaiting,
+  problems,
+  next,
+}: {
+  work: HomeWork;
+  awaiting: number;
+  problems: OperationsHome["problems"] | null;
+  next: string | null;
+}) {
+  const cells: { label: string; value: string; line: ReactNode; to: string }[] = [
+    {
+      label: COPY.listTitle,
+      value: work.rows.length > 0 ? `${work.rows.length.toLocaleString("ko-KR")}${work.truncated ? "+" : ""}` : COPY.none,
+      line: work.rows.length > 0 ? <Items parts={reasonCounts(work.rows)} /> : next ? <span>다음 확인 {next}</span> : null,
+      to: "/customer-operations/cases",
+    },
+    {
+      label: "실행 대기",
+      value: awaiting > 0 ? awaiting.toLocaleString("ko-KR") : COPY.none,
+      line: <span>승인함 · 판매자센터 등록 전</span>,
+      to: "#실행-대기",
+    },
+    {
+      label: "반복 문제",
+      value: problems && problems.decidable > 0 ? problems.decidable.toLocaleString("ko-KR") : COPY.none,
+      line: problems ? (
+        <span>
+          판단 필요{problems.observing > 0 ? ` · 지켜보는 중 ${problems.observing.toLocaleString("ko-KR")}` : ""}
+        </span>
+      ) : null,
+      to: "/memory",
+    },
+  ];
+  return (
+    <ul aria-label="오늘 요약" className="grid grid-cols-1 overflow-hidden rounded-2xl border border-line bg-surface sm:grid-cols-3">
+      {cells.map((cell, i) => (
+        <li key={cell.label} className={i > 0 ? "border-t border-line sm:border-l sm:border-t-0" : ""}>
+          <Link
+            to={cell.to}
+            className="block h-full px-5 py-4 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+          >
+            <span className="block text-sm font-semibold text-muted">{cell.label}</span>
+            <span className="mt-1 block text-[28px] font-extrabold leading-tight tracking-tight tabular-nums text-ink">
+              {cell.value}
+              {/^\d/.test(cell.value) ? <span className="ml-0.5 text-base font-semibold text-muted">건</span> : null}
+            </span>
+            {cell.line ? <span className="mt-1 block break-keep text-sm text-muted">{cell.line}</span> : null}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** What Reviewnary checked in the last 24 hours — context under the counts, never a count of the seller's work. */
+function CheckedLine({ co }: { co: CustomerOperationsHome }) {
+  const cell = doneCell(co);
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+      <span className="font-semibold">{cell.label}</span>
+      <span className="font-semibold text-ink tabular-nums">
+        {cell.value}
+        {"unit" in cell && cell.unit ? cell.unit : ""}
+      </span>
+      {"line" in cell && cell.line ? <span className="flex flex-wrap items-center gap-x-1.5">· {cell.line}</span> : null}
+    </p>
+  );
+}
+
+/** The rows of 실행 대기 after the dedupe against 확인할 일, and how many the section stands for in total. */
+function awaitingRows(ops: OperationsHome | null | undefined, work: HomeWork) {
+  const prepared = ops?.prepared;
+  if (!prepared) return { rows: [] as HomePreparedItem[], moreReplies: 0, count: 0 };
+  // Anything 확인할 일 is already offering is not offered again, by the same key that list deduped itself with.
+  const claimed = new Set(work.rows.map((row) => row.owner));
+  const rows = prepared.rows.filter((row) => !claimed.has(row.to));
+  // The server caps its list; only the review-reply kind is compared, because it is the only one this section never
+  // expects to lose rows to the dedupe above.
+  const drawnReplies = rows.filter((row) => row.kind === "REVIEW_REPLY").length;
+  const moreReplies = Math.max(0, prepared.reviewRepliesApproved - drawnReplies);
+  return { rows, moreReplies, count: rows.length + moreReplies };
 }
 
 /**
@@ -237,32 +423,33 @@ export function CustomerOpsHome({
  * aborted attempt is not such an outcome: it is one guided run ending at the submit barrier, which posts nothing
  * and withdraws nothing, so the reply is still waiting and still belongs here.
  */
-function AwaitingExecution({ ops, work }: { ops: OperationsHome | null | undefined; work: HomeWork }) {
-  const prepared = ops?.prepared;
-  if (!prepared) return null;
-
-  // Anything 확인 필요 is already offering is not offered again, by the same key that list deduped itself with.
-  // In practice this is the inquiry-draft kind: a draft-ready inquiry is AWAITING_SELLER, so the work queue above
-  // is already showing it — with 「초안 있음 · 미발송」 on the row, which says more than a second row here would.
-  const claimed = new Set(work.rows.map((row) => row.owner));
-  const rows = prepared.rows.filter((row) => !claimed.has(row.to));
-  if (rows.length === 0) return null;
-
-  // The server caps its list; the counts above it are org-wide. Only the review-reply kind is compared, because it
-  // is the only one this section never expects to lose rows to the dedupe above — inferring a remainder for the
-  // others would be counting the rows we deliberately dropped as missing.
-  const drawnReplies = rows.filter((row) => row.kind === "REVIEW_REPLY").length;
-  const moreReplies = prepared.reviewRepliesApproved - drawnReplies;
+function AwaitingExecution({
+  awaiting,
+  selection,
+}: {
+  awaiting: ReturnType<typeof awaitingRows>;
+  selection?: HomeSelection;
+}) {
+  const { rows, moreReplies } = awaiting;
+  if (rows.length === 0 && moreReplies === 0) return null;
+  const wide = selection?.wide ?? false;
+  const search = selection?.search ?? "";
+  const selectedId = selection?.selectedKey?.startsWith(PREPARED) ? selection.selectedKey.slice(PREPARED.length) : null;
 
   return (
-    <section aria-label="실행 대기">
+    <section aria-label="실행 대기" id="실행-대기">
       <div className="mb-3 mt-8 flex items-center gap-2">
         <h2 className="text-[17px] font-bold tracking-tight text-ink">실행 대기</h2>
         <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">
           승인함 · 등록 전
         </span>
       </div>
-      <PreparedWorkList rows={rows} />
+      <PreparedWorkList
+        rows={rows}
+        selectedId={wide ? selectedId : null}
+        // An approved review reply opens in the pane — the Review Case, where the approved text and its copy are.
+        linkFor={(row) => (row.kind === "REVIEW_REPLY" ? selectionHref(wide, `${PREPARED}${row.id}`, row.to, search) : row.to)}
+      />
       {moreReplies > 0 ? (
         <p className="mt-2 px-1 text-sm">
           <Link
@@ -404,16 +591,23 @@ function warningLines(co: CustomerOperationsHome, now: Date): React.ReactNode[] 
  * reviews, not another customer waiting — that separation is the reason one row can stand for eighteen of them
  * without the Home saying the same thing twice.
  */
-function RepeatedProblems({ ops }: { ops: OperationsHome | null | undefined }) {
+function RepeatedProblems({ ops, selection }: { ops: OperationsHome | null | undefined; selection?: HomeSelection }) {
   const problems = ops?.problems;
   if (!problems || problems.rows.length === 0) return null;
+  const wide = selection?.wide ?? false;
+  const search = selection?.search ?? "";
+  const selectedId = selection?.selectedKey?.startsWith(PROBLEM) ? selection.selectedKey.slice(PROBLEM.length) : null;
   return (
     <section aria-label="반복 문제">
       <div className="mb-3 mt-8 flex items-center gap-2">
         <h2 className="text-[17px] font-bold tracking-tight text-ink">반복 문제</h2>
       </div>
       <p className="break-keep px-1 leading-relaxed text-ink">{problemLine(problems)}</p>
-      <RepeatedProblemList rows={problems.rows} />
+      <RepeatedProblemList
+        rows={problems.rows}
+        selectedId={wide ? selectedId : null}
+        linkFor={(issueId) => selectionHref(wide, `${PROBLEM}${issueId}`, `/memory/${issueId}`, search)}
+      />
       <p className="mt-2 px-1 text-sm">
         <Link
           to="/memory"

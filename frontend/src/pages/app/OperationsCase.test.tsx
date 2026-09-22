@@ -419,7 +419,7 @@ describe("OperationsCase", () => {
     const card = await screen.findByTestId("work-flow-card");
     expect(card).toHaveTextContent("정리함");
     expect(card).toHaveTextContent("5점 긍정 리뷰로 제품 만족도가 높습니다.");
-    expect(card).toHaveTextContent("내 확인 필요없음");
+    expect(card).toHaveTextContent("내가 확인할 일없음");
     // Earlier-stage text that the final state overruled is not shown anywhere on the screen.
     expect(screen.queryByText(/불편을 말하는 내용이 있습니다/)).toBeNull();
     expect(screen.queryByText(/모니터링만 하시면/)).toBeNull();

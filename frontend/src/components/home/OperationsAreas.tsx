@@ -74,7 +74,7 @@ export function OperationsAreas({ home }: { home: OperationsHome }) {
       </Area>
 
       {/* 2 — 반복 문제 */}
-      <Area title="반복 문제" to="/memory" linkLabel="고객운영 메모리 열기">
+      <Area title="반복 문제" to="/memory" linkLabel="반복 문제 열기">
         <p className="break-keep leading-relaxed text-ink">{problemLine(problems)}</p>
         {/* The rows are shared with 고객 운영 관리's Home — see RepeatedProblemList for why there is one renderer. */}
         <RepeatedProblemList rows={problems.rows} />

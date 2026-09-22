@@ -17,7 +17,7 @@ import { TRIAGE_OPTIONS } from "./vocItems";
  * What the 조치 선택 step promises, and it depends on the channel.
  *
  * <b>No second label vocabulary.</b> The three buttons keep the words they already had
- * (`TRIAGE_OPTIONS`: 대응 필요 / 지켜보기 / 조치 불필요) — a workspace that renamed them would leave the
+ * (`TRIAGE_OPTIONS`: 대응 필요 / 두고 보기 / 조치 불필요) — a workspace that renamed them would leave the
  * worklist, the record and the audit trail describing the same three values in different words. What
  * the workspace adds is the sentence UNDER them, and that sentence depends on why a draft is or is
  * not on offer. There are three reasons and they are three different facts: the channel has a reply

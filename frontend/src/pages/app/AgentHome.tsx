@@ -16,7 +16,7 @@ import { previewText } from "../../lib/plainText";
 import { matchCommandIntent, INTENT_HEADING } from "../../lib/commandIntents";
 import { INQUIRY_NEEDS_REPLY_PATH } from "../../lib/todayInbox";
 import { OperationsAreas } from "../../components/home/OperationsAreas";
-import { CustomerOpsHome, coHomeApplies } from "../../components/customerOperations/CustomerOpsHome";
+import { CustomerOpsHome, TodayWorkspace, coHomeApplies } from "../../components/customerOperations/CustomerOpsHome";
 import { COPY } from "../../lib/copy/customerOps";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import { hasAnythingToShow } from "../../lib/operationsHome";
@@ -339,9 +339,17 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
       surface="home"
       leadingTurns={leadingTurns}
       lead={lead}
-      chips={beforeFirstConnection ? FIRST_USE_PROMPTS : HOME_PROMPTS}
+      chips={beforeFirstConnection ? FIRST_USE_PROMPTS : coHome ? [] : HOME_PROMPTS}
       placeholder={coHome ? COPY.composer : "무엇이든 물어보세요"}
       onBeforeSend={onBeforeSend}
+      // 오늘 (UI/UX v2 Phase 1): the job's Home is a work list with the selected item beside it, and the box sits
+      // under the list. The first sentence turns it back into the transcript. Example prompts are left out here —
+      // four chips under the box every morning were the same four sentences, and the box already says what it takes.
+      emptyLayout={
+        coHome
+          ? (dock) => <TodayWorkspace co={coHome} ops={home} now={now} onChanged={() => void loadCo()} dock={dock} />
+          : undefined
+      }
     />
   );
 }

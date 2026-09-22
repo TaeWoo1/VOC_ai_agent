@@ -36,6 +36,7 @@ export function DecisionRow({
   state,
   action,
   children,
+  selected = false,
 }: {
   tone: ReasonTone;
   icon: ReasonIcon;
@@ -52,6 +53,11 @@ export function DecisionRow({
   action?: ReactNode;
   /** Opened below the row — an inline editor. */
   children?: ReactNode;
+  /**
+   * The row whose detail stands in the master-detail pane. A selectable list passes no `verb`: the row IS the
+   * control, and the one primary action lives in the detail (UI/UX v2 Phase 1).
+   */
+  selected?: boolean;
 }) {
   const body = (
     <>
@@ -59,8 +65,8 @@ export function DecisionRow({
         <Icon name={icon} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-          <span className={`rounded-md px-1.5 py-px font-semibold ${TAG[tone]}`}>{tag}</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+          <span className={`rounded-md px-1.5 py-px text-xs font-semibold ${TAG[tone]}`}>{tag}</span>
           {source ? <span>{source}</span> : null}
         </span>
         <span className="mt-1 block break-keep text-base font-bold leading-snug tracking-tight text-ink [overflow-wrap:anywhere]">
@@ -69,7 +75,7 @@ export function DecisionRow({
         {line ? <span className="mt-0.5 block truncate text-sm text-muted">{line}</span> : null}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-2 self-center">
-        {wait ? <span className="whitespace-nowrap text-xs tabular-nums text-muted">{wait}</span> : null}
+        {wait ? <span className="whitespace-nowrap text-sm tabular-nums text-muted">{wait}</span> : null}
         {verb && to ? (
           <span
             className={`inline-flex min-h-[36px] items-center rounded-lg px-3.5 text-sm font-semibold ${
@@ -90,7 +96,10 @@ export function DecisionRow({
         <Link
           to={to}
           state={state}
-          className="group flex items-start gap-3.5 px-5 py-4 transition hover:bg-[#FAFBFC] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+          aria-current={selected ? "true" : undefined}
+          className={`group flex items-start gap-3.5 px-5 py-4 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700 ${
+            selected ? "bg-brand-50 shadow-[inset_3px_0_0_#1B64DA]" : "hover:bg-[#FAFBFC]"
+          }`}
         >
           {body}
         </Link>

@@ -151,7 +151,9 @@ describe("triage copy", () => {
       "MONITOR",
       "NO_ACTION",
     ]);
-    expect(TRIAGE_OPTIONS.map((o) => o.label)).toEqual(["대응 필요", "지켜보기", "조치 불필요"]);
+    // 「두고 보기」 for MONITOR (UI/UX v2 Phase 1): the triage TIER `WATCH` is 「지켜보기」, and the Decision Workspace
+    // asks both questions one above the other — two buttons with one word would be one press read two ways.
+    expect(TRIAGE_OPTIONS.map((o) => o.label)).toEqual(["대응 필요", "두고 보기", "조치 불필요"]);
   });
 });
 

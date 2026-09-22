@@ -209,7 +209,10 @@ export function facetOptions(
  */
 export const TRIAGE_OPTIONS: ReadonlyArray<{ value: TriageDisposition; label: string }> = [
   { value: "RESPONSE_NEEDED", label: "대응 필요" },
-  { value: "MONITOR", label: "지켜보기" },
+  // 「두고 보기」, not 「지켜보기」 (UI/UX v2 Phase 1, product-owner decision). The triage TIER `WATCH` is 지켜보기 on
+  // every list, tab and chip, and the Decision Workspace asks for both judgments one above the other — two buttons
+  // with one word, recorded in two stores. The stored value stays `MONITOR`; only the seller's word moved.
+  { value: "MONITOR", label: "두고 보기" },
   { value: "NO_ACTION", label: "조치 불필요" },
 ];
 

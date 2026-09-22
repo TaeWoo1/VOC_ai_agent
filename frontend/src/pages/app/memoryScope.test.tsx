@@ -144,7 +144,8 @@ describe("고객운영 메모리 — v1 scope fence", () => {
 
   it("describes what the surface holds without promising unbuilt capability", async () => {
     renderMemory();
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("고객운영 메모리");
-    expect(screen.getByText(/반복되는 고객 문제와 그 근거/)).toBeInTheDocument();
+    // One name since UI/UX v2 Phase 1: the nav entry, the Home section and this title all say 반복 문제.
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("반복 문제");
+    expect(screen.getByText(/반복해서 말한 문제와 그 근거/)).toBeInTheDocument();
   });
 });

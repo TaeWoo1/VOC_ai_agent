@@ -16,15 +16,27 @@ import type { HomePreparedItem } from "../../lib/types";
  * <p>The distinguishing fact leads when there is one. Four rows reading 「승인된 리뷰 답변」 are four links a seller
  * cannot choose between; the kind of work follows as the quieter half.
  */
-export function PreparedWorkList({ rows }: { rows: readonly HomePreparedItem[] }) {
+export function PreparedWorkList({
+  rows,
+  linkFor,
+  selectedId,
+}: {
+  rows: readonly HomePreparedItem[];
+  /** Where a row points when the page can draw it in place (the 오늘 pane); the row's own screen otherwise. */
+  linkFor?: (row: HomePreparedItem) => string;
+  selectedId?: string | null;
+}) {
   if (rows.length === 0) return null;
   return (
-    <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
+    <ul className="mt-3 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
       {rows.map((row) => (
-        <li key={`${row.kind}-${row.id}`} className="p-3">
+        <li key={`${row.kind}-${row.id}`}>
           <Link
-            to={row.to}
-            className="block rounded break-keep text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            to={linkFor ? linkFor(row) : row.to}
+            aria-current={selectedId === row.id ? "true" : undefined}
+            className={`block break-keep px-4 py-3 text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700 ${
+              selectedId === row.id ? "bg-brand-50 shadow-[inset_3px_0_0_#1B64DA]" : "hover:bg-canvas"
+            }`}
           >
             {row.detail ? (
               <>

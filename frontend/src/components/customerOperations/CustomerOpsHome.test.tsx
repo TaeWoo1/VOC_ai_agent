@@ -199,37 +199,44 @@ describe("CustomerOpsHome", () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue());
   });
 
-  it("reads 자동 확인 → 내 확인 필요 first: what was checked, never called processed", async () => {
+  it("opens on what the seller can act on — then what was checked, never called processed", async () => {
     const { container } = draw();
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     expect(card).toHaveTextContent("자동 확인 · 24시간");
     expect(card).toHaveTextContent("47건");
     expect(card).toHaveTextContent("정리 31");
     expect(card).toHaveTextContent("관찰 4");
     expect(card).toHaveTextContent("초안 9 (미발송)");
     expect(card).not.toHaveTextContent("처리");
-    await waitFor(() => expect(card).toHaveTextContent("내 확인 필요"));
+    // UI/UX v2 Phase 1: the top is three actionable counts (확인할 일 · 실행 대기 · 반복 문제); what Reviewnary
+    // checked is the quiet line under them, no longer the left half of the first card.
+    await waitFor(() => expect(card).toHaveTextContent("확인할 일"));
     await waitFor(() => expect(card).toHaveTextContent("4건"));
+    expect(within(card).getByRole("link", { name: /확인할 일/ })).toHaveAttribute("href", "/customer-operations/cases");
+    expect(within(card).getByRole("link", { name: /반복 문제/ })).toHaveAttribute("href", "/memory");
     expect(card).toHaveTextContent("교환·환불 1·정보 부족 1·답변 필요 1·리뷰 1");
     await expectNoAxeViolations(container);
   });
 
-  it("each row says why, from where, how long — and one row, the first, carries the filled verb", async () => {
+  it("each row says why, from where, how long — and no row carries a button of its own", async () => {
     draw();
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     await waitFor(() => expect(within(list).getAllByRole("link")).toHaveLength(4));
     const [first, second] = within(list).getAllByRole("link");
-    expect(first).toHaveAttribute("href", "/reviews/reply/r-1");
+    // A review carries the way back to the work list it was opened from.
+    expect(first).toHaveAttribute("href", "/reviews/reply/r-1?from=work");
     expect(first).toHaveTextContent("리뷰");
     expect(first).toHaveTextContent("네이버 리뷰 ★1");
     expect(second).toHaveAttribute("href", "/customer-operations/cases/c-2");
     expect(second).toHaveTextContent("정보 부족");
     expect(second).toHaveTextContent("9oz 뚜껑 판매 여부 필요");
-    expect(second).toHaveTextContent("정보 입력");
     expect(second).toHaveTextContent("5시간 대기");
+    // The verb (「검토」, 「정보 입력」) is gone from the row: the one primary action lives in the item itself.
+    expect(second).not.toHaveTextContent("정보 입력");
     const exchange = within(list).getByRole("link", { name: /뚜껑이 깨져서 왔어요/ });
     expect(exchange).toHaveTextContent("초안 있음 · 미발송");
-    expect(list.querySelectorAll(".bg-brand-700")).toHaveLength(1);
+    expect(list.querySelectorAll(".bg-brand-700")).toHaveLength(0);
+    expect(list).not.toHaveTextContent("검토");
   });
 
   it("a source that was not read is excluded from the count and says so, with its fix", async () => {
@@ -241,7 +248,7 @@ describe("CustomerOpsHome", () => {
         ],
       }),
     );
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     expect(card).toHaveTextContent("쿠팡 문의 연결 만료 · 어제 22:00부터 집계 제외");
     expect(within(card).getByRole("link", { name: "재연결" })).toHaveAttribute("href", "/connect/coupang");
     expect(card).toHaveTextContent("네이버 문의 일부만 확인 · 응답 지연");
@@ -250,7 +257,7 @@ describe("CustomerOpsHome", () => {
   it("a list read that failed counts what loaded and says the count is partial — never 「N+」", async () => {
     api.getInquiryQueueStrict.mockRejectedValue(new Error("down"));
     draw();
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     await waitFor(() => expect(card).toHaveTextContent("문의 목록 읽기 실패 · 부분 집계"));
     // c-1, c-2 and the review — what loaded, with no 「+」.
     expect(card).toHaveTextContent("3건");
@@ -261,14 +268,14 @@ describe("CustomerOpsHome", () => {
   it("「N+」 only when a read reports more than it returned", async () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue({ totalElements: 80 }));
     draw();
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     await waitFor(() => expect(card).toHaveTextContent("4+건"));
     expect(card).not.toHaveTextContent("부분 집계");
   });
 
   it("a failed latest run keeps the 24-hour tally and names the check it does not include", async () => {
     draw(co({ lastRunStatus: "FAILED" }));
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     // What earlier runs checked in the window is still checked.
     expect(card).toHaveTextContent("47건");
     expect(card).toHaveTextContent("정리 31");
@@ -278,10 +285,10 @@ describe("CustomerOpsHome", () => {
   it("nothing waiting is 「없음」 with the next check — and no list", async () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue({ content: [], totalElements: 0 }));
     draw(co({ decisions: { total: 0, rows: [] } }), null);
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     await waitFor(() => expect(card).toHaveTextContent("없음"));
     expect(card).toHaveTextContent("다음 확인 오늘 16:00");
-    expect(screen.queryByRole("list", { name: "확인 필요" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "확인할 일" })).toBeNull();
   });
 
   it("a paused job says so and resumes on one press", async () => {
@@ -291,7 +298,7 @@ describe("CustomerOpsHome", () => {
     await userEvent.click(screen.getByRole("button", { name: "재개" }));
     await waitFor(() => expect(api.resumeCustomerOperations).toHaveBeenCalled());
     expect(onChanged).toHaveBeenCalled();
-    expect(screen.queryByTestId("work-flow-card")).toBeNull();
+    expect(screen.queryByTestId("today-summary")).toBeNull();
   });
 
   /*
@@ -311,7 +318,7 @@ describe("CustomerOpsHome", () => {
   it("does not offer anything 확인 필요 is already offering", async () => {
     draw();
     const section = await screen.findByRole("region", { name: "실행 대기" });
-    const queueList = await screen.findByRole("region", { name: "확인 필요" });
+    const queueList = await screen.findByRole("region", { name: "확인할 일" });
 
     // The draft-ready inquiry is AWAITING_SELLER, so it is a 확인 필요 row — with 「초안 있음 · 미발송」 on it,
     // which says more than a second row here would. It must appear in exactly one of the two sections.
@@ -339,7 +346,7 @@ describe("CustomerOpsHome", () => {
 
   it("renders nothing when the operations read failed, rather than claiming nothing is waiting", async () => {
     draw(co(), null);
-    await screen.findByRole("region", { name: "확인 필요" });
+    await screen.findByRole("region", { name: "확인할 일" });
     expect(screen.queryByRole("region", { name: "실행 대기" })).toBeNull();
   });
 
@@ -394,7 +401,7 @@ describe("CustomerOpsHome", () => {
     expect(section).not.toHaveTextContent("검토");
     expect(section).not.toHaveTextContent("답변");
 
-    const list = container.querySelector('section[aria-label="확인 필요"]');
+    const list = container.querySelector('section[aria-label="확인할 일"]');
     expect(list).not.toBeNull();
     // Node.DOCUMENT_POSITION_FOLLOWING — the problems come after the work.
     expect(list!.compareDocumentPosition(section) & 4).toBeTruthy();

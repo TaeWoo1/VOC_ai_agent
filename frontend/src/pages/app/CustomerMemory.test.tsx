@@ -173,23 +173,46 @@ afterEach(() => {
 });
 
 describe("고객운영 메모리 — two panes", () => {
-  it("renders a grouped issue list and a detail pane", async () => {
-    renderMemory();
-    const list = await screen.findByLabelText("반복 이슈 목록");
-    expect(within(list).getByRole("heading", { name: "확인 필요" })).toBeInTheDocument();
-    expect(within(list).getByRole("heading", { name: "개선됨" })).toBeInTheDocument();
-    expect(screen.getByText(/왼쪽에서 이슈를 고르면/)).toBeInTheDocument();
+  it("renders a grouped issue list — and, beside it on a wide screen, the first problem already open", async () => {
+    // UI/UX v2 Phase 1: the first screen used to be two thirds 「왼쪽에서 이슈를 고르면…」. On a wide screen the
+    // list and the detail stand side by side and the first problem (the server's worst-first order) is open.
+    const restore = stubWide(true);
+    try {
+      renderMemory();
+      const list = await screen.findByLabelText("반복 이슈 목록");
+      expect(within(list).getByRole("heading", { name: "확인 필요" })).toBeInTheDocument();
+      expect(within(list).getByRole("heading", { name: "개선됨" })).toBeInTheDocument();
+      expect(await screen.findByLabelText("선택한 이슈")).toBeInTheDocument();
+      expect(screen.queryByText(/왼쪽에서 이슈를 고르면/)).toBeNull();
+      expect(within(list).getAllByRole("link").filter((a) => a.getAttribute("aria-current") === "true")).toHaveLength(1);
+    } finally {
+      restore();
+    }
   });
 
-  it("shows each issue's state, severity, judgement and evidence count", async () => {
+  it("on a narrow screen draws the list alone — a row opens the problem, there is no empty half", async () => {
+    renderMemory();
+    await screen.findByLabelText("반복 이슈 목록");
+    expect(screen.queryByLabelText("선택한 이슈")).toBeNull();
+    expect(screen.queryByText(/왼쪽에서 이슈를 고르면/)).toBeNull();
+  });
+
+  it("shows each issue's state, judgement and evidence count on one line — severity moved to the problem itself", async () => {
     renderMemory();
     const list = await screen.findByLabelText("반복 이슈 목록");
     const row = within(list).getByRole("link", { name: /접착력이 약하다는/ });
     expect(row).toHaveTextContent("확인 필요");
-    expect(row).toHaveTextContent("심각도 심각");
     expect(row).toHaveTextContent("증가 중");
     expect(row).toHaveTextContent("근거 4건");
     expect(row).toHaveTextContent("마지막 확인 2026-08-02");
+    // Metadata no longer opens the row: the title is read before the facts about it.
+    expect(row).not.toHaveTextContent("심각도");
+  });
+
+  it("names the severity in the problem's own header", async () => {
+    renderMemory("/memory/issue-1");
+    const detail = await screen.findByLabelText("선택한 이슈");
+    expect(detail).toHaveTextContent("심각도 심각");
   });
 
   it("links each row to its own deep link", async () => {
@@ -214,7 +237,7 @@ describe("고객운영 메모리 — deep link", () => {
 
   it("says so honestly when the issue is not loaded", async () => {
     renderMemory("/memory/nope");
-    expect(await screen.findByText("이 이슈를 찾을 수 없습니다")).toBeInTheDocument();
+    expect(await screen.findByText("이 문제를 찾을 수 없습니다")).toBeInTheDocument();
     expect(screen.getByText(/목록에서 다시 선택해 주세요/)).toBeInTheDocument();
   });
 
@@ -521,3 +544,21 @@ describe("고객운영 메모리 — the issue's opportunities live beside its e
     expect(await within(section).findByText(/아직 제안할 개선 기회가 없습니다/)).toBeTruthy();
   });
 });
+
+/** Stands the list and the detail side by side, as the layout does at 1200px and up. Returns the restore. */
+function stubWide(matches: boolean): () => void {
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  return () => {
+    window.matchMedia = original;
+  };
+}

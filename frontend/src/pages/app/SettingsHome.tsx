@@ -77,7 +77,7 @@ export function SettingsHome() {
       <ListBox ariaLabel="더 보기">
         <ul className="divide-y divide-line/70">
           <li>
-            <ObjectRow name="고객운영 메모리" facets="반복되는 고객 문제와 그 근거" action={<BtnLink to="/memory" size="sm" variant="outline">열기</BtnLink>} />
+            <ObjectRow name="반복 문제" facets="반복되는 고객 문제와 그 근거" action={<BtnLink to="/memory" size="sm" variant="outline">열기</BtnLink>} />
           </li>
           <li>
             <ObjectRow name="리포트" facets="수집된 자료로 만든 기간 요약" action={<BtnLink to="/reports" size="sm" variant="outline">열기</BtnLink>} />

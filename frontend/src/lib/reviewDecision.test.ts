@@ -24,7 +24,7 @@ describe("decisionLogSentence", () => {
     expect(decisionLogSentence(entry({ kind: "SELLER_JUDGMENT_WITHDRAWN", from: "FYI" })))
       .toBe("판매자 판단을 되돌림");
     expect(decisionLogSentence(entry({ kind: "ACTION_CHOSEN", to: "MONITOR" })))
-      .toBe("조치를 지켜보기(으)로 정함");
+      .toBe("조치를 두고 보기(으)로 정함");
     expect(decisionLogSentence(entry({ kind: "ACTION_RECORDED", to: "ACTION_COMPLETED" })))
       .toBe("조치를 완료했다고 기록");
     expect(decisionLogSentence(entry({ kind: "REPLY_APPROVAL", to: "APPROVED" })))

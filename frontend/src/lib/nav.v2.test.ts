@@ -13,12 +13,15 @@ describe("nav.v2 — structure", () => {
     expect(NAV_GROUPS.map((group) => group.heading)).toEqual(["운영", "연결·설정"]);
   });
 
-  it("declares the workflow destinations, in order — 홈 / 확인할 일 / 상품 / 리뷰 / 문의 / 주문, then 지식 / 채널 연결 / 설정", () => {
+  it("declares the workflow destinations, in order — 오늘 / 확인할 일 / 반복 문제 / 상품 / 리뷰 / 문의 / 주문, then 지식 / 채널 연결 / 설정", () => {
     expect(NAV_ITEMS.map((item) => item.to)).toEqual([
       "/",
       // The unified case queue, directly under 홈 whose briefing is its first rows. 문의 and 리뷰 below it are
       // where the seller goes already knowing which object they want; this is where they go not knowing yet.
       "/customer-operations/cases",
+      // UI/UX v2 Phase 1 (product-owner decision): the repeated problems — one of the seven Demo Core screens, and
+      // the only one a seller could reach only by falling into it from the Home's last section or 설정's overflow.
+      "/memory",
       "/products",
       "/reviews",
       "/inquiries",
@@ -33,8 +36,10 @@ describe("nav.v2 — structure", () => {
 
   it("labels every destination in seller language", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
-      "홈",
+      // 홈 → 오늘 (UI/UX v2 Phase 1): the first screen is named for the question it answers.
+      "오늘",
       "확인할 일",
+      "반복 문제",
       "상품",
       "리뷰",
       "문의",
@@ -59,8 +64,9 @@ describe("nav.v2 — structure", () => {
     }
   });
 
-  it("keeps 메모리 and 리포트 as routes but out of the primary IA", () => {
-    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/memory");
+  it("keeps 리포트 as a route but out of the primary IA — and puts 반복 문제 in it", () => {
+    // 리포트 stays where it is, reached from 설정 (product-owner decision: it is not moved further into 설정 either).
+    expect(NAV_ITEMS.map((item) => item.to)).toContain("/memory");
     expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/reports");
     expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/inbox");
   });

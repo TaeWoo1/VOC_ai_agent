@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
   getCustomerOperationsHome: vi.fn(),
   getOperationsHomeStrict: vi.fn(),
   getInquiryQueueStrict: vi.fn(),
+  // The pane beside the list reads the selected case; it never settles here — the list is what is under test.
+  getOperationsCase: vi.fn(() => new Promise(() => undefined)),
 }));
 vi.mock("../../lib/apiClient", () => ({ api, getToken: () => null }));
 
@@ -90,7 +92,7 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
     draw();
 
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     const items = within(list).getAllByRole("listitem");
     // The review has waited a day longer, so it leads — the order is the wait, not the kind.
     expect(items[0]).toHaveTextContent("배송이 너무 늦었어요");
@@ -104,7 +106,7 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
     draw();
 
-    await screen.findByRole("list", { name: "확인 필요" });
+    await screen.findByRole("list", { name: "확인할 일" });
     const links = screen.getAllByRole("link");
     // A case opens its case screen whatever its subject is — the investigation is what the seller came for, and
     // splitting cases by subject kind would be two queues wearing one name.
@@ -141,13 +143,14 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 1, rows: [row()] });
     draw();
 
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     expect(list).toHaveTextContent("접착이 약해요");
     expect(list).toHaveTextContent("배송 언제 되나요?");
     expect(list).toHaveTextContent("교환 신청은 언제까지 가능한가요?");
     // Each row opens the screen that owns it — the same identity the Home dedupes by.
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(hrefs).toContain("/reviews/reply/r-9");
+    // A review carries the way back to this list (UI/UX v2 Phase 1) — the Review Case offers 「← 확인할 일」 then.
+    expect(hrefs).toContain("/reviews/reply/r-9?from=work");
     expect(hrefs).toContain("/inquiries/i-9");
     expect(hrefs).toContain("/customer-operations/cases/c-1");
   });
@@ -157,7 +160,7 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 1, rows: [row()] });
     draw();
 
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     expect(list).toHaveTextContent("초안 있음");
     expect(list).toHaveTextContent("미발송");
   });
@@ -185,7 +188,7 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 80, rows: [row(), REVIEW] });
     draw();
 
-    await screen.findByRole("list", { name: "확인 필요" });
+    await screen.findByRole("list", { name: "확인할 일" });
     // It says the depth it reached, not a total: the reads that overflow count different populations, and their
     // sum is a number nobody measured.
     const note = screen.getByText(/2건까지 보여 드립니다/);
@@ -211,7 +214,7 @@ describe("OperationsCaseQueue", () => {
     });
     draw();
 
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     expect(list).toHaveTextContent(/「포장 파손」 문제가 3건 확인됐습니다/);
     expect(list).toHaveTextContent("리뷰");
     expect(list).not.toHaveTextContent("판단 보류");
@@ -229,7 +232,7 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 1, rows: [row()] });
     draw();
 
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     expect(list).toHaveTextContent("답변 필요");
     expect(list).not.toHaveTextContent("판단 보류");
     // The recommendation and the tag are the same fact, so the row still says what is ready.
@@ -241,10 +244,29 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 1, rows: [REVIEW] });
     draw();
 
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     // Falls back to the rule's own line. A product with no issue memory yields no repeat claim rather than a
     // hedged one, and the row says only what is true.
     expect(list).toHaveTextContent("확인이 필요한 리뷰입니다");
+  });
+
+  it("행마다 버튼이 없다 — 넓은 화면에서 행은 선택이고, 한 가지 주 행동은 오른쪽 상세에 있다", async () => {
+    const restore = stubWide(true);
+    try {
+      reads();
+      api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
+      draw();
+      const list = await screen.findByRole("list", { name: "확인할 일" });
+      // No row carries a verb of its own: the list used to end every row in 「검토」.
+      expect(within(list).queryByText("검토")).toBeNull();
+      // Each row selects in place, and the first one is open beside the list.
+      const links = within(list).getAllByRole("link");
+      expect(links.every((a) => /[?&]item=/.test(a.getAttribute("href") ?? ""))).toBe(true);
+      expect(links[0]).toHaveAttribute("aria-current", "true");
+      expect(await screen.findByLabelText("선택한 확인할 일")).toBeInTheDocument();
+    } finally {
+      restore();
+    }
   });
 
   it("이 화면에는 결정하는 컨트롤이 없다", async () => {
@@ -252,7 +274,7 @@ describe("OperationsCaseQueue", () => {
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
     draw();
 
-    await screen.findByRole("list", { name: "확인 필요" });
+    await screen.findByRole("list", { name: "확인할 일" });
     // Every row is a link to the screen that owns the decision; nothing here resolves, dismisses or sends.
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
@@ -261,7 +283,25 @@ describe("OperationsCaseQueue", () => {
     reads();
     api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
     const { container } = draw();
-    await screen.findByRole("list", { name: "확인 필요" });
+    await screen.findByRole("list", { name: "확인할 일" });
     await expectNoAxeViolations(container);
   });
 });
+
+/** Stands the list and the detail side by side, as the layout does at 1200px and up. Returns the restore. */
+function stubWide(matches: boolean): () => void {
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  return () => {
+    window.matchMedia = original;
+  };
+}

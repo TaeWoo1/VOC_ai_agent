@@ -40,7 +40,7 @@ export function RepeatedSignal({
     return (
       <Section title="반복 신호">
         <p className="break-keep text-sm leading-relaxed text-muted">
-          이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다. 같은 문제를 말한 리뷰가 쌓이면 고객운영 메모리에 문제로
+          이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다. 같은 문제를 말한 리뷰가 쌓이면 반복 문제로
           모입니다 — 위의 자동 분류와는 다른 기준입니다.
         </p>
       </Section>

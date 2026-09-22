@@ -6,6 +6,7 @@ import {
   SEVERITY_LABEL_KO,
   changeBadges,
   investigationHintKo,
+  nextActionKo,
   provenanceKo,
   renderableQuotes,
   suppressedQuoteCount,
@@ -19,6 +20,8 @@ import type {
   ReviewIssueView,
 } from "../../lib/types";
 import { OpportunityList } from "../opportunity/OpportunityList";
+import { Facts } from "../ui/ObjectRow";
+import { CaseBlock, CaseLayout, DecisionCard } from "../workspace/CaseLayout";
 import { IssueDecision } from "./repeat/IssueDecision";
 import { IssueGrounding } from "./repeat/IssueGrounding";
 import { RatingSpread } from "./repeat/RatingSpread";
@@ -128,143 +131,127 @@ export function IssueDetailPanel({
   const suppressed = detail ? suppressedQuoteCount(detail.evidence) : 0;
 
   return (
-    <article aria-label="선택한 이슈" className="space-y-6">
-      <header>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-semibold text-muted">
-            {issue.lifecycleLabelKo}
-          </span>
-          <span className="text-sm text-muted">심각도 {SEVERITY_LABEL_KO[issue.severity]}</span>
-        </div>
-        <h2 className="mt-3 break-keep text-xl font-bold text-ink">{issue.title}</h2>
-      </header>
-
-      <section aria-label="왜 올라왔나요">
-        <h3 className="text-base font-bold text-ink">왜 올라왔나요</h3>
-        <ul className="mt-2 space-y-1.5">
-          {badges.map((badge) => (
-            <li key={badge.kind} className="break-keep leading-relaxed text-muted">
-              <span className="font-semibold text-ink">{badge.labelKo}</span> —{" "}
-              {CHANGE_EXPLANATION_KO[badge.kind]}
-            </li>
-          ))}
-          {badges.length === 0 ? (
-            <li className="break-keep leading-relaxed text-muted">
-              최근 판단된 변화는 없지만 관련 리뷰가 기록되어 있습니다.
-            </li>
-          ) : null}
-        </ul>
-        {surge ? <p className="mt-3 text-sm tabular-nums text-muted">{surge}</p> : null}
-        {hint ? <p className="mt-3 break-keep leading-relaxed text-ink">{hint}</p> : null}
-      </section>
-
-      {/* Where it repeats, and against how many reviews. The product line used to live in the header
-          as a single dominant name; a problem that reaches three products was describing itself with
-          one of them. */}
-      <RepeatByProduct evidence={context?.evidence ?? null} failed={contextFailed} />
-
-      {/* Drawn right after WHERE it repeats because it answers the next question about the same
-          evidence set — in what kind of review. It sits before the quotes so a seller reads the
-          shape of the evidence before three examples of it. */}
-      <RatingSpread distribution={context?.evidence.ratingDistribution ?? null} failed={contextFailed} />
-
-      <section aria-label="근거">
-        <h3 className="text-base font-bold text-ink">근거</h3>
-        {loading ? (
-          <p className="mt-2 text-muted">근거를 불러오는 중…</p>
-        ) : failed ? (
-          <p className="mt-2 text-muted">근거를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
-        ) : (
-          <>
-            {quotes.length > 0 ? (
-              <ul className="mt-2 space-y-3">
-                {(detail?.evidence ?? [])
-                  .filter((row) => row.quote && row.quote.trim().length > 0)
-                  .slice(0, 3)
-                  .map((row) => (
-                    <li key={`${row.reviewId}-${row.unitOrdinal}`} className="rounded-xl bg-canvas p-4">
-                      <p className="break-keep leading-relaxed text-ink">“{row.quote}”</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
-                        <span>{row.occurredOn}</span>
-                        {row.productName ? (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span>{row.productName}</span>
-                          </>
-                        ) : null}
-                        {/*
-                          The other half of the bidirectional link. The review decision workspace
-                          links here for the repeated signal behind one review; this goes back to the
-                          review that produced this evidence — and to the ONE surface where a review
-                          is judged and answered, not to a second reader of it.
-
-                          Unconditional, unlike the inbox link it replaces: that one rendered only
-                          when the row happened to be in an already-loaded inbox page, so whether a
-                          seller could reach the review behind a quote depended on what some other
-                          screen had fetched. The account-less route resolves the account itself with
-                          an org-scoped read, so this link needs nothing but the review id.
-                        */}
-                        <Link
-                          to={`/reviews/reply/${row.reviewId}`}
-                          className="ml-auto rounded font-semibold text-brand-700 transition hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
-                        >
-                          이 리뷰 처리하기
-                        </Link>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-muted">표시할 수 있는 인용이 없습니다.</p>
-            )}
-            {suppressed > 0 ? (
-              <p className="mt-3 text-sm text-muted">
-                인용을 표시할 수 없는 근거가 {suppressed}건 더 있습니다.
-              </p>
-            ) : null}
-          </>
-        )}
-      </section>
-
-      <IssueGrounding knowledge={context?.knowledge ?? null} failed={contextFailed} />
-
-      {/*
-        Opportunity Engine v1 — what can be done about this. Drawn between what we know and what we
-        decided because that is its place in the seller's reading. The list decides its own emptiness
-        sentence; the heading is always drawn so the seller learns the product HAS this layer even on
-        an issue that yields nothing.
-      */}
-      <section aria-label="개선 기회">
-        <h3 className="text-base font-bold text-ink">개선 기회</h3>
-        <OpportunityList issueId={issue.id} />
-      </section>
-
-      <IssueDecision
-        state={issue.lifecycleState}
-        busy={busy}
-        error={actionError}
-        onSubmit={runAction}
-      />
-
-      {detail && detail.history.length > 0 ? (
-        <section aria-label="기록">
-          <h3 className="text-base font-bold text-ink">기록</h3>
-          <ul className="mt-2 space-y-2">
-            {detail.history.map((event) => (
-              <li key={`${event.at}-${event.toState}`} className="text-sm text-muted">
-                <span className="font-medium text-ink">{event.toStateLabelKo}</span>
-                {" · "}
-                {event.actor === "OPERATOR" ? "운영자" : "reviewnary"}
-                {" · "}
-                {kstDate(event.at)}
-                {event.note ? <span className="block break-keep text-ink">{event.note}</span> : null}
+    <CaseLayout
+      variant="pane"
+      label="선택한 이슈"
+      decisionLabel="판매자의 결정"
+      meta={
+        <Facts>
+          <span className="font-semibold text-ink">{issue.lifecycleLabelKo}</span>
+          <span>심각도 {SEVERITY_LABEL_KO[issue.severity]}</span>
+        </Facts>
+      }
+      title={issue.title}
+      subject={
+        <CaseBlock title="왜 올라왔나요" tone="subject">
+          <ul className="space-y-1.5">
+            {badges.map((badge) => (
+              <li key={badge.kind} className="break-keep leading-relaxed text-muted">
+                <span className="font-semibold text-ink">{badge.labelKo}</span> — {CHANGE_EXPLANATION_KO[badge.kind]}
               </li>
             ))}
+            {badges.length === 0 ? (
+              <li className="break-keep leading-relaxed text-muted">최근 판단된 변화는 없지만 관련 리뷰가 기록되어 있습니다.</li>
+            ) : null}
           </ul>
-        </section>
-      ) : null}
+          {surge ? <p className="mt-3 text-sm tabular-nums text-muted">{surge}</p> : null}
+          {hint ? <p className="mt-3 break-keep leading-relaxed text-ink">{hint}</p> : null}
+        </CaseBlock>
+      }
+      decision={
+        // The one thing a seller does here, straight after why it is here — it used to be the eighth block, four
+        // screens down, under the evidence and the opportunities.
+        <DecisionCard primary={nextActionKo(issue.lifecycleState) !== null}>
+          <IssueDecision state={issue.lifecycleState} busy={busy} error={actionError} onSubmit={runAction} />
+        </DecisionCard>
+      }
+      context={
+        <>
+          {/* Where it repeats, and against how many reviews. */}
+          <RepeatByProduct evidence={context?.evidence ?? null} failed={contextFailed} />
 
-      <p className="break-keep text-xs leading-relaxed text-muted">{provenanceKo(issue)}</p>
-    </article>
+          {/* In what kind of review — the shape of the evidence before three examples of it. */}
+          <RatingSpread distribution={context?.evidence.ratingDistribution ?? null} failed={contextFailed} />
+
+          <section aria-label="근거" className="border-t border-line pt-4">
+            <h3 className="text-base font-bold text-ink">근거</h3>
+            {loading ? (
+              <p className="mt-2 text-muted">근거를 불러오는 중…</p>
+            ) : failed ? (
+              <p className="mt-2 text-muted">근거를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
+            ) : (
+              <>
+                {quotes.length > 0 ? (
+                  <ul className="mt-2 space-y-3">
+                    {(detail?.evidence ?? [])
+                      .filter((row) => row.quote && row.quote.trim().length > 0)
+                      .slice(0, 3)
+                      .map((row) => (
+                        <li key={`${row.reviewId}-${row.unitOrdinal}`} className="rounded-xl bg-canvas p-4">
+                          <p className="break-keep leading-relaxed text-ink">“{row.quote}”</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
+                            <span>{row.occurredOn}</span>
+                            {row.productName ? (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span>{row.productName}</span>
+                              </>
+                            ) : null}
+                            {/* Back to the review that produced this evidence — the ONE surface where a review is
+                                judged and answered. Needs nothing but the review id. */}
+                            <Link
+                              to={`/reviews/reply/${row.reviewId}`}
+                              className="ml-auto rounded font-semibold text-brand-700 transition hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2"
+                            >
+                              이 리뷰 처리하기
+                            </Link>
+                          </div>
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-muted">표시할 수 있는 인용이 없습니다.</p>
+                )}
+                {suppressed > 0 ? (
+                  <p className="mt-3 text-sm text-muted">인용을 표시할 수 없는 근거가 {suppressed}건 더 있습니다.</p>
+                ) : null}
+              </>
+            )}
+          </section>
+        </>
+      }
+      more={
+        <>
+          <IssueGrounding knowledge={context?.knowledge ?? null} failed={contextFailed} />
+
+          {/* Opportunity Engine v1 — what can be done about this. The heading is always drawn so the seller learns
+              the product HAS this layer even on an issue that yields nothing. */}
+          <section aria-label="개선 기회" className="border-t border-line pt-4">
+            <h3 className="text-base font-bold text-ink">개선 기회</h3>
+            <OpportunityList issueId={issue.id} />
+          </section>
+
+          {detail && detail.history.length > 0 ? (
+            <section aria-label="기록" className="border-t border-line pt-4">
+              <h3 className="text-base font-bold text-ink">기록</h3>
+              <ul className="mt-2 space-y-2">
+                {detail.history.map((event) => (
+                  <li key={`${event.at}-${event.toState}`} className="text-sm text-muted">
+                    <span className="font-medium text-ink">{event.toStateLabelKo}</span>
+                    {" · "}
+                    {event.actor === "OPERATOR" ? "운영자" : "reviewnary"}
+                    {" · "}
+                    {kstDate(event.at)}
+                    {event.note ? <span className="block break-keep text-ink">{event.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <p className="break-keep text-sm leading-relaxed text-muted">{provenanceKo(issue)}</p>
+        </>
+      }
+    />
   );
 }

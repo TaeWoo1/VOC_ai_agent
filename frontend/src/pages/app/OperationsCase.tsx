@@ -4,6 +4,8 @@ import { isAxiosError } from "axios";
 import { Btn, BtnLink } from "../../components/ui/Btn";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { WorkFlowCard } from "../../components/ui/WorkFlowCard";
+import { Facts } from "../../components/ui/ObjectRow";
+import { CaseBlock, CaseLayout, CaseQuote, type CaseVariant } from "../../components/workspace/CaseLayout";
 import { api } from "../../lib/apiClient";
 import { actionKo, subjectFallback } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, decisionOf, photoWord, shortDate, sourceLabel, waitLabel } from "../../lib/copy/customerOps";
@@ -28,6 +30,23 @@ export function OperationsCase() {
   const { caseId = "" } = useParams();
   const location = useLocation();
   const queue = (location.state as CaseQueueState | null)?.caseIds ?? null;
+  return <OperationsCaseView caseId={caseId} variant="page" queue={queue} />;
+}
+
+/**
+ * The case itself, in either reading of {@link CaseLayout}: the full page this route opens, or the right-hand pane
+ * of 확인할 일 and 오늘. Same reads, same writes, same words — only the placement differs, so a seller who decides a
+ * case in the pane and one who opens it on its own page are looking at the same screen.
+ */
+export function OperationsCaseView({
+  caseId,
+  variant,
+  queue = null,
+}: {
+  caseId: string;
+  variant: CaseVariant;
+  queue?: string[] | null;
+}) {
   const [detail, setDetail] = useState<OperationsCaseDetail | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -63,89 +82,91 @@ export function OperationsCase() {
     setError(message ?? COPY.saveFailed);
   };
 
-  const title = detail.title?.trim() || firstLine(plainText(detail.body)) || subjectFallback(detail.subjectKind);
+  const body = plainText(detail.body);
+  const title = detail.title?.trim() || firstLine(body) || subjectFallback(detail.subjectKind);
   const wait = waitLabel(detail.receivedOn);
   const index = queue ? queue.indexOf(caseId) : -1;
   const showTeach = Boolean(detail.gap) && !receipt;
+  const pane = variant === "pane";
+  // The title is the customer's first line. When that line IS the whole message, the subject block would print the
+  // same sentence a second time one block below — measured on the demo org, 「교환 신청은 언제까지 가능한가요?」 was
+  // both the h1 and the only line of 문의 내용. The block stays whenever it adds anything: more text, or photos.
+  const bodyAddsSomething = Boolean(body) && body.trim() !== title.trim();
+  const hasMedia = Boolean(detail.media && detail.media.length > 0);
 
   return (
-    <div className="mx-auto w-full max-w-[1080px] space-y-5">
-      <nav aria-label="위치" className="flex items-center gap-2 text-sm text-muted">
-        <Link to="/" className="rounded hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
-          {COPY.homeTitle}
-        </Link>
-        <span aria-hidden="true">›</span>
-        <span className="font-semibold text-ink">{COPY.listTitle}</span>
-        {queue && index >= 0 ? <Pager queue={queue} index={index} /> : null}
-      </nav>
-
-      <header className="flex flex-wrap items-start gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          <h1 className="break-keep text-[24px] font-extrabold leading-tight tracking-tight text-ink [overflow-wrap:anywhere]">
-            {title}
-          </h1>
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted">
-            <span>{sourceLabel(detail.channelNameKo, detail.subjectKind, detail.rating)}</span>
-            {detail.productName ? (
-              <>
-                <Sep />
-                <span className="break-keep">{detail.productName}</span>
-              </>
-            ) : null}
-            {wait ? (
-              <>
-                <Sep />
-                <span className="tabular-nums">{wait}</span>
-              </>
-            ) : null}
+    <CaseLayout
+      variant={variant}
+      decisionLabel={COPY.mineLabel}
+      nav={
+        pane ? undefined : (
+          <nav aria-label="위치" className="flex items-center gap-2 text-sm text-muted">
+            <Link to="/" className="rounded hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+              {COPY.homeTitle}
+            </Link>
+            <span aria-hidden="true">›</span>
+            <Link
+              to="/customer-operations/cases"
+              className="rounded font-semibold text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              {COPY.listTitle}
+            </Link>
+            {queue && index >= 0 ? <Pager queue={queue} index={index} /> : null}
+          </nav>
+        )
+      }
+      meta={
+        <Facts>
+          <span>{sourceLabel(detail.channelNameKo, detail.subjectKind, detail.rating)}</span>
+          {wait ? <span className="tabular-nums">{wait}</span> : null}
+        </Facts>
+      }
+      sub={detail.productName ?? undefined}
+      title={title}
+      headerAction={
+        pane ? (
+          <Link
+            to={`/customer-operations/cases/${caseId}`}
+            className="rounded font-semibold text-muted hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            전체 화면으로
+          </Link>
+        ) : (
+          <Link
+            to={detail.to}
+            className="rounded font-semibold text-brand-700 hover:text-brand-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            {COPY.original} ↗
+          </Link>
+        )
+      }
+      summary={<WorkFlowCard ariaLabel="자동 확인과 내가 확인할 일" {...flowCells(detail, receipt !== null)} />}
+      notice={
+        error ? (
+          <p className="break-keep text-sm text-bad" role="alert">
+            {error}
           </p>
-        </div>
-        <Link
-          to={detail.to}
-          className="shrink-0 rounded pt-1 text-sm font-semibold text-brand-700 hover:text-brand-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-        >
-          {COPY.original} ↗
-        </Link>
-      </header>
-
-      <WorkFlowCard ariaLabel="자동 확인과 내 확인 필요" {...flowCells(detail, receipt !== null)} />
-
-      {error ? (
-        <p className="break-keep text-sm text-bad" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      {/*
-        One grid, two readings. From 1280 up the seller's column sits beside the story and follows the scroll; below
-        it everything stacks, and the column comes right after what the customer wrote — the thing to do is not left
-        under the evidence, below the fold. Extra height goes to the last row so nothing opens a gap under the body.
-      */}
-      <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[auto_auto_1fr] xl:gap-x-6">
-        <div className="min-w-0 xl:col-start-1 xl:row-start-1">
-          <Block title={detail.subjectKind === "INQUIRY" ? COPY.inquiryBody : COPY.reviewBody}>
+        ) : null
+      }
+      subject={
+        bodyAddsSomething || hasMedia ? (
+          <CaseBlock title={detail.subjectKind === "INQUIRY" ? COPY.inquiryBody : COPY.reviewBody} tone="subject">
             {/* The channel's own markup is stripped HERE and nowhere else — the stored row keeps what the channel
                 sent, and the same helper the 문의 화면 has used since Demo UX Polish v1 does the stripping, so the
-                two screens cannot show the same customer different words. Measured: this case's body arrives as
-                `<meta charset="utf-8">교환 신청은 언제까지 가능한가요?`, and the tag was the first thing a seller
-                read on the first case they opened. */}
-            <p className="whitespace-pre-wrap break-keep text-[17px] font-medium leading-[1.8] text-ink [overflow-wrap:anywhere]">
-              {plainText(detail.body) || "내용 없음"}
-            </p>
-            {detail.media && detail.media.length > 0 ? (
+                two screens cannot show the same customer different words. */}
+            {bodyAddsSomething ? <CaseQuote>{body}</CaseQuote> : null}
+            {hasMedia ? (
               <ul className="mt-4 flex flex-wrap gap-3" aria-label="고객이 올린 사진">
-                {detail.media.map((m) => (
+                {detail.media!.map((m) => (
                   <MediaItem key={m.ordinal} caseId={caseId} media={m} />
                 ))}
               </ul>
             ) : null}
-          </Block>
-        </div>
-
-        <aside
-          aria-label={COPY.mineLabel}
-          className="flex flex-col gap-3.5 self-start xl:sticky xl:top-4 xl:col-start-2 xl:row-span-3 xl:row-start-1"
-        >
+          </CaseBlock>
+        ) : null
+      }
+      decision={
+        <>
           {receipt ? <TaughtReceipt receipt={receipt} redrafted={Boolean(detail.draft)} /> : null}
           {showTeach ? (
             <TeachCard
@@ -162,22 +183,18 @@ export function OperationsCase() {
             <DraftCard caseId={caseId} detail={detail} primary={!showTeach} onApplied={applied} onFailed={failed} />
           ) : null}
           <CorrectionCard caseId={caseId} detail={detail} onApplied={applied} onFailed={failed} />
-        </aside>
-
-        <div className="min-w-0 xl:col-start-1 xl:row-start-2">
-          <Block title={COPY.checks}>
-            <Checks detail={detail} gapOpen={showTeach} />
-            {!detail.summary && detail.reasonNote && !settled(detail) ? (
-              <p className="mt-3 break-keep text-sm text-muted">{detail.reasonNote}</p>
-            ) : null}
-          </Block>
-        </div>
-
-        <div className="min-w-0 self-start xl:col-start-1 xl:row-start-3">
-          <Evidence detail={detail} />
-        </div>
-      </div>
-    </div>
+        </>
+      }
+      context={
+        <CaseBlock title={COPY.checks}>
+          <Checks detail={detail} gapOpen={showTeach} />
+          {!detail.summary && detail.reasonNote && !settled(detail) ? (
+            <p className="mt-3 break-keep text-sm text-muted">{detail.reasonNote}</p>
+          ) : null}
+        </CaseBlock>
+      }
+      more={<Evidence detail={detail} />}
+    />
   );
 }
 
@@ -359,15 +376,6 @@ function PagerLink({ to, queue, label, dir }: { to: string | null; queue: string
     >
       {icon}
     </Link>
-  );
-}
-
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section aria-label={title} className="rounded-[14px] bg-surface px-5 py-5 shadow-[0_0_0_1px_#E4E7EC] sm:px-6">
-      <h2 className="mb-3 text-xs font-bold text-muted">{title}</h2>
-      {children}
-    </section>
   );
 }
 

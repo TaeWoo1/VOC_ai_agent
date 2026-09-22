@@ -19,6 +19,9 @@ import { ConversationProvider } from "../../lib/conversation/ConversationProvide
 const AGENT_BRIDGE_ENABLED = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
 const AGENT_PROJECTION_ENABLED = import.meta.env.VITE_ENABLE_AGENT_PROJECTION === "true";
 
+/** Pages drawn as a list beside a detail pane — each column scrolls on its own. */
+const MASTER_DETAIL_ROUTES = [/^\/customer-operations\/cases\/?$/, /^\/memory(\/[^/]+)?\/?$/];
+
 /**
  * Application shell for the v2 product surface.
  *
@@ -33,6 +36,9 @@ export function AppShellV2() {
   // composer at the bottom of the viewport, so the shell gives it the full column — no page padding,
   // no content-width cap, no outer scroll. Every other page keeps the work-surface layout.
   const chat = location.pathname === "/";
+  // Master-detail (UI/UX v2 Phase 1): the list and the selected item's detail each own their scroll, so the shell
+  // gives these pages the full column and no outer scroll — the same arrangement the conversation has.
+  const workspace = MASTER_DETAIL_ROUTES.some((route) => route.test(location.pathname));
 
   // Close the drawer on any navigation, including a tap on the item that is already active.
   useEffect(() => {
@@ -65,6 +71,10 @@ export function AppShellV2() {
             // surface it is written on. That single inversion is what stops an answer from arriving
             // as a white card floating on grey, and it costs no new colour token.
             <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface pb-16 outline-none md:pb-0" data-layout="chat">
+              <Outlet />
+            </main>
+          ) : workspace ? (
+            <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none" data-layout="master-detail">
               <Outlet />
             </main>
           ) : (

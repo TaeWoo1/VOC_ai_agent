@@ -4,7 +4,7 @@ import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { Facts } from "../../components/ui/ObjectRow";
 import { Section } from "../../components/ui/Section";
-import { Btn, BtnLink } from "../../components/ui/Btn";
+import { Btn } from "../../components/ui/Btn";
 import { VocItemReplyPrep } from "../../components/VocItemReplyPrep";
 import { SellerCorrectionControls } from "../../components/reviews/SellerCorrectionControls";
 import { ChannelAnsweredState } from "../../components/reviews/ChannelAnsweredState";
@@ -14,8 +14,11 @@ import { GroundingOnHand } from "../../components/reviews/decision/GroundingOnHa
 import { DecisionActionStep } from "../../components/reviews/decision/DecisionActionStep";
 import { DecisionLog } from "../../components/reviews/decision/DecisionLog";
 import { api } from "../../lib/apiClient";
-import { reviewRecordPath, ratingLabel } from "../../lib/reviewRecord";
+import { reviewRecordPath } from "../../lib/reviewRecord";
 import { reviewWord } from "../../lib/channelVocabulary";
+import { plainText } from "../../lib/plainText";
+import { COPY, sourceLabel } from "../../lib/copy/customerOps";
+import { CaseBlock, CaseLayout, DecisionCard, type CaseVariant } from "../../components/workspace/CaseLayout";
 import type {
   ChannelReviewDetailView,
   ReviewDecisionContext,
@@ -69,7 +72,30 @@ import type {
 export function ReviewReplyTask() {
   const { reviewId = "" } = useParams();
   const [params] = useSearchParams();
-  const cameFromConversation = params.get("from") === "chat";
+  const from = params.get("from");
+  return <ReviewCaseView reviewId={reviewId} variant="page" from={from === "chat" || from === "work" ? from : null} />;
+}
+
+/**
+ * The Review Case in either reading of {@link CaseLayout} — its own page, or the right-hand pane of 확인할 일 and
+ * 오늘. The reads, the writes and the reply lane are the same in both; only the placement differs.
+ *
+ * <p><b>Two judgments, numbered, because they are two.</b> 「이 리뷰의 중요도」 is T-07's correction of the
+ * triage tier; 「처리 방법」 is the `TriageDisposition`. They used to stand one under the other with the same word —
+ * 「지켜보기」 — on a button in each, recorded in two different stores. The stored values are unchanged; the
+ * disposition's word is now 「두고 보기」 (`TRIAGE_OPTIONS`) so the seller can tell which question a press answers.
+ */
+export function ReviewCaseView({
+  reviewId,
+  variant,
+  from = null,
+}: {
+  reviewId: string;
+  variant: CaseVariant;
+  /** Where a full page was opened from — decides which way back it offers. */
+  from?: "chat" | "work" | null;
+}) {
+  const pane = variant === "pane";
 
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [failed, setFailed] = useState(false);
@@ -93,9 +119,16 @@ export function ReviewReplyTask() {
   const [decision, setDecision] = useState<TriageDisposition | null>(null);
   // Whether the review carries reply work that must stay reachable whatever the decision now says.
   // Monotonic within a session: a draft written while the review was 대응 필요 must stay readable — and
-  // any approval withdrawable — after the seller moves it to 지켜보기.
+  // any approval withdrawable — after the seller moves it to 두고 보기.
   const [prepared, setPrepared] = useState(false);
   const [localWork, setLocalWork] = useState(false);
+
+  useEffect(() => {
+    // A pane that switches from one review to the next must not carry the last one's session state.
+    setDecision(null);
+    setPrepared(false);
+    setLocalWork(false);
+  }, [reviewId]);
 
   useEffect(() => {
     if (!reviewId) return;
@@ -170,20 +203,26 @@ export function ReviewReplyTask() {
 
   // The channel record is an ACCOUNT-shaped surface: it lists what one connected account holds. A
   // review this org uploaded has no such page, so the way back is the index rather than a link into a
-  // record that does not exist. Read from the detail, so it is right on both kinds of review and is
-  // simply the index while the detail is still loading.
+  // record that does not exist.
   const recordPath = detail?.sellerAccountId ? reviewRecordPath(detail.sellerAccountId) : "/reviews";
 
-  const back = (
+  const back = pane ? undefined : (
     <div className="flex flex-wrap items-center gap-3">
-      <Link to={recordPath} className="text-sm font-semibold text-muted hover:text-ink hover:underline">
-        ← 리뷰 기록으로
-      </Link>
+      {/* The way back is the way in. A review opened from 확인할 일 goes back there — sending the seller to one
+          channel's record would drop them into a list they never came from. */}
+      {from === "work" ? (
+        <Link to="/customer-operations/cases" className="text-sm font-semibold text-muted hover:text-ink hover:underline">
+          ← {COPY.listTitle}
+        </Link>
+      ) : (
+        <Link to={recordPath} className="text-sm font-semibold text-muted hover:text-ink hover:underline">
+          ← 리뷰 기록으로
+        </Link>
+      )}
       {/* The conversation that sent the seller here is still the one at `/` — the pointer is stored per
           org and restored on mount, so this link returns to the same thread rather than starting one.
-          Rendered only when a conversation actually sent them: on a page reached from the record it
-          would offer a way back to somewhere they were not. */}
-      {cameFromConversation ? (
+          Rendered only when a conversation actually sent them. */}
+      {from === "chat" ? (
         <Link to="/" className="text-sm font-semibold text-muted hover:text-ink hover:underline">
           대화로 돌아가기
         </Link>
@@ -191,11 +230,11 @@ export function ReviewReplyTask() {
     </div>
   );
 
-  if (loading) {
+  if (loading && !detail) {
     return (
       <div className="space-y-4">
         {back}
-        <PageHead title="리뷰 처리" compact />
+        {pane ? null : <PageHead title="리뷰 처리" compact />}
         <p className="text-sm text-muted">불러오는 중…</p>
       </div>
     );
@@ -205,7 +244,7 @@ export function ReviewReplyTask() {
     return (
       <div className="space-y-4">
         {back}
-        <PageHead title="리뷰 처리" compact />
+        {pane ? null : <PageHead title="리뷰 처리" compact />}
         <Empty
           title="이 리뷰를 불러오지 못했습니다"
           body="연결 상태를 확인한 뒤 다시 시도해 주세요. 불러오지 못한 리뷰를 임의로 채우지는 않습니다."
@@ -218,124 +257,134 @@ export function ReviewReplyTask() {
   const replyWork = detail.replyWork;
   // The draft belongs to the chosen action: it opens on 대응 필요, and it stays open for work that
   // already exists so an approved reply can never be stranded where the seller can neither read nor
-  // withdraw it. Both operands are free — the decision is local and `prepared` starts from a flag this
-  // page already read — so the rule costs no request of its own.
+  // withdraw it.
   const showDraft = replyWork !== null && (decision === "RESPONSE_NEEDED" || prepared || localWork);
   // The reply lane's own address. Reply work is only ever handed out with an account behind it, so
-  // this is non-null exactly when the panel below mounts; the `?? ""` is a type narrowing, not a
-  // fallback that could send a request.
+  // this is non-null exactly when the panel below mounts.
   const replyAccountId = detail.sellerAccountId ?? "";
+  const body = detail.body ? plainText(detail.body).trim() : "";
+  const title = detail.textless || body.length === 0 ? `별점만 남긴 ${word}` : body;
 
   return (
-    <div className="space-y-6">
-      {back}
-      <PageHead
-        title="리뷰 처리"
-        compact
-        meta={
-          <Facts className="text-sm text-muted">
-            {detail.productName ? (
-              context?.productId ? (
-                <Link to={`/products/${context.productId}`} className="break-keep font-medium text-ink hover:underline">
-                  {detail.productName}
-                </Link>
-              ) : (
-                <span className="break-keep text-ink">{detail.productName}</span>
-              )
-            ) : null}
-            <span className="tabular-nums">{ratingLabel(detail.rating)}</span>
-            <span className="tabular-nums">{detail.writtenOn ?? "날짜 없음"}</span>
-          </Facts>
-        }
-        action={
-          detail.sellerAccountId ? (
-            <BtnLink to={`${reviewRecordPath(detail.sellerAccountId)}?review=${detail.id}`} variant="ghost" size="sm">
-              리뷰 기록에서 보기
-            </BtnLink>
-          ) : undefined
-        }
-      />
+    <CaseLayout
+      variant={variant}
+      decisionLabel="판매자의 결정"
+      nav={back}
+      meta={
+        <Facts>
+          <span>{sourceLabel(context?.channelCode ?? null, "REVIEW", detail.rating)}</span>
+          <span className="tabular-nums">{detail.writtenOn ?? "날짜 없음"}</span>
+        </Facts>
+      }
+      sub={
+        detail.productName ? (
+          context?.productId ? (
+            <Link to={`/products/${context.productId}`} className="hover:text-ink hover:underline">
+              {detail.productName}
+            </Link>
+          ) : (
+            detail.productName
+          )
+        ) : undefined
+      }
+      title={title}
+      headerAction={
+        pane ? (
+          <Link to={`/reviews/reply/${detail.id}?from=work`} className="rounded font-semibold text-muted hover:text-ink hover:underline">
+            전체 화면으로
+          </Link>
+        ) : detail.sellerAccountId ? (
+          <Link
+            to={`${reviewRecordPath(detail.sellerAccountId)}?review=${detail.id}`}
+            className="rounded font-semibold text-muted hover:text-ink hover:underline"
+          >
+            리뷰 기록에서 보기
+          </Link>
+        ) : undefined
+      }
+      subject={
+        <CaseBlock title="왜 올라왔나요" tone={pane ? "subject" : "plain"}>
+          {/* The customer's sentence is the title above; this block is what the rules said about it. */}
+          <ReviewProblemCard detail={detail} word={word} showBody={false} />
+        </CaseBlock>
+      }
+      decision={
+        <>
+          {/* The channel's own statement, said BEFORE anyone decides anything. */}
+          <ChannelAnsweredState state={replyWork?.channelReplyState ?? null} />
 
-      {/* 1 · 2 — what the problem is, and why it is here. */}
-      <ReviewProblemCard detail={detail} word={word} />
+          <DecisionCard>
+            {/* ① — the seller's own judgment of the tier, which does not replace the system's. */}
+            <Section title="① 이 리뷰의 중요도" ariaLabel="판매자 판단 영역">
+              <SellerCorrectionControls
+                reviewId={detail.id}
+                word={word}
+                systemTier={detail.triage.tier}
+                aiMarked={detail.aiMark !== null}
+                correction={detail.sellerCorrection}
+                onCorrected={bump}
+                headingLevel={3}
+              />
+            </Section>
+          </DecisionCard>
 
-      {/* The channel's own statement, said BEFORE anyone decides anything. The panel that has always
-          known this does not mount until after the decision, so the fact was invisible at the one
-          moment it changes what a person would do. It is not the seller's decision and makes none. */}
-      <ChannelAnsweredState state={replyWork?.channelReplyState ?? null} />
+          <DecisionCard primary={decision === null}>
+            {/* ② — what to do. Stands on every review the workspace can open: a channel with no reply flow,
+                and a review no account acquired. */}
+            <DecisionActionStep
+              reviewId={detail.id}
+              decision={decision}
+              replySupported={replyWork !== null}
+              replyUnavailableReason={detail.replyUnavailableReason}
+              title="② 처리 방법"
+              onDecided={(next) => {
+                setDecision(next);
+                bump();
+              }}
+              onRecorded={bump}
+            />
+          </DecisionCard>
 
-      {/* 3 — has anyone said this before. */}
-      <RepeatedSignal problems={context?.repeatedProblems ?? []} failed={contextFailed || context === null} />
+          {/* The draft that follows from 대응 필요. The same panel as every other reply surface: no second
+              reply flow, no write this page owns, and the approval boundary untouched. */}
+          {showDraft && replyWork ? (
+            <DecisionCard primary>
+              <Section title="답변 준비" ariaLabel="답변 준비 영역">
+                <VocItemReplyPrep
+                  key={`prep-${replyWork.actionRef}`}
+                  accountId={replyAccountId}
+                  actionRef={replyWork.actionRef}
+                  disposition={decision}
+                  onPrepared={() => setPrepared(true)}
+                  onOutcomeRecorded={bump}
+                  onLocalWork={setLocalWork}
+                  headingLevel={3}
+                />
+              </Section>
+            </DecisionCard>
+          ) : null}
 
-      {/* 4 — what a reply would stand on. */}
-      {context ? <GroundingOnHand context={context} /> : null}
-
-      {/* 5 — the seller's own judgment, which does not replace the system's. */}
-      <Section title="판매자 판단" ariaLabel="판매자 판단 영역">
-        <SellerCorrectionControls
-          reviewId={detail.id}
-          word={word}
-          systemTier={detail.triage.tier}
-          aiMarked={detail.aiMark !== null}
-          correction={detail.sellerCorrection}
-          onCorrected={bump}
-          headingLevel={3}
-        />
-      </Section>
-
-      {/* 6 — what to do. The address is the review, so this control stands on every review the
-          workspace can open: a channel with no reply flow, and a review no account acquired. It used
-          to be gated on a server-minted ref, which meant a failed context read could cost the seller
-          the ability to decide as well as the context. */}
-      <DecisionActionStep
-        reviewId={detail.id}
-        decision={decision}
-        replySupported={replyWork !== null}
-        replyUnavailableReason={detail.replyUnavailableReason}
-        onDecided={(next) => {
-          setDecision(next);
-          bump();
-        }}
-        onRecorded={bump}
-      />
-
-      {/* 7 — the draft that follows from 대응 필요. The same panel as every other reply surface: no
-          second reply flow, no write this page owns, and the approval boundary untouched. */}
-      {showDraft && replyWork ? (
-        <Section title="답변 준비" ariaLabel="답변 준비 영역">
-          <VocItemReplyPrep
-            key={`prep-${replyWork.actionRef}`}
-            accountId={replyAccountId}
-            actionRef={replyWork.actionRef}
-            disposition={decision}
-            onPrepared={() => setPrepared(true)}
-            onOutcomeRecorded={bump}
-            onLocalWork={setLocalWork}
-            headingLevel={3}
-          />
-        </Section>
-      ) : null}
-
-      {/* Why there is no draft — and the two reasons are not the same sentence. 「이 채널은 답변 기능이
-          없습니다」 is a fact about the marketplace; 「연결된 판매 계정이 없습니다」 is a fact about this
-          seller's setup, and only the second has something they can do about it. The server decides
-          which; this page does not infer it from the channel code. */}
-      {replyWork === null ? (
-        <div className="space-y-1">
-          <p className="break-keep text-sm leading-relaxed text-muted">
-            {detail.replyUnavailableReason === "NO_SELLER_ACCOUNT"
-              ? "이 채널에 연결된 판매 계정이 없어 답변을 준비할 수 없습니다."
-              : "이 채널에서는 reviewnary가 답변을 작성하지 않습니다."}
-          </p>
-          <p className="break-keep text-sm leading-relaxed text-muted">
-            판단과 조치는 위에 기록됩니다.
-          </p>
-        </div>
-      ) : null}
-
-      {/* 8 — what has already been decided. */}
-      <DecisionLog entries={log ?? []} failed={logFailed || log === null} />
-    </div>
+          {/* Why there is no draft — and the two reasons are not the same sentence. The server decides which. */}
+          {replyWork === null ? (
+            <div className="space-y-1">
+              <p className="break-keep text-sm leading-relaxed text-muted">
+                {detail.replyUnavailableReason === "NO_SELLER_ACCOUNT"
+                  ? "이 채널에 연결된 판매 계정이 없어 답변을 준비할 수 없습니다."
+                  : "이 채널에서는 reviewnary가 답변을 작성하지 않습니다."}
+              </p>
+              <p className="break-keep text-sm leading-relaxed text-muted">판단과 조치는 위에 기록됩니다.</p>
+            </div>
+          ) : null}
+        </>
+      }
+      context={
+        <>
+          <RepeatedSignal problems={context?.repeatedProblems ?? []} failed={contextFailed || context === null} />
+          {context ? <GroundingOnHand context={context} /> : null}
+        </>
+      }
+      more={<DecisionLog entries={log ?? []} failed={logFailed || log === null} />}
+    />
   );
 }
 

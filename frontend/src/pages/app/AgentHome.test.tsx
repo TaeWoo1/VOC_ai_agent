@@ -509,12 +509,13 @@ describe("Customer Operations v3.1 — the job's Home", () => {
     });
     renderHome();
 
-    const card = await screen.findByTestId("work-flow-card");
+    const card = await screen.findByTestId("today-summary");
     expect(card).toHaveTextContent("자동 확인 · 24시간");
     expect(card).toHaveTextContent("9건");
-    expect(screen.getByRole("heading", { level: 1, name: "홈" })).toBeInTheDocument();
+    // 홈 → 오늘 (UI/UX v2 Phase 1, product-owner decision).
+    expect(screen.getByRole("heading", { level: 1, name: "오늘" })).toBeInTheDocument();
     // The case and the queue row are the same inquiry: drawn once, as the case.
-    const list = await screen.findByRole("list", { name: "확인 필요" });
+    const list = await screen.findByRole("list", { name: "확인할 일" });
     const hrefs = within(list).getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(hrefs).toContain("/customer-operations/cases/k-1");
     expect(hrefs).not.toContain("/inquiries/i-1");

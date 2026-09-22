@@ -33,6 +33,7 @@ export function ConversationWorkspace({
   disabledReason,
   footer,
   onBeforeSend,
+  emptyLayout,
 }: {
   surface: ConversationSurface;
   compact?: boolean;
@@ -49,6 +50,12 @@ export function ConversationWorkspace({
   footer?: ReactNode;
   /** A chance to answer locally (a palette shortcut). Return true when the sentence was handled. */
   onBeforeSend?: (text: string) => boolean;
+  /**
+   * The page an EMPTY conversation is drawn as, given the composer dock to place (UI/UX v2 Phase 1). The 오늘 screen
+   * is a work list with the selected item beside it, and the box sits under the list rather than across the page.
+   * The first sentence the seller sends turns it back into the transcript — the same thread, the same send path.
+   */
+  emptyLayout?: (dock: ReactNode) => ReactNode;
 }) {
   const conversation = useConversation();
   const panel = useAgentPanel();
@@ -80,30 +87,8 @@ export function ConversationWorkspace({
   // answer, and 「무엇이든 물어보세요」 above the cursor was the one place that did not say so.
   const askedPlaceholder = conversation.activeTask === "CAPTURE_KNOWLEDGE" ? "답변 기준을 여기에 적어 주세요" : null;
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-workspace">
-      <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-4" : "px-4 py-8 md:px-8"}`}>
-        {/* Reviewnary Visual System v1 §5 — before the first message the morning screen is ONE
-            composition: the briefing and the box under it. Anchored to the top it left ~470px of
-            empty paper between what the seller reads and where they answer, which is the shape of a
-            page waiting for content rather than an assistant waiting for a sentence. Once the thread
-            has turns it is a transcript again and reads from the top. */}
-        <div className={compact ? "" : `mx-auto w-full max-w-thread${empty ? " flex min-h-full flex-col justify-center" : ""}`}>
-          {empty && lead ? <div className="mb-8">{lead}</div> : null}
-          <ConversationTimeline
-            turns={[...leadingTurns, ...conversation.turns]}
-            busy={conversation.busy}
-            stages={conversation.stages}
-            elapsed={conversation.elapsed}
-            error={conversation.error}
-            compact={compact}
-            dockKey={context ? `${context.kind}:${context.label}:${context.task ?? ""}` : ""}
-            onPrompt={send}
-            onResume={(turnId) => void conversation.resume(turnId)}
-            onCaptureDecision={(captureId, fingerprint, decision) => void conversation.decideCapture(captureId, fingerprint, decision)}
-          />
-        </div>
-      </div>
+  const dock = (
+    <>
       {/* The dock (Chat Motion v1): the box sits 20px off the viewport edge on a solid ground, and the
           transcript slides UNDER a short fade above it — a deliberate edge, not a box floating in the
           scroll. One fade, one place; it is the only gradient in the shell. */}
@@ -137,6 +122,42 @@ export function ConversationWorkspace({
           />
         </div>
       </div>
+    </>
+  );
+
+  if (empty && emptyLayout) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-workspace">
+        {emptyLayout(dock)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-workspace">
+      <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-4" : "px-4 py-8 md:px-8"}`}>
+        {/* Reviewnary Visual System v1 §5 — before the first message the morning screen is ONE
+            composition: the briefing and the box under it. Anchored to the top it left ~470px of
+            empty paper between what the seller reads and where they answer, which is the shape of a
+            page waiting for content rather than an assistant waiting for a sentence. Once the thread
+            has turns it is a transcript again and reads from the top. */}
+        <div className={compact ? "" : `mx-auto w-full max-w-thread${empty ? " flex min-h-full flex-col justify-center" : ""}`}>
+          {empty && lead ? <div className="mb-8">{lead}</div> : null}
+          <ConversationTimeline
+            turns={[...leadingTurns, ...conversation.turns]}
+            busy={conversation.busy}
+            stages={conversation.stages}
+            elapsed={conversation.elapsed}
+            error={conversation.error}
+            compact={compact}
+            dockKey={context ? `${context.kind}:${context.label}:${context.task ?? ""}` : ""}
+            onPrompt={send}
+            onResume={(turnId) => void conversation.resume(turnId)}
+            onCaptureDecision={(captureId, fingerprint, decision) => void conversation.decideCapture(captureId, fingerprint, decision)}
+          />
+        </div>
+      </div>
+      {dock}
     </div>
   );
 }

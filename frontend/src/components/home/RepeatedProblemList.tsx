@@ -22,10 +22,19 @@ import type { HomeProblem, IssueSeverity } from "../../lib/types";
  * urgency out of an evidence trickle. Every row is a link out to the problem's own workspace, which is where a
  * decision about it is actually taken.
  */
-export function RepeatedProblemList({ rows }: { rows: readonly HomeProblem[] }) {
+export function RepeatedProblemList({
+  rows,
+  linkFor,
+  selectedId,
+}: {
+  rows: readonly HomeProblem[];
+  /** Where a row points when the page can draw the problem in place (the 오늘 pane); its own workspace otherwise. */
+  linkFor?: (issueId: string) => string;
+  selectedId?: string | null;
+}) {
   if (rows.length === 0) return null;
   return (
-    <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
+    <ul className="mt-3 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
       {rows.map(({ issue, context }) => {
         const badges = changeBadges(issue.change);
         const top = context?.evidence?.byProduct?.[0];
@@ -33,9 +42,13 @@ export function RepeatedProblemList({ rows }: { rows: readonly HomeProblem[] }) 
           issue.severity in SEVERITY_LABEL_KO ? SEVERITY_LABEL_KO[issue.severity as IssueSeverity] : null;
         const span = top ? productSpanLine(top) : null;
         return (
-          <li key={issue.id} className="space-y-1 p-3">
+          <li
+            key={issue.id}
+            className={`space-y-1 px-4 py-3 ${selectedId === issue.id ? "bg-brand-50 shadow-[inset_3px_0_0_#1B64DA]" : ""}`}
+          >
             <Link
-              to={`/memory/${issue.id}`}
+              to={linkFor ? linkFor(issue.id) : `/memory/${issue.id}`}
+              aria-current={selectedId === issue.id ? "true" : undefined}
               className="break-keep font-semibold text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
             >
               {issue.title}

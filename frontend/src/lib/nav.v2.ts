@@ -23,9 +23,13 @@
 // overflow links inside 고객 운영 관리 — a screen the seller is meant to open every morning cannot be something
 // they can only fall into.
 //
+// 반복 문제 joined 운영 with UI/UX v2 Phase 1 (2026-09-22, product-owner decision). It is one of the seven Demo Core
+// screens and was the only one a seller could reach only by falling into it — from the Home's last section or from
+// 설정's overflow. It answers 운영's question for the patterns rather than the items: what keeps coming back.
+// 홈 became 오늘 in the same decision: the first screen is named for the question it answers.
+//
 // Deliberately absent from the menu: `/agent` (an action offered inside the operations screens,
-// not a destination), `/memory` and `/reports` (kept as routes, reached from 홈 and 설정, out of the
-// primary IA — the today-inbox question above is now answered, theirs is not), and every per-channel page
+// not a destination — kept as a route, never deleted), `/reports` (kept as a route, reached from 설정), and every per-channel page
 // (`/connect/channels/:accountId`, the connect wizards) — those are reached from 채널 연결.
 
 export interface NavItem {
@@ -48,8 +52,9 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     heading: "운영",
     items: [
-      { to: "/", label: "홈", short: "홈", icon: "home", end: true },
+      { to: "/", label: "오늘", short: "오늘", icon: "home", end: true },
       { to: "/customer-operations/cases", label: "확인할 일", short: "확인", icon: "inbox" },
+      { to: "/memory", label: "반복 문제", short: "반복", icon: "memory" },
       { to: "/products", label: "상품", short: "상품", icon: "product" },
       { to: "/reviews", label: "리뷰", short: "리뷰", icon: "review" },
       { to: "/inquiries", label: "문의", short: "문의", icon: "mail" },
