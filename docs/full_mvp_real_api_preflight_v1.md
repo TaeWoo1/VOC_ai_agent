@@ -61,3 +61,26 @@ UI/UX는 Phase 4에서 freeze; 이 문서는 E2E 검증의 첫 관문이다.
   **지금도 같은지는 저장소가 확인할 수 없다** — authorization-code 교환(재동의)을 할 때만 문제가 되며 READ preflight는 쓰지 않는다.
 - **부팅은 한 명령**: `tools/live-proof/api-read-preflight.sh <approvalId> <orgId> <out.json>` — 스케줄러·모델·publish OFF, self-pilot
   grant unset, Coupang 게이트는 **이 approval id로만**, limit 10.
+
+## 5. 두 번째 preflight — 7개 source 전부 (2026-09-22 23:29 KST)
+
+승인 `apr-api-read-1933eb9ee1d47e1f` · run `preflight-88e76e9b` · commit `88e76e9b` · READ_ONLY · operator 「Seated and ready.」 ·
+`tools/live-proof/api-read-preflight.sh`(최근 7일 KST, 페이지당 10).
+
+| 채널 | 타입 | source | 코드상 지원 | **이번 환경 실제** | 건수 | 다음 페이지 | ms |
+|---|---|---|---|---|---|---|---|
+| NAVER | 문의 | PRODUCT_QNA(상품 문의) | 지원 | **SUCCESS** | 1 | 없음 | 921 |
+| NAVER | 문의 | CUSTOMER_INQUIRY(고객 문의) | 지원 | **SUCCESS** | 1 | 없음 | 945 |
+| NAVER | 리뷰 | — | 공식 API 없음 | 호출 안 함 | — | — | — |
+| CAFE24 | 문의 | board 6 1페이지 | 지원 | **SUCCESS** | 0 | 없음 | 615 |
+| CAFE24 | 리뷰 | board 4 1페이지 | 지원 | **SUCCESS** | 0 | 없음 | 330 |
+| COUPANG | 문의 | NOANSWER 1페이지 | 지원 | **SUCCESS** | 0 | 없음 | 233 |
+| COUPANG | 문의 | ANSWERED 1페이지 | 지원 | **SUCCESS** | 0 | 없음 | 135 |
+| COUPANG | 리뷰 | — | 공식 API 없음 | 호출 안 함 | — | — | — |
+
+- **ResponsibilitySources** = `NAVER:INQUIRY · CAFE24:INQUIRY · CAFE24:REVIEW · COUPANG:INQUIRY`.
+- **순서**: `Started` → 설정 검증 통과(기동 거부 0) → preflight. 인증 실패 0 · 설정 실패 0 · 코드 결함 0.
+- **요청**(로그 기준): NAVER 토큰 1 + GET 2 · CAFE24 토큰 갱신 1 + GET 2(새 글 0 ⇒ 댓글 확인 0) · COUPANG GET 2. manifest 상한 이내.
+- **부수 효과**(실행 전후 DB 비교): Cafe24 `last_rotated_at` 22:57:01 → **23:29:45**(선언된 유일한 쓰기) · sync_jobs 1553→1553 ·
+  inquiries 3360→3360 · reviews 4677→4677 · 커서 최신값 불변 · 연결 상태 불변 · 켜진 스케줄 8→8. WRITE 0 · 모델 0.
+- **건수 1이 두 lane에 같은 문의인지는 이 기록이 말하지 않는다** — 행 내용은 세기만 하고 버렸다.

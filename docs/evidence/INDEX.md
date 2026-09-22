@@ -337,6 +337,7 @@ A row here records **what was true of the code at one commit**. It never moves a
 | Date | Channel · capability | What it established | Env | Approval | Outcome | Evidence |
 |---|---|---|---|---|---|---|
 | **2026-09-22** | **NAVER · CAFE24 (· COUPANG 미실행) · INQUIRY + REVIEW (API READ)** | **run 없이 공식 API가 이 환경에서 응답하는가 + ResponsibilitySources 해석** | `12cc0cac`, backend 8080 preflight 부팅(.env.local + scheduler/self-pilot/proactive/모델 OFF, self-pilot grant unset, Coupang live id 미설정) | **`apr-api-read-9066f36a7e463ef5`** — operator 「Seated and ready.」 + Coupang 각 1페이지 제한 | **NAVER 문의 SUCCESS 1 · CAFE24 문의 SUCCESS 0 · CAFE24 리뷰 SUCCESS 0 · COUPANG 요청 0(범위 보장 불가로 게이트 미개방)** · sources = 템플릿 4개 전부 · Cafe24 토큰 갱신 1 · ingest/sync/cursor/WRITE/모델 0 | `docs/full_mvp_real_api_preflight_v1.md` |
+| **2026-09-22** | **NAVER · CAFE24 · COUPANG · INQUIRY + REVIEW (API READ, source별 1페이지)** | **7개 공식 source가 이 환경에서 응답하는가 — 설정 검증 뒤에만, 승인한 페이지 수를 넘을 수 없게** | `88e76e9b`, `tools/live-proof/api-read-preflight.sh`(scheduler/self-pilot/proactive/모델/publish OFF, self-pilot grant unset, Coupang 게이트 = 이 approval id, 7일·10건) | **`apr-api-read-1933eb9ee1d47e1f`** — operator 「Seated and ready.」 | **`LIVE_PASS`** — NAVER 상품 문의 1 · 고객 문의 1 · CAFE24 문의 0 · 리뷰 0 · COUPANG 미답변 0 · 답변 0, 전부 SUCCESS·다음 페이지 없음 · 리뷰 NAVER/COUPANG 공식 API 없음(호출 0) · sources 4개 · 기동 거부 0 · Cafe24 토큰 갱신 1 · ingest/sync/cursor/WRITE/모델 0 | `docs/full_mvp_real_api_preflight_v1.md` §5 |
 
 ## Known gaps in this index (recorded, not hidden)
 
