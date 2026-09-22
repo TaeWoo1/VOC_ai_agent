@@ -111,6 +111,9 @@ export const REASON = {
   review: { tag: "리뷰", tone: "gray", icon: "star" },
   reply: { tag: "답변 필요", tone: "gray", icon: "chat" },
   withheld: { tag: "판단 보류", tone: "gray", icon: "scale" },
+  // The seller's own reply work (UI/UX v2 Phase 3) — the words `lib/workState.ts` already uses for it.
+  approve: { tag: "승인 대기", tone: "blue", icon: "star" },
+  draft: { tag: "초안 필요", tone: "gray", icon: "star" },
 } as const satisfies Record<string, Reason>;
 
 /**

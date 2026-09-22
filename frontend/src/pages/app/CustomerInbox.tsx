@@ -12,18 +12,14 @@ import { InboxDetail } from "../../components/inbox/InboxDetail";
 import { Facts } from "../../components/ui/ObjectRow";
 import { MasterDetail, useWideLayout } from "../../components/workspace/MasterDetail";
 import { CaseLayout } from "../../components/workspace/CaseLayout";
-import { ProactiveCases } from "../../components/proactive/ProactiveCases";
 import { api } from "../../lib/apiClient";
 import { analysisKey, buildAnalysisIndex } from "../../lib/inboxView";
 import { previewText } from "../../lib/plainText";
 import { relativeTime } from "../../lib/format";
 import { productChannelLabel } from "../../lib/productRows";
-import { onlySharedWord } from "../../lib/sharedWord";
 import {
   RECORD_STATUS_OPTIONS,
   asFeedItem,
-  queueOrder,
-  queueRowState,
   recordRowState,
 } from "../../lib/inquiryWorkspace";
 import type { InquiryQueueItem, InquiryRowItem, ItemAnalysis } from "../../lib/types";
@@ -251,24 +247,17 @@ export function CustomerInbox() {
     () => (productId ? (queue ?? []).filter((row) => row.productId === productId) : queue ?? []),
     [queue, productId],
   );
-  const queueGroups = useMemo(() => queueOrder(queueRows), [queueRows]);
   // What the pane shows: the chosen inquiry, or — on a wide screen with nothing chosen — the first row of the work
   // the seller owes, which is the row this screen itself says to look at first.
-  const defaultRow = wide && !itemRef ? [...queueGroups.recent, ...queueGroups.old][0] ?? null : null;
+  const defaultRow = wide && !itemRef ? (record ?? [])[0] ?? null : null;
   const shownRef = itemRef ?? defaultRow?.inquiryId;
-  const shownItem = selected ?? (defaultRow ? asFeedItem(queueAsRow(defaultRow)) : null);
-  const shownWorkItemId = itemRef ? workItemId : defaultRow?.workItemId ?? null;
+  const shownItem = selected ?? (defaultRow ? asFeedItem(defaultRow) : null);
+  const shownWorkItemId = itemRef
+    ? workItemId
+    : defaultRow
+      ? (queue ?? []).find((row) => row.inquiryId === defaultRow.inquiryId)?.workItemId ?? defaultRow.workItemId
+      : null;
 
-  /**
-   * A word every row carries is a fact about the LIST, not a mark on the rows (`lib/sharedWord.ts`).
-   * Measured 2026-09-04: all 21 rows printed 「답변 필요」 in warn colour, which made the loudest
-   * repeated element on this screen the one element that told the seller nothing — the screen's content
-   * is what the customers wrote. Said once in the section's own caption instead.
-   */
-  const sharedState = useMemo(
-    () => onlySharedWord(queueRows.map((row) => queueRowState(row).text)),
-    [queueRows],
-  );
   const channels = useMemo(() => {
     const seen = new Map<string, string>();
     for (const row of record ?? []) {
@@ -298,41 +287,18 @@ export function CustomerInbox() {
 
   const lists = (
     <>
-      {/* ── 지금 처리할 일 ─────────────────────────────────────────────
-          Rendered whenever there is work, and never rendered as 0: a heading over an empty queue
-          is a number the seller cannot act on. A read that FAILED says so instead of showing none. */}
+      {/* The work is 확인할 일's (UI/UX v2 Phase 3): this screen is where inquiries are looked up. It used to open
+          with its own 「지금 처리할 일」 list — the same inquiries 확인할 일 already lists, in a second layout. */}
       {queue === null ? (
         <p className="text-sm text-warn" role="status">
-          지금 처리할 일을 불러오지 못했습니다. 아래 전체 문의는 그대로 보실 수 있습니다.
+          처리할 문의 수를 불러오지 못했습니다. 아래 전체 문의는 그대로 보실 수 있습니다.
         </p>
       ) : queueRows.length > 0 ? (
-        <Section
-          title={productId ? "이 상품의 지금 처리할 일" : "지금 처리할 일"}
-          count={queueRows.length}
-          // The shared-word caption, then the bound — when the server holds more than it returned, the heading
-          // says so rather than letting the drawn rows be read as the whole of what is owed.
-          hint={
-            [
-              sharedState ? `모두 ${sharedState}` : null,
-              !productId && queueTotal != null && queueTotal > queueRows.length
-                ? `${queueTotal.toLocaleString("ko-KR")}건 중 ${queueRows.length.toLocaleString("ko-KR")}건`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || undefined
-          }
-        >
-          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
-            {queueGroups.recent.map((row) => queueRow(row, shownRef, false, sharedState))}
-            {/* The decade-old backlog is real work and stays in the queue — under its own quiet divider. */}
-            {queueGroups.old.length > 0 ? (
-              <li aria-hidden="true" className="bg-canvas px-4 py-1.5 text-sm font-semibold text-muted">
-                1년 넘게 지난 문의 {queueGroups.old.length}건
-              </li>
-            ) : null}
-            {queueGroups.old.map((row) => queueRow(row, shownRef, true, sharedState))}
-          </ul>
-        </Section>
+        <p className="text-sm">
+          <Link to="/customer-operations/cases" className="font-semibold text-brand-700 hover:underline">
+            확인할 일에 문의 {(productId ? queueRows.length : queueTotal ?? queueRows.length).toLocaleString("ko-KR")}건 →
+          </Link>
+        </p>
       ) : null}
 
       {/* ── 전체 문의 ────────────────────────────────────────────────── */}
@@ -488,9 +454,6 @@ export function CustomerInbox() {
     ) : (
       <>
         {head}
-        {/* 「AI가 먼저 확인한 일」 answers 「무엇부터 볼까」, so it stays above the work — and disappears once a row
-            is open, because a seller who followed its own link is already inside the answer. */}
-        {!itemRef ? <ProactiveCases limit={4} /> : null}
         {lists}
       </>
     );
@@ -537,31 +500,6 @@ function InquiryCasePane({
   );
 }
 
-function queueRow(row: InquiryQueueItem, itemRef: string | undefined, dim = false, sharedState: string | null = null) {
-  const state = queueRowState(row);
-  // Dropped only when EVERY row carries it and the caption has already said so.
-  const showState = !sharedState || state.text !== sharedState;
-  return (
-    <li key={row.workItemId}>
-      <WorkItem
-        to={`/inquiries/${row.inquiryId}`}
-        selected={row.inquiryId === itemRef}
-        ariaCurrent={row.inquiryId === itemRef ? "true" : undefined}
-        dim={dim}
-        state={showState ? state.text : null}
-        tone={state.tone}
-        title={previewText(row.snippet) || row.title || "문의"}
-        meta={
-          <>
-            {row.channelNameKo}
-            {!itemRef && row.productName ? ` · ${row.productName}` : ""}
-          </>
-        }
-        time={relativeTime(row.receivedAt)}
-      />
-    </li>
-  );
-}
 
 /** One page of the record. The seller narrows rather than scrolls; the count says what is behind it. */
 const PAGE_SIZE = 50;
@@ -571,24 +509,3 @@ function hasNarrowing(q: string, channel: string | null, status: string, product
   return q.trim() !== "" || channel != null || status !== "ALL" || productId != null;
 }
 
-/** A queue row read as a record row — the same inquiry, so the pane can draw it before the seller picks one. */
-function queueAsRow(row: InquiryQueueItem): InquiryRowItem {
-  return {
-    inquiryId: row.inquiryId,
-    workItemId: row.workItemId,
-    sellerAccountId: row.sellerAccountId,
-    channelId: row.channelId,
-    channelCode: row.channelCode,
-    channelNameKo: row.channelNameKo,
-    productId: row.productId,
-    productName: row.productName,
-    phase: row.phase,
-    status: row.status,
-    title: row.title,
-    snippet: row.snippet,
-    receivedAt: row.receivedAt,
-    answeredAt: null,
-    sourceSubtype: null,
-    executableIdentity: null,
-  };
-}

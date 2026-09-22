@@ -9,6 +9,9 @@ import { api } from "../../lib/apiClient";
 import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import { HOME_QUEUE_SIZE } from "../../components/customerOperations/CustomerOpsHome";
 import { COPY } from "../../lib/copy/customerOps";
+import { ReplyWorkHistory } from "../../components/customerOperations/ReplyWorkHistory";
+import { attentionUncertaintyCopy } from "../../lib/attention";
+import type { ReviewWorkView } from "../../lib/types";
 
 /** One name for one list: the nav entry, this page's title and the Home's section all say 확인할 일 (UI/UX v2). */
 const TITLE = COPY.listTitle;
@@ -45,6 +48,9 @@ const DESCRIPTION = "판매자님의 결정을 기다리는 문의와 리뷰입�
  */
 export function OperationsCaseQueue({ now }: { now?: Date }) {
   const [work, setWork] = useState<HomeWork | null | undefined>(undefined);
+  const [reviewWork, setReviewWork] = useState<ReviewWorkView | null>(null);
+  // Bumped when a set-aside review is restored below, so it comes back into this list without a reload.
+  const [reloadKey, setReloadKey] = useState(0);
   const wide = useWideLayout();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -59,20 +65,26 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
       nothing<Awaited<ReturnType<typeof api.getInquiryQueueStrict>>>()(
         api.getInquiryQueueStrict({ size: HOME_QUEUE_SIZE }),
       ),
-    ]).then(([co, decisions, ops, queue]) => {
+      // The review half, whole (UI/UX v2 Phase 3): every undecided 확인 필요 review, and the seller's own reply work
+      // before approval — the items the 리뷰 screen's 「내 답변 작업」 used to be the only home of.
+      nothing<Awaited<ReturnType<typeof api.getReviewWorkStrict>>>()(
+        Promise.resolve().then(() => api.getReviewWorkStrict()),
+      ),
+    ]).then(([co, decisions, ops, queue, reviewWork]) => {
       if (!live) return;
-      if (!co && !decisions && !ops && !queue) {
+      if (!co && !decisions && !ops && !queue && !reviewWork) {
         setWork(null);
         return;
       }
       // The deep case list replaces the Home's briefing slice; everything else is read exactly as the Home reads it.
       const merged = co ? (decisions ? { ...co, decisions } : co) : null;
-      setWork(mergeHomeWork(merged, ops, queue, now));
+      setWork(mergeHomeWork(merged, ops, queue, now, reviewWork));
+      setReviewWork(reviewWork);
     });
     return () => {
       live = false;
     };
-  }, [now]);
+  }, [now, reloadKey]);
 
   const rows = work?.rows ?? [];
   const selected = wide ? selectedRow(rows, params.get("item")) : null;
@@ -99,6 +111,20 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
       />
 
       {work === undefined ? <p className="text-sm text-muted">불러오는 중입니다.</p> : null}
+
+      {/* An account whose reply work cannot be attributed declines to answer rather than reading as 「no work」 —
+          the same copy the 리뷰 screen's 「내 답변 작업」 used, moved with the work (UI/UX v2 Phase 3). */}
+      {(reviewWork?.committed ?? []).map((account) => {
+        const uncertain = attentionUncertaintyCopy(account.coverage ?? "COVERED");
+        return uncertain ? (
+          <div key={account.accountId} role="status" className="rounded-xl bg-warn/5 px-4 py-3" data-testid="reply-work-coverage-uncertain">
+            <p className="text-sm font-semibold text-ink">
+              {account.channelNameKo ?? account.channelCode}: {uncertain.headline}
+            </p>
+            <p className="mt-1 text-sm text-muted">{uncertain.detail}</p>
+          </div>
+        ) : null;
+      })}
 
       {/* A failed read says so. An empty list and a list we could not read are different sentences, and only one of
           them is good news. */}
@@ -131,6 +157,11 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
             </p>
           ) : null}
         </section>
+      ) : null}
+
+      {/* History, not work: what the seller reported posting, and what they set aside — with 복원. */}
+      {reviewWork ? (
+        <ReplyWorkHistory accounts={reviewWork.committed} onRestored={() => setReloadKey((n) => n + 1)} />
       ) : null}
     </>
   );

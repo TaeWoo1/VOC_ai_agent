@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Btn } from "../ui/Btn";
 import { RepeatedProblemList } from "../home/RepeatedProblemList";
@@ -14,7 +14,7 @@ import { dataTypeKo, kstClock } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
-import type { HomePreparedItem, InquiryQueueResponse, OperationsHome, ReviewIssueView } from "../../lib/types";
+import type { HomePreparedItem, InquiryQueueResponse, OperationsHome, ReviewIssueView, ReviewWorkView } from "../../lib/types";
 
 /** How many rows the list shows before 「+N」. */
 export const HOME_ROWS = 5;
@@ -45,6 +45,7 @@ export function CustomerOpsHome({
   now = new Date(),
   onChanged,
   sharedQueue,
+  sharedReviewWork,
   selection,
 }: {
   co: CustomerOperationsHome;
@@ -53,15 +54,19 @@ export function CustomerOpsHome({
   onChanged: () => void;
   /** The queue read, when the page around this list already made it (the 오늘 workspace needs the same rows). */
   sharedQueue?: { value: InquiryQueueResponse | null | undefined };
+  /** The review half of 확인할 일, when the page around this list already read it. */
+  sharedReviewWork?: { value: ReviewWorkView | null | undefined };
   /** Master-detail selection. Absent: every row opens its own screen, as on a narrow page. */
   selection?: HomeSelection;
 }) {
   const ownQueue = useHomeQueue(sharedQueue === undefined);
   const queue = sharedQueue ? sharedQueue.value : ownQueue;
+  const ownReviewWork = useReviewWork(sharedReviewWork === undefined);
+  const reviewWork = sharedReviewWork ? sharedReviewWork.value : ownReviewWork;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const work = mergeHomeWork(co, ops, queue, now);
+  const work = mergeHomeWork(co, ops, queue, now, reviewWork);
   const shown = work.rows.slice(0, HOME_ROWS);
   const hidden = work.rows.length - shown.length;
   const next = co.status === "ACTIVE" ? kstClock(co.nextCheckAt, now) : null;
@@ -69,7 +74,6 @@ export function CustomerOpsHome({
   const wide = selection?.wide ?? false;
   const search = selection?.search ?? "";
   const awaiting = awaitingRows(ops, work);
-  const reviewScope = ops?.reviews ?? null;
 
   async function act(run: () => Promise<unknown>) {
     setBusy(true);
@@ -196,12 +200,10 @@ export function CustomerOpsHome({
               </Link>
             </p>
           ) : null}
-          {/* The scope label for the one number a seller will compare with another screen: 리뷰 counts the 확인 필요
-              reviews nobody has decided yet; the 리뷰 화면's 확인 필요 tab counts decided ones too. */}
-          {reviewScope && reviewScope.needsAttentionTotal > reviewScope.needsAttentionUndecided ? (
+          {/* Scope label: what 리뷰 counts here, since the 리뷰 screen's 확인 필요 tab counts something else. */}
+          {reviewWork ? (
             <p className="mt-1.5 break-keep text-sm text-muted">
-              리뷰는 확인 필요 리뷰 {reviewScope.needsAttentionTotal.toLocaleString("ko-KR")}건 중 아직 판단하지 않은{" "}
-              {reviewScope.needsAttentionUndecided.toLocaleString("ko-KR")}건만 셉니다.
+              리뷰는 확인 필요 중 아직 판단하지 않은 것과, 답변하기로 정했지만 아직 승인하지 않은 것을 셉니다.
             </p>
           ) : null}
         </section>
@@ -218,6 +220,23 @@ export interface HomeSelection {
   wide: boolean;
   selectedKey: string | null;
   search: string;
+}
+
+/** The review half of 확인할 일 (UI/UX v2 Phase 3). `null` = the read failed; the list is then what it was. */
+export function useReviewWork(enabled = true): ReviewWorkView | null | undefined {
+  const [value, setValue] = useState<ReviewWorkView | null | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    Promise.resolve()
+      .then(() => api.getReviewWorkStrict())
+      .then((r) => live && setValue(r))
+      .catch(() => live && setValue(null));
+    return () => {
+      live = false;
+    };
+  }, [enabled]);
+  return value;
 }
 
 /** The queue read the Home's list needs. `enabled` false when the page around it already made the same read. */
@@ -265,7 +284,8 @@ export function TodayWorkspace({
   const location = useLocation();
   const [params] = useSearchParams();
   const queue = useHomeQueue();
-  const work = mergeHomeWork(co, ops, queue, now);
+  const reviewWork = useReviewWork();
+  const work = mergeHomeWork(co, ops, queue, now, reviewWork);
   const key = params.get("item");
 
   let detail: ReactNode = null;
@@ -303,6 +323,7 @@ export function TodayWorkspace({
           now={now}
           onChanged={onChanged}
           sharedQueue={{ value: queue }}
+          sharedReviewWork={{ value: reviewWork }}
           selection={{ wide, selectedKey, search: location.search }}
         />
       }
@@ -474,11 +495,16 @@ function AwaitingExecution({
 function Items({ parts }: { parts: React.ReactNode[] }) {
   return (
     <>
+      {/* A space between the unbreakable parts is the only place a long tally may wrap — without it a cell's line
+          runs under the next cell instead of onto its own second line. */}
       {parts.map((part, i) => (
-        <span key={i} className="whitespace-nowrap">
-          {i > 0 ? <span aria-hidden="true" className="mr-1.5">·</span> : null}
-          {part}
-        </span>
+        <Fragment key={i}>
+          {i > 0 ? " " : null}
+          <span className="whitespace-nowrap">
+            {i > 0 ? <span aria-hidden="true" className="mr-1.5">·</span> : null}
+            {part}
+          </span>
+        </Fragment>
       ))}
     </>
   );

@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useParams, useSearchParams } from "react-router-dom";
+import type { ReactNode } from "react";
+import { MasterDetail } from "../../components/workspace/MasterDetail";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { api } from "../../lib/apiClient";
-import { reviewAccounts, type ReviewAccount } from "../../lib/reviewAccounts";
-import { reviewRecordPath } from "../../lib/reviewRecord";
+import { reviewAccounts } from "../../lib/reviewAccounts";
 import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
-import { ChannelReviews } from "./ChannelReviews";
 import { ReviewRecord } from "./ReviewRecord";
 import { ProductReviews } from "../../components/reviews/ProductReviews";
 import { useAgentSurface } from "../../lib/agentPanel";
@@ -59,16 +59,20 @@ export function Reviews() {
     label: selectedTarget ? `리뷰 · ${selectedTarget.label}` : "리뷰",
   });
 
+  // Every branch is drawn in the page's own scroller: /reviews is a master-detail route (UI/UX v2 Phase 3), so the
+  // shell gives it the full column and no outer scroll.
+  const page = (content: ReactNode) => <MasterDetail wide={false} list={content} detail={null} detailLabel="" />;
+
   if (loading) {
-    return (
+    return page(
       <>
         <PageHead title="리뷰" />
         <p className="text-sm text-muted">불러오는 중…</p>
-      </>
+      </>,
     );
   }
   if (failed) {
-    return (
+    return page(
       <>
         <PageHead title="리뷰" />
         <Empty
@@ -76,26 +80,24 @@ export function Reviews() {
           body="연결 상태를 확인한 뒤 다시 시도해 주세요."
           action={<BtnLink to="/connect">채널 연결 확인</BtnLink>}
         />
-      </>
+      </>,
     );
   }
-  // Scoped to a product, the account switcher has nothing to switch: the figure the seller pressed was
-  // counted across every channel this org holds for that product, so the surface is scoped the same way
-  // and the channel becomes a fact on each row. Redirecting into one account here would silently answer
-  // a narrower question than the one that was asked.
+  // Scoped to a product, the surface answers 「이 상품의 리뷰」 across every channel the org holds, and the channel is a
+  // fact on each row — the figure the seller pressed was counted that way.
   if (productId) {
-    return (
-      <div className="space-y-5">
+    return page(
+      <>
         <PageHead
           title="리뷰"
           action={<AgentLaunch context={{ productId, surface: "reviews" }} label="이 상품 리뷰에 대해 물어보기" />}
         />
         <ProductReviews productId={productId} accountIds={targets.map((t) => t.account.id)} />
-      </div>
+      </>,
     );
   }
   if (targets.length === 0) {
-    return (
+    return page(
       <>
         <PageHead title="리뷰" />
         <Empty
@@ -103,75 +105,35 @@ export function Reviews() {
           body="네이버 스마트스토어, 쿠팡, 카페24 중 하나를 연결하면 그 채널의 리뷰가 여기에 모입니다."
           action={<BtnLink to="/connect">채널 연결하기</BtnLink>}
         />
-      </>
+      </>,
     );
   }
-  // UI/UX v2 Phase 2 (product-owner decision): the default is the organisation's record over every channel, with
-  // the channel as a filter. It used to redirect into the FIRST account's record, so the screen's first answer was
-  // one channel the seller never chose. The channel record stays at `/reviews/:accountId` for what only one account
-  // can answer.
-  if (!accountId) {
-    return (
-      <div className="space-y-5">
+  /*
+    One record screen (UI/UX v2 Phase 3). `/reviews/:accountId` was a second, older record — the same rows, filters
+    and paging in a different layout, plus an inline detail. It now lands on THIS screen with the account's channel
+    as the filter, keeping `?tier=` and turning `?review=` into the selection, so every link and bookmark that points
+    at it still opens what it named. An account this org does not hold lands on the unfiltered record.
+  */
+  if (accountId) {
+    const target = targets.find((t) => t.account.id === accountId) ?? null;
+    const params = new URLSearchParams(searchParams);
+    if (target) params.set("channel", target.channel.code);
+    return <Navigate replace to={`/reviews${params.toString() ? `?${params.toString()}` : ""}`} />;
+  }
+
+  return (
+    <ReviewRecord
+      targets={targets}
+      head={
         <PageHead
           title="리뷰"
           meta={<span className="text-sm text-muted">{REVIEWS_DESCRIPTION}</span>}
           action={<AgentLaunch context={{ surface: "reviews" }} label="리뷰에 대해 물어보기" />}
         />
-        <ReviewRecord targets={targets} />
-      </div>
-    );
-  }
-
-  const selected = targets.find((t) => t.account.id === accountId) ?? null;
-  return (
-    <div className="space-y-5">
-      <PageHead
-        title="리뷰"
-        meta={<span className="text-sm text-muted">{REVIEWS_DESCRIPTION}</span>}
-        action={
-          <>
-            {/* The organisation's record is the default now; one account's record is a step in, so it offers the
-                way back out. */}
-            <BtnLink to="/reviews" variant="ghost" size="sm">
-              전체 채널 리뷰
-            </BtnLink>
-            {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
-            <AgentLaunch context={{ surface: "reviews" }} label="리뷰에 대해 물어보기" />
-          </>
-        }
-      />
-      <ChannelReviews channelName={selected?.label} />
-    </div>
+      }
+    />
   );
 }
 
 /** One line, and it answers 「이 화면은 무엇인가」. */
 export const REVIEWS_DESCRIPTION = "확인이 필요한 리뷰부터 봅니다.";
-
-/** One segment per review-capable account; rendered only when there are several. */
-function ChannelSwitcher({ targets, selectedAccountId }: { targets: readonly ReviewAccount[]; selectedAccountId: string }) {
-  const [searchParams] = useSearchParams();
-  const carried = new URLSearchParams(searchParams);
-  carried.delete("review");
-  const search = carried.toString() ? `?${carried.toString()}` : "";
-  return (
-    <nav aria-label="리뷰 채널" className="flex items-center gap-0.5 rounded-lg bg-canvas p-0.5">
-      {targets.map(({ account, label }) => {
-        const active = account.id === selectedAccountId;
-        return (
-          <Link
-            key={account.id}
-            to={`${reviewRecordPath(account.id)}${search}`}
-            aria-current={active ? "page" : undefined}
-            className={`min-h-[32px] whitespace-nowrap rounded-md px-2.5 py-1 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${
-              active ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"
-            }`}
-          >
-            {label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}

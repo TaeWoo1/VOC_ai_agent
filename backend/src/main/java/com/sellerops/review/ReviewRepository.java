@@ -479,6 +479,9 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     List<Object[]> countByChannelsGroupedByChannelAndCategory(@Param("orgId") UUID orgId,
                                                               @Param("channelIds") java.util.Collection<UUID> channelIds);
 
+    /** Reviews on channels outside a set — the organisation's record counts what its visible scope leaves out. */
+    long countByOrgIdAndChannelIdNotIn(UUID orgId, java.util.Collection<UUID> channelIds);
+
     long countByOrgIdAndNegativeTrue(UUID orgId);
 
     /**

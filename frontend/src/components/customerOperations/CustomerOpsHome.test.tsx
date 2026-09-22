@@ -214,7 +214,7 @@ describe("CustomerOpsHome", () => {
     await waitFor(() => expect(card).toHaveTextContent("4건"));
     expect(within(card).getByRole("link", { name: /확인할 일/ })).toHaveAttribute("href", "/customer-operations/cases");
     expect(within(card).getByRole("link", { name: /반복 문제/ })).toHaveAttribute("href", "/memory");
-    expect(card).toHaveTextContent("교환·환불 1·정보 부족 1·답변 필요 1·리뷰 1");
+    expect(card).toHaveTextContent(/교환·환불 1 ?·정보 부족 1 ?·답변 필요 1 ?·리뷰 1/);
     await expectNoAxeViolations(container);
   });
 

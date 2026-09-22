@@ -245,7 +245,8 @@ public class ChannelReviewService {
         boolean aiEnabled = pilot.isEnabledFor(orgId);
         if (byId.isEmpty()) {
             return new ReviewRecordPageView(pageable.getPageNumber(), pageable.getPageSize(), 0, 0, aiEnabled,
-                    codes, new ChannelReviewTriageSummaryView(0, 0, 0, 0, List.of()), List.of());
+                    codes, new ChannelReviewTriageSummaryView(0, 0, 0, 0, List.of()), List.of(), List.of(),
+                    outsideVisible(orgId));
         }
         List<UUID> channelIds = List.copyOf(byId.keySet());
 
@@ -299,8 +300,30 @@ public class ChannelReviewService {
         ChannelReviewTriageSummaryView summary = summaryOf(byTier,
                 aiEnabled ? reviews.countAiAttentionByChannels(orgId, channelIds) : 0, countsInScope);
 
+        List<ReviewRecordPageView.ChannelFacts> facts = new java.util.ArrayList<>();
+        for (Channel ch : byId.values()) {
+            List<SellerAccount> held = accounts.findAllByOrgIdAndChannelId(orgId, ch.getId());
+            // One account or none: with two on one channel there is no way to say which one a row belongs to,
+            // exactly as the review workspace's own reply-account rule says.
+            SellerAccount only = held.size() == 1 ? held.get(0) : null;
+            Optional<SyncJob> last = lastReviewImport(orgId, ch.getId());
+            facts.add(new ReviewRecordPageView.ChannelFacts(ch.getCode(), ch.getNameKo(),
+                    only == null ? null : only.getId(),
+                    only == null ? null : capabilityOf(orgId, only),
+                    last.map(SyncJob::getFinishedAt).orElse(null),
+                    last.map(j -> "SUCCESS".equals(j.getStatus())).orElse(false)));
+        }
+
         return new ReviewRecordPageView(found.getNumber(), found.getSize(), found.getTotalElements(), newCount,
-                aiEnabled, byId.values().stream().map(Channel::getCode).toList(), summary, items);
+                aiEnabled, byId.values().stream().map(Channel::getCode).toList(), summary, items, facts,
+                outsideVisible(orgId));
+    }
+
+    /** Reviews on channels outside {@code ProductChannels.VISIBLE_CODES} — counted, never listed. */
+    private long outsideVisible(UUID orgId) {
+        List<UUID> visible = com.sellerops.channel.ProductChannels.VISIBLE_CODES.stream()
+                .map(channels::findByCode).flatMap(Optional::stream).map(Channel::getId).toList();
+        return visible.isEmpty() ? 0 : reviews.countByOrgIdAndChannelIdNotIn(orgId, visible);
     }
 
     /** The seller-visible channel codes in scope: all of them, or the one asked for. */

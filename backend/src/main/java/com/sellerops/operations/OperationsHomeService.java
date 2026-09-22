@@ -156,6 +156,24 @@ public class OperationsHomeService {
                 attentionRows(orgId, rows));
     }
 
+    /**
+     * Every undecided 확인 필요 review up to {@code limit} — the same predicate, order and row mapping as the Home's
+     * three, for the screen that must hold ALL of them (UI/UX v2 Phase 3: 확인할 일 is where work lives, and it
+     * was reading the Home's briefing-sized slice).
+     */
+    @Transactional(readOnly = true)
+    public List<OperationsHomeView.AttentionReview> undecidedAttention(UUID orgId, int limit) {
+        boolean aiEnabled = pilot.isEnabledFor(orgId);
+        return attentionRows(orgId, reviews.findUndecidedByOrgAndTier(
+                orgId, NEEDS_ATTENTION_RANK, aiEnabled, PageRequest.of(0, Math.max(1, limit))));
+    }
+
+    /** How many undecided 확인 필요 reviews exist — the count {@link #undecidedAttention} is a page of. */
+    @Transactional(readOnly = true)
+    public long undecidedAttentionCount(UUID orgId) {
+        return reviews.countUndecidedByOrgAndTier(orgId, NEEDS_ATTENTION_RANK, pilot.isEnabledFor(orgId));
+    }
+
     private List<OperationsHomeView.AttentionReview> attentionRows(UUID orgId, List<Review> rows) {
         if (rows.isEmpty()) {
             return List.of();

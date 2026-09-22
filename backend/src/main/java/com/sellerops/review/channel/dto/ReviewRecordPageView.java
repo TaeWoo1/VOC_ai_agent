@@ -24,7 +24,24 @@ public record ReviewRecordPageView(
         List<String> channels,
         /** The UNFILTERED picture of the channels in scope — the same rule as the channel page's summary. */
         ChannelReviewTriageSummaryView triageSummary,
-        List<Row> items) {
+        List<Row> items,
+        /**
+         * What each channel in scope can answer that the organisation cannot: the one account a row's detail and
+         * `[쿠팡에서 보기]` act through (null when the org holds none or several on that channel), that channel's
+         * capability row, and its last import. The channel record used to carry these for its one channel.
+         */
+        List<ChannelFacts> channelFacts,
+        /**
+         * Reviews this organisation holds on channels OUTSIDE the seller-visible set — a file-uploaded G마켓
+         * export, for instance. Not listed here (the visible set is a product decision); counted, so 「전체」 is
+         * never read as every review the organisation has.
+         */
+        long outsideVisibleChannels) {
+
+    public record ChannelFacts(String channelCode, String channelNameKo, java.util.UUID accountId,
+                               ReviewChannelCapabilityView capability, java.time.Instant lastImportAt,
+                               boolean lastImportComplete) {
+    }
 
     /** One row, with the channel it came from — the one fact a per-channel page never needed to say. */
     public record Row(String channelCode, String channelNameKo, ChannelReviewItemView review) {

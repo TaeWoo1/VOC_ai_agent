@@ -172,6 +172,23 @@ class ReviewRecordIT {
     }
 
     @Test
+    void namesEachChannelsOneAccount_andCountsWhatTheVisibleScopeLeavesOut() {
+        Channel gmarket = channel("GMARKET", "G마켓/옥션");
+        review(naver, 1, "네이버 리뷰", LocalDate.of(2026, 9, 1));
+        review(gmarket, 1, "파일로 들어온 G마켓 리뷰", LocalDate.of(2026, 9, 1));
+        review(gmarket, 5, "또 하나", LocalDate.of(2026, 9, 2));
+
+        ReviewRecordPageView page = service.record(org, null, null, null, 0, 20);
+        // G마켓 is not a seller-visible channel: not listed, not widened into 「전체」 — counted, so 「전체」 can say so.
+        assertThat(page.items()).extracting(ReviewRecordPageView.Row::channelCode).containsOnly("NAVER");
+        assertThat(page.outsideVisibleChannels()).isEqualTo(2);
+        assertThat(page.channelFacts()).extracting(ReviewRecordPageView.ChannelFacts::channelCode)
+                .containsExactly("NAVER", "COUPANG");
+        assertThat(page.channelFacts()).extracting(ReviewRecordPageView.ChannelFacts::accountId)
+                .containsExactly(naverAccount.getId(), coupangAccount.getId());
+    }
+
+    @Test
     void anotherOrganisationsReviewsAreNotInTheRecord() {
         review(naver, 1, "우리 리뷰", LocalDate.of(2026, 9, 1));
         Review foreign = review(naver, 1, "남의 리뷰", LocalDate.of(2026, 9, 1));

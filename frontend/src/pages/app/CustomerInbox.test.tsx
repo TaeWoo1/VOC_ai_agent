@@ -142,65 +142,37 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("지금 처리할 일 — the work queue, from the queue read", () => {
-  it("is the WORK QUEUE, not a slice of the record: it renders what the queue read returned", async () => {
-    getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
+/*
+ * CONTRACT CHANGE (UI/UX v2 Phase 3, product-owner decision): the work is 확인할 일's, and 문의 is where inquiries
+ * are looked up. This screen used to open with its own 「지금 처리할 일」 list — the same inquiries 확인할 일 lists,
+ * drawn a second time — and its ordering/backlog/초안 준비됨 behaviour is now asserted where the list lives
+ * (`OperationsCaseQueue.test.tsx`, `homeWork.test.ts`). What stays true here is asserted: the queue read is ONE read
+ * of the declared set, its count is the link, and a failed read says so instead of showing none.
+ */
+describe("확인할 일 — linked from the record, not drawn twice", () => {
+  it("draws no second work list, and links to 확인할 일 with the queue's own count", async () => {
+    getInquiryQueueStrict.mockImplementation(
+      queueOf([queued({ workItemId: "w1", inquiryId: "i1" }), queued({ workItemId: "w2", inquiryId: "i2" })]),
+    );
     renderInbox();
-
-    const queue = await screen.findByLabelText("지금 처리할 일");
-    expect(within(queue).getAllByRole("link")).toHaveLength(1);
-    expect(within(queue).getByRole("link")).toHaveAttribute("href", "/inquiries/i1");
-    // Membership is not decided on screen: the read names no phase, so the server answers with the
-    // set it declared (`InquiryWorkItemPhase.AWAITING_SELLER`).
+    const link = await screen.findByRole("link", { name: /확인할 일에 문의 2건/ });
+    expect(link).toHaveAttribute("href", "/customer-operations/cases");
+    expect(screen.queryByLabelText("지금 처리할 일")).toBeNull();
+    // Membership is still the server's: one read, no phase named.
     expect(getInquiryQueueStrict).toHaveBeenCalledTimes(1);
     expect(getInquiryQueueStrict.mock.calls[0][0]).not.toHaveProperty("phase");
   });
 
-  it("초안 준비됨 needs a draft — a queued row without one is 답변 필요", async () => {
-    getInquiryQueueStrict.mockImplementation(
-      queueOf([
-        queued({ workItemId: "w1", inquiryId: "i1", phase: "PROPOSED", hasDraft: false }),
-        queued({ workItemId: "w2", inquiryId: "i2", phase: "PROPOSED", hasDraft: true, receivedAt: "2026-08-02T10:00:00Z" }),
-      ]),
-    );
-    renderInbox();
-
-    const queue = await screen.findByLabelText("지금 처리할 일");
-    const items = within(queue).getAllByRole("listitem").map((li) => li.textContent ?? "");
-    expect(items[0]).toContain("답변 필요");
-    expect(items[1]).toContain("초안 준비됨");
-  });
-
-  it("longest-waiting first WITHIN recent work — but a decade-old row does not bury this week's", async () => {
-    getInquiryQueueStrict.mockImplementation(
-      queueOf([
-        queued({ workItemId: "w-newest", inquiryId: "newest", receivedAt: new Date(Date.now() - 3_600_000).toISOString() }),
-        queued({ workItemId: "w-ancient", inquiryId: "ancient", receivedAt: "2014-01-04T10:00:00Z" }),
-        queued({ workItemId: "w-week", inquiryId: "week", receivedAt: new Date(Date.now() - 7 * 86_400_000).toISOString() }),
-      ]),
-    );
-    renderInbox();
-
-    const queue = await screen.findByLabelText("지금 처리할 일");
-    const hrefs = within(queue).getAllByRole("link").map((a) => a.getAttribute("href"));
-    // Recent work, longest-waiting first; then the year-plus backlog under its own divider.
-    expect(hrefs).toEqual(["/inquiries/week", "/inquiries/newest", "/inquiries/ancient"]);
-    // The divider says what the group is and is not itself a heading or a control.
-    const divider = within(queue).getByText(/1년 넘게 지난 문의 1건/);
-    expect(divider).toHaveAttribute("aria-hidden", "true");
-    expect(divider.closest("a")).toBeNull();
-  });
-
-  it("renders no section at all when nothing is waiting — never 「0건」", async () => {
+  it("says nothing about 확인할 일 when nothing is waiting — never 「0건」", async () => {
     renderInbox();
     await screen.findByLabelText("전체 문의");
-    expect(screen.queryByLabelText("지금 처리할 일")).toBeNull();
+    expect(screen.queryByRole("link", { name: /확인할 일에 문의/ })).toBeNull();
   });
 
   it("a queue read that FAILED says so — an unread queue is not an empty one", async () => {
     getInquiryQueueStrict.mockRejectedValue(new Error("down"));
     renderInbox();
-    expect(await screen.findByText(/지금 처리할 일을 불러오지 못했습니다/)).toBeInTheDocument();
+    expect(await screen.findByText(/처리할 문의 수를 불러오지 못했습니다/)).toBeInTheDocument();
     // The record is a separate read and is unaffected.
     expect(screen.getByLabelText("전체 문의")).toBeInTheDocument();
   });
@@ -297,7 +269,7 @@ describe("상품 → 문의 doorway", () => {
     expect(scope).toHaveTextContent("케이블 몰딩");
   });
 
-  it("the WORK is scoped too — a doorway must not land the seller above 21 other products' items", async () => {
+  it("the WORK count is scoped too — a doorway does not count 21 other products' items", async () => {
     getInquiryQueueStrict.mockImplementation(
       queueOf([
         queued({ workItemId: "w-mine", inquiryId: "mine", productId: "p1", productName: "케이블 몰딩" }),
@@ -313,10 +285,9 @@ describe("상품 → 문의 doorway", () => {
     });
     renderInbox("/inquiries?productId=p1");
 
-    const queue = await screen.findByLabelText("이 상품의 지금 처리할 일");
-    const hrefs = within(queue).getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/inquiries/mine"]);
-    // Scoped from rows already read — the queue is not asked a second time for the product.
+    // The link counts this product's waiting inquiries, not the other products' — scoped from the rows already
+    // read, so the queue is not asked a second time for the product.
+    expect(await screen.findByRole("link", { name: /확인할 일에 문의 1건/ })).toBeInTheDocument();
     expect(getInquiryQueueStrict).toHaveBeenCalledTimes(1);
   });
 
@@ -416,22 +387,17 @@ describe("accessibility", () => {
 });
 
 describe("master-detail (UI/UX v2 Phase 2) — the list and the chosen inquiry, side by side", () => {
-  it("on a wide screen opens the first row of 지금 처리할 일 beside the list, without a click", async () => {
+  it("on a wide screen opens the record's first row beside the list, without a click", async () => {
     const restore = stubWide(true);
     try {
-      getInquiryQueueStrict.mockImplementation(
-        queueOf([
-          queued({ workItemId: "w-newest", inquiryId: "newest", receivedAt: new Date(Date.now() - 3_600_000).toISOString() }),
-          queued({ workItemId: "w1", inquiryId: "i1", receivedAt: new Date(Date.now() - 7 * 86_400_000).toISOString() }),
-        ]),
-      );
+      // i1 is the record's first row; its work item comes from the queue read, so the pane can answer it.
+      getInquiryQueueStrict.mockImplementation(queueOf([queued({ workItemId: "w1", inquiryId: "i1" })]));
       renderInbox();
-      // The row the list itself puts first — the one that has waited longest this year — is the one open.
       const pane = await screen.findByLabelText("선택한 문의");
       expect(pane).toBeInTheDocument();
       await waitFor(() => expect(getInquiryDetailStrict).toHaveBeenCalledWith("w1"));
-      const queue = screen.getByLabelText("지금 처리할 일");
-      expect(within(queue).getAllByRole("link")[0]).toHaveAttribute("aria-current", "true");
+      const record = screen.getByLabelText("전체 문의");
+      expect(within(record).getAllByRole("link")[0]).toHaveAttribute("aria-current", "true");
     } finally {
       restore();
     }

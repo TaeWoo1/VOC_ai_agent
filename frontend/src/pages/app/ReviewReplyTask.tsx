@@ -371,6 +371,11 @@ export function ReviewCaseView({
                   headingLevel={3}
                 />
               </Section>
+              {/* 작업에서 제외 lived only on the 리뷰 screen's 「내 답변 작업」 list; that list is gone and its rows are
+                  확인할 일's now, so the one exit from the to-do stands with the work it takes out. */}
+              {detail.sellerAccountId ? (
+                <SetAsideFromWork accountId={detail.sellerAccountId} actionRef={replyWork.actionRef} onDone={bump} />
+              ) : null}
             </DecisionCard>
           ) : null}
 
@@ -415,4 +420,71 @@ export function ReviewReplyTaskLegacyEntry() {
   const [params] = useSearchParams();
   const search = params.toString();
   return <Navigate replace to={`/reviews/reply/${reviewId}${search ? `?${search}` : ""}`} />;
+}
+
+/**
+ * 「작업에서 제외」 — the reply to-do's one exit, moved here from the 리뷰 screen's 「내 답변 작업」 (UI/UX v2 Phase 3).
+ *
+ * <p>The same write, the same idempotency key and the same confirmation sentence it always had: the review leaves
+ * the to-do (확인할 일) and nothing else happens — no draft is deleted, nothing is recorded as answered — and it can
+ * be restored from 확인할 일's 「지난 답변 작업」.
+ */
+function SetAsideFromWork({ accountId, actionRef, onDone }: { accountId: string; actionRef: string; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+
+  if (state === "done") {
+    return (
+      <p role="status" className="mt-3 border-t border-line pt-3 text-sm text-ink" data-testid="reply-work-dismissed-notice">
+        리뷰를 답변 작업 목록에서 제외했어요. 저장한 초안과 기록은 그대로 있습니다.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      {confirming ? (
+        <div role="group" aria-label="작업에서 제외 확인" className="space-y-2" data-testid="reply-work-dismiss-confirm">
+          <p className="break-keep text-sm text-muted">
+            이 리뷰를 확인할 일에서만 제외합니다. 저장한 초안과 기록은 그대로 남고, 답변한 것으로 기록되지 않습니다.
+            제외한 리뷰는 확인할 일 아래 &apos;제외한 작업&apos;에서 다시 확인하고 복원할 수 있어요.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await api.dismissReplyWork(accountId, actionRef, { commandId: crypto.randomUUID() });
+                  setState("done");
+                  onDone();
+                } catch {
+                  setState("failed");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? "제외하는 중…" : "제외하기"}
+            </Btn>
+            <Btn size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+              취소
+            </Btn>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="text-sm text-muted underline underline-offset-2 hover:text-ink"
+          data-testid="reply-work-dismiss"
+        >
+          작업에서 제외
+        </button>
+      )}
+      {state === "failed" ? <p className="mt-2 text-sm text-bad">제외하지 못했습니다. 잠시 후 다시 시도해 주세요.</p> : null}
+    </div>
+  );
 }

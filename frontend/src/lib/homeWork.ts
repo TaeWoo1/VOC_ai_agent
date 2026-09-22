@@ -2,7 +2,7 @@ import { REASON, reasonOfCase, sourceLabel, waitSince, DRAFT_UNSENT, type Reason
 import { subjectFallback } from "./customerOperations";
 import { isOldBacklog as isOldInquiryBacklog } from "./inquiryWorkspace";
 import type { CustomerOperationsDecisionRow, CustomerOperationsHome } from "./customerOperationsTypes";
-import type { InquiryQueueResponse, OperationsHome } from "./types";
+import type { InquiryQueueResponse, OperationsHome, ReviewWorkView } from "./types";
 
 /**
  * <b>「확인 필요」 on the Home — one list, not three</b> (Customer Operations v3.1).
@@ -100,6 +100,13 @@ export function mergeHomeWork(
   ops: OperationsHome | null | undefined,
   queue: InquiryQueueResponse | null | undefined,
   now: Date = new Date(),
+  /**
+   * The review half, whole (UI/UX v2 Phase 3). When present it replaces the Home's three-row slice of undecided
+   * 확인 필요 reviews with all of them, and adds the seller's own reply work still before approval — the items the
+   * 리뷰 screen's 「내 답변 작업」 used to be the only place for. Absent (a failed read, an older caller), the list is
+   * what it was.
+   */
+  reviewWork?: ReviewWorkView | null,
 ): HomeWork {
   const byOwner = new Map<string, HomeWorkRow>();
   const settled = new Set<string>((co?.handled.rows ?? []).map((r) => r.to));
@@ -110,7 +117,8 @@ export function mergeHomeWork(
   }
   if (co && co.decisions.total > co.decisions.rows.length) truncated = true;
 
-  for (const row of ops?.reviews.rows ?? []) {
+  const attentionRows = reviewWork ? reviewWork.attention : ops?.reviews.rows ?? [];
+  for (const row of attentionRows) {
     const owner = `/reviews/reply/${row.reviewId}`;
     if (byOwner.has(owner) || settled.has(owner)) continue;
     byOwner.set(owner, {
@@ -128,6 +136,36 @@ export function mergeHomeWork(
       subjectId: row.reviewId,
       workItemId: null,
     });
+  }
+
+  if (reviewWork && reviewWork.attentionTotal > reviewWork.attention.length) truncated = true;
+
+  // The seller's own reply work before approval. A decided review is not in the undecided list above, so the two
+  // never describe one review twice; a case about it still wins, by the same owner key.
+  for (const account of reviewWork?.committed ?? []) {
+    for (const item of account.todo) {
+      if (!item.reviewId) continue;
+      const owner = `/reviews/reply/${item.reviewId}`;
+      if (byOwner.has(owner) || settled.has(owner)) continue;
+      const awaiting = item.replyWorkState === "AWAITING_APPROVAL";
+      byOwner.set(owner, {
+        key: `review:${item.reviewId}`,
+        reason: awaiting ? REASON.approve : REASON.draft,
+        source: sourceLabel(item.channelCode ?? account.channelCode, "REVIEW", item.rating),
+        title: item.safePreview?.trim() || "본문 없는 리뷰",
+        line: [awaiting ? `초안 있음 · ${DRAFT_UNSENT}` : "대응 필요로 정함 · 답변 초안 없음", item.productName]
+          .filter(Boolean)
+          .join(" · "),
+        since: item.sourceCreatedDate,
+        to: owner,
+        owner,
+        caseId: null,
+        verb: "검토",
+        kind: "REVIEW",
+        subjectId: item.reviewId,
+        workItemId: null,
+      });
+    }
   }
 
   for (const row of queue?.content ?? []) {
@@ -180,7 +218,7 @@ export function isOldBacklog(row: HomeWorkRow, now: Date): boolean {
 
 /** 「교환·환불 1」, 「정보 부족 1」… — the reasons of the rows drawn, in a fixed order, zeros left out. */
 export function reasonCounts(rows: HomeWorkRow[]): string[] {
-  const order: Reason[] = [REASON.exchange, REASON.info, REASON.reply, REASON.review, REASON.withheld];
+  const order: Reason[] = [REASON.exchange, REASON.info, REASON.reply, REASON.review, REASON.approve, REASON.draft, REASON.withheld];
   return order
     .map((reason) => [reason.tag, rows.filter((r) => r.reason.tag === reason.tag).length] as const)
     .filter(([, n]) => n > 0)

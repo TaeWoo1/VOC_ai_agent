@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Reviews } from "./Reviews";
 import { expectNoAxeViolations } from "../../test/axe";
 import type { ChannelResponse, ChannelReviewPageView, SellerAccountResponse } from "../../lib/types";
@@ -14,6 +14,7 @@ const getChannelsStrict = vi.fn();
 const getChannelReviewsStrict = vi.fn();
 const getProductReviews = vi.fn();
 const getReviewRecordStrict = vi.fn();
+const getReviewWorkspace = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -25,6 +26,9 @@ vi.mock("../../lib/apiClient", () => ({
     recordChannelReviewTriageBehavior: vi.fn(),
     getProductReviews: (productId: string, options: unknown) => getProductReviews(productId, options),
     getReviewRecordStrict: (params: unknown) => getReviewRecordStrict(params),
+    getReviewWorkspace: (id: string) => getReviewWorkspace(id),
+    getReviewWorkStrict: async () => ({ attentionTotal: 0, attention: [], committed: [] }),
+    getCustomerOperationsDecisions: async () => ({ total: 0, rows: [] }),
     // 내 답변 작업 mounts on a reply-capable (NAVER) account since A6; keep it empty and off the wire here.
     getReplyWork: async (accountId: string) => ({
       sellerAccountId: accountId,
@@ -95,11 +99,17 @@ const CHANNELS = [
   channel("c24", "CAFE24", "카페24 자사몰"),
 ];
 
+/** Reports where the router ended up — the per-account address now lands on the one record screen. */
+function LocationProbe() {
+  const { pathname, search } = useLocation();
+  return <output data-testid="location">{`${pathname}${search}`}</output>;
+}
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/reviews" element={<Reviews />} />
+        <Route path="/reviews" element={<><Reviews /><LocationProbe /></>} />
         <Route path="/reviews/:accountId" element={<Reviews />} />
         <Route path="/connect" element={<h1>채널 연결</h1>} />
       </Routes>
@@ -217,8 +227,8 @@ describe("리뷰 — the workflow surface", () => {
     renderAt("/reviews");
     const filter = await screen.findByRole("group", { name: "채널 필터" });
     expect(screen.getByRole("heading", { level: 1, name: "리뷰" })).toBeInTheDocument();
-    expect(within(filter).getByRole("button", { name: "전체 채널" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual(["전체 채널", "네이버", "쿠팡"]);
+    expect(within(filter).getByRole("button", { name: "전체" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual(["전체", "네이버", "쿠팡"]);
     // One read, answered by the server over every channel — nothing merged on this side.
     expect(getReviewRecordStrict).toHaveBeenCalledWith(expect.objectContaining({ channel: undefined, sort: "attention" }));
     expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
@@ -230,50 +240,56 @@ describe("리뷰 — the workflow surface", () => {
     );
   });
 
-  it("opens each row in the Review Case, carrying the way back to this record", async () => {
+  it("opens no work area first — the record is a record, and the work is 확인할 일's (UI/UX v2 Phase 3)", async () => {
+    renderAt("/reviews");
+    await screen.findByRole("group", { name: "채널 필터" });
+    expect(screen.queryByRole("heading", { name: /내 답변 작업/ })).toBeNull();
+    expect(screen.queryByText(/지금 확인이 필요한 리뷰/)).toBeNull();
+  });
+
+  it("selects a row into the detail, which offers the door to the Review Case and the way back", async () => {
+    getReviewWorkspace.mockResolvedValue({
+      id: "rv-1", writtenOn: "2026-09-01", rating: 1, negative: true, body: "접착이 약해요", bodyRedacted: false,
+      productName: "선바로 일체형 전선몰딩", mediaCount: 0, textless: false, isNew: false,
+      triage: { tier: "NEEDS_ATTENTION", reason: "1점", recommendedAction: null, tags: [] }, aiMark: null,
+      sellerCorrection: null, locateTarget: { productId: null, vendorItemId: null, writtenOn: null, rating: null },
+      replyWork: null, sellerAccountId: "acc-cp", replyUnavailableReason: "CHANNEL_HAS_NO_REPLY_FLOW",
+    });
     renderAt("/reviews");
     const row = await screen.findByRole("link", { name: /접착이 약해요/ });
-    expect(row).toHaveAttribute("href", "/reviews/reply/rv-1?from=record");
+    expect(row.getAttribute("href")).toMatch(/[?&]review=rv-1$/);
     expect(row).toHaveTextContent("쿠팡");
+    await userEvent.click(row);
+    expect(screen.getByTestId("location")).toHaveTextContent("/reviews?review=rv-1");
+    const door = await screen.findByRole("link", { name: "이 리뷰 처리하기" });
+    expect(door).toHaveAttribute("href", "/reviews/reply/rv-1?from=record");
   });
 
-  it("switches channel by account; the h1 stays 리뷰 and the record heading names the channel", async () => {
-    renderAt("/reviews/acc-cp");
-    const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
-    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual([
-      "네이버 스마트스토어",
-      "쿠팡",
-    ]);
-    expect(within(nav).getByRole("link", { current: "page" })).toHaveTextContent("쿠팡");
-    expect(screen.getByRole("heading", { level: 1, name: "리뷰" })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { level: 2, name: "쿠팡" })).toBeInTheDocument();
-    // One line, and it answers what the screen is — the tier chips below state the ordering.
-    expect(screen.getByText("확인이 필요한 리뷰부터 봅니다.")).toBeInTheDocument();
-  });
-
-  it("keeps the tier filter and drops the review selection when switching channel", async () => {
+  it("a per-account address lands on the one record screen, filtered to that account's channel", async () => {
+    // URL compatibility: every bookmark and link to `/reviews/:accountId` still opens what it named — the channel —
+    // keeping the tier filter and turning the review into the selection.
     renderAt("/reviews/acc-cp?tier=NEEDS_ATTENTION&review=r9");
-    const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
-    expect(within(nav).getByRole("link", { name: "네이버 스마트스토어" })).toHaveAttribute(
-      "href",
-      "/reviews/acc-nv?tier=NEEDS_ATTENTION",
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/reviews?tier=NEEDS_ATTENTION&review=r9&channel=COUPANG",
+      ),
+    );
+    expect(getReviewRecordStrict).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "COUPANG", tier: "NEEDS_ATTENTION" }),
     );
   });
 
-  it("names no channel that keeps no record, and no channel outside the product set", async () => {
-    getChannelsStrict.mockResolvedValue([...CHANNELS, channel("gm", "GMARKET", "G마켓")]);
-    getSellerAccountsStrict.mockResolvedValue([account("acc-gm", "gm", "G마켓"), account("acc-cp", "cp", "쿠팡"), account("acc-nv", "nv", "네이버 스마트스토어")]);
-    renderAt("/reviews/acc-cp");
-    const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
-    expect(within(nav).queryByText("G마켓")).toBeNull();
-    expect(within(nav).getByRole("link", { current: "page" })).toHaveTextContent("쿠팡");
+  it("an account this organisation does not hold lands on the unfiltered record", async () => {
+    renderAt("/reviews/acc-unknown");
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/reviews$/));
   });
 
-  it("shows no switcher for a single account — the record heading already names it", async () => {
-    getSellerAccountsStrict.mockResolvedValue([account("acc-nv", "nv", "네이버 스마트스토어")]);
-    renderAt("/reviews/acc-nv");
-    expect(await screen.findByRole("heading", { level: 2, name: "네이버 스마트스토어" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
+  it("names no channel outside the product set as a filter", async () => {
+    getChannelsStrict.mockResolvedValue([...CHANNELS, channel("gm", "GMARKET", "G마켓")]);
+    getSellerAccountsStrict.mockResolvedValue([account("acc-gm", "gm", "G마켓"), account("acc-cp", "cp", "쿠팡"), account("acc-nv", "nv", "네이버 스마트스토어")]);
+    renderAt("/reviews");
+    const filter = await screen.findByRole("group", { name: "채널 필터" });
+    expect(within(filter).queryByText("G마켓")).toBeNull();
   });
 
   it("points at 채널 연결 when no review-capable channel is connected", async () => {
@@ -292,9 +308,8 @@ describe("리뷰 — the workflow surface", () => {
   });
 
   it("has no axe violations", async () => {
-    const { container } = renderAt("/reviews/acc-nv");
-    await screen.findByRole("navigation", { name: "리뷰 채널" });
-    await screen.findByRole("heading", { level: 2, name: "네이버 스마트스토어" });
+    const { container } = renderAt("/reviews");
+    await screen.findByRole("link", { name: /접착이 약해요/ });
     await expectNoAxeViolations(container);
   });
 });

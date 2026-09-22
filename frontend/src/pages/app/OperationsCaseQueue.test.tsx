@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   getCustomerOperationsHome: vi.fn(),
   getOperationsHomeStrict: vi.fn(),
   getInquiryQueueStrict: vi.fn(),
+  getReviewWorkStrict: vi.fn((): Promise<unknown> => Promise.reject(new Error("not in this test"))),
   // The pane beside the list reads the selected case; it never settles here — the list is what is under test.
   getOperationsCase: vi.fn(() => new Promise(() => undefined)),
 }));
@@ -305,3 +306,40 @@ function stubWide(matches: boolean): () => void {
     window.matchMedia = original;
   };
 }
+
+describe("OperationsCaseQueue — the seller's own reply work (UI/UX v2 Phase 3)", () => {
+  it("lists reply work before approval beside the rest, and an unattributable account declines rather than reading as none", async () => {
+    api.getCustomerOperationsHome.mockResolvedValue(null);
+    api.getCustomerOperationsDecisions.mockResolvedValue(null);
+    api.getOperationsHomeStrict.mockResolvedValue(null);
+    api.getInquiryQueueStrict.mockResolvedValue(null);
+    api.getReviewWorkStrict.mockResolvedValue({
+      attentionTotal: 0,
+      attention: [],
+      committed: [
+        {
+          accountId: "acc-nv", channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", coverage: "COVERED",
+          todo: [{
+            channelCode: "NAVER", channelNameKo: "네이버 스마트스토어", sourceType: "REVIEW", productName: "선바로",
+            rating: 4, replyStatus: "PENDING", sourceCreatedDate: "2026-08-28", collectedDate: "2026-08-29",
+            signalType: "LOW_RATING_REVIEW", safePreview: "잘 떨어져요", actionRef: "review:r-1", reviewId: "r-1",
+            triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: true, replyWorkState: "AWAITING_APPROVAL",
+            category: null, hasReportedSubmission: false,
+          }],
+          recentlyReported: [],
+        },
+        { accountId: "acc-2", channelCode: "CAFE24", channelNameKo: "카페24", coverage: "UNCERTAIN_MULTI_ACCOUNT", todo: [], recentlyReported: [] },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <OperationsCaseQueue />
+      </MemoryRouter>,
+    );
+    const list = await screen.findByRole("list", { name: "확인할 일" });
+    const row = within(list).getByRole("link", { name: /잘 떨어져요/ });
+    expect(row).toHaveTextContent("승인 대기");
+    expect(row).toHaveAttribute("href", "/reviews/reply/r-1?from=work");
+    expect(screen.getByTestId("reply-work-coverage-uncertain")).toHaveTextContent("안전하게 판단할 수 없어요");
+  });
+});

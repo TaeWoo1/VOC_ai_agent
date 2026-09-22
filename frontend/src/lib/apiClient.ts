@@ -49,6 +49,7 @@ import type {
   ChannelReviewLocateRun,
   ChannelReviewPageView,
   ReviewRecordPageView,
+  ReviewWorkView,
   ReviewTriageTier,
   ConnectionInfoView,
   ConnectionCapabilityView,
@@ -2102,6 +2103,12 @@ export const api = {
    * `channel`. The server orders, filters, pages and counts; nothing is merged here. No mock fallback, for the same
    * reason the channel record has none.
    */
+  /** The review half of 확인할 일, whole (UI/UX v2 Phase 3). No mock fallback: invented work is worse than none. */
+  async getReviewWorkStrict(): Promise<ReviewWorkView> {
+    const { data } = await http.get<ReviewWorkView>("/api/operations/review-work");
+    return data;
+  },
+
   async getReviewRecordStrict(
     params: {
       channel?: string;

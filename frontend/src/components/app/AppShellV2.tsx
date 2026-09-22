@@ -24,6 +24,7 @@ const MASTER_DETAIL_ROUTES = [
   /^\/customer-operations\/cases\/?$/,
   /^\/memory(\/[^/]+)?\/?$/,
   /^\/inquiries(\/[^/]+)?\/?$/,
+  /^\/reviews(\/[^/]+)?\/?$/,
 ];
 
 /**

@@ -20,6 +20,7 @@ const recordReviewDecision = vi.fn();
 const recordReviewTriageAction = vi.fn();
 const correctReviewTriage = vi.fn();
 const withdrawReviewTriageCorrection = vi.fn();
+const dismissReplyWork = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -31,6 +32,7 @@ vi.mock("../../lib/apiClient", () => ({
     recordReviewTriageAction: (...a: unknown[]) => recordReviewTriageAction(...a),
     correctReviewTriage: (...a: unknown[]) => correctReviewTriage(...a),
     withdrawReviewTriageCorrection: (...a: unknown[]) => withdrawReviewTriageCorrection(...a),
+    dismissReplyWork: (...a: unknown[]) => dismissReplyWork(...a),
   },
 }));
 
@@ -757,5 +759,49 @@ describe("리뷰 처리 — the account-scoped address still lands", () => {
     const { container } = renderLegacy("?from=chat");
     await screen.findByText("도착: 리뷰 처리");
     expect(container).toBeTruthy();
+  });
+});
+
+/**
+ * 「작업에서 제외」 — moved here from the 리뷰 screen's 「내 답변 작업」 with the work it takes out (UI/UX v2 Phase 3).
+ * Ported from `MyReplyWork.test.tsx`: it asks first and says what it does and does NOT do, 취소 writes nothing, and
+ * confirming sets the review aside with an idempotency key and claims no completion.
+ */
+describe("리뷰 처리 — 작업에서 제외", () => {
+  beforeEach(() => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+  });
+
+  it("asks first, explaining what it does and does NOT do — before any write", async () => {
+    renderTask();
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss"));
+    const confirm = await screen.findByTestId("reply-work-dismiss-confirm");
+    expect(confirm).toHaveTextContent("저장한 초안과 기록은 그대로 남고");
+    expect(confirm).toHaveTextContent("답변한 것으로 기록되지 않습니다");
+    expect(dismissReplyWork).not.toHaveBeenCalled();
+  });
+
+  it("취소 backs out with nothing written", async () => {
+    renderTask();
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss"));
+    await userEvent.click(within(await screen.findByTestId("reply-work-dismiss-confirm")).getByRole("button", { name: "취소" }));
+    expect(screen.queryByTestId("reply-work-dismiss-confirm")).toBeNull();
+    expect(dismissReplyWork).not.toHaveBeenCalled();
+  });
+
+  it("confirming sets the review aside through the review's own account and ref, and claims no completion", async () => {
+    dismissReplyWork.mockResolvedValue({ actionRef: `review:${REVIEW}`, replayed: false });
+    renderTask();
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss"));
+    await userEvent.click(within(await screen.findByTestId("reply-work-dismiss-confirm")).getByRole("button", { name: "제외하기" }));
+    await waitFor(() => expect(dismissReplyWork).toHaveBeenCalledTimes(1));
+    const [accountId, ref, body] = dismissReplyWork.mock.calls[0]!;
+    expect(accountId).toBe(ACCOUNT);
+    expect(ref).toBe(`review:${REVIEW}`);
+    expect((body as { commandId: string }).commandId).toBeTruthy();
+    const notice = await screen.findByTestId("reply-work-dismissed-notice");
+    expect(notice).toHaveTextContent("저장한 초안과 기록은 그대로 있습니다");
+    expect(notice).not.toHaveTextContent("완료");
   });
 });

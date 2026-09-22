@@ -2143,6 +2143,26 @@ export interface IssueKnowledgeOnHand {
  * One review on the Home. `accountId` rides along so the row can link straight into the decision
  * workspace without a second read to learn which account it belongs to.
  */
+/**
+ * The review half of 확인할 일, whole — `GET /api/operations/review-work` (UI/UX v2 Phase 3). Every undecided
+ * 확인 필요 review (the Home's predicate without its three-row cap), and per reply-capable account the seller's own
+ * reply to-do still in DRAFT_NEEDED / AWAITING_APPROVAL. APPROVED is 실행 대기's.
+ */
+export interface ReviewWorkView {
+  attentionTotal: number;
+  attention: HomeAttentionReview[];
+  committed: ReviewWorkAccount[];
+}
+
+export interface ReviewWorkAccount {
+  accountId: string;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  coverage: string | null;
+  todo: OperatorVocItem[];
+  recentlyReported: OperatorVocItem[];
+}
+
 export interface HomeAttentionReview {
   reviewId: string;
   accountId: string | null;
@@ -2360,6 +2380,19 @@ export interface ReviewRecordPageView {
   channels: string[];
   triageSummary: ChannelReviewTriageSummaryView;
   items: ReviewRecordRow[];
+  /** Per channel in scope: its one account (or null), its capability row, its last import. */
+  channelFacts: ReviewRecordChannelFacts[];
+  /** Reviews on channels outside the seller-visible set — counted, never listed. */
+  outsideVisibleChannels: number;
+}
+
+export interface ReviewRecordChannelFacts {
+  channelCode: string;
+  channelNameKo: string | null;
+  accountId: string | null;
+  capability: ReviewChannelCapabilityView | null;
+  lastImportAt: string | null;
+  lastImportComplete: boolean;
 }
 
 export interface ReviewRecordRow {

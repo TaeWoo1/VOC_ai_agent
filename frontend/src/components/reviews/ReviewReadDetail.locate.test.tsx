@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 //
-// **`[쿠팡에서 보기]` on the 상품평 screen.**
+// **`[쿠팡에서 보기]` in the 리뷰 record's read detail.**
+//
+// Moved with the detail itself (UI/UX v2 Phase 3): the per-account record screen that used to hold it was retired
+// and its read detail became the 리뷰 screen's right-hand pane. Every case below is the same case, asserted against
+// the component that now draws it.
 //
 // The interesting cases are the ones that are not a ring. A review that is not on the page the seller has up
 // must not read as an error, an ambiguous match must say why nothing was outlined, and a run belonging to
@@ -9,29 +13,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ChannelReviews } from "./ChannelReviews";
+import { MemoryRouter } from "react-router-dom";
+import { ReviewReadDetail } from "./ReviewReadDetail";
 import type { ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
 import type { ChannelReviewDetailView, ChannelReviewPageView } from "../../lib/types";
 import type { ReviewLocateBinding } from "../../lib/actionWindow/locate/useReviewLocate";
 
-const getChannelReviewsStrict = vi.fn();
-const getChannelReviewStrict = vi.fn();
-const startChannelReviewLocateRun = vi.fn();
 const recordBehavior = vi.fn(async (..._args: unknown[]) => undefined);
-
-vi.mock("../../lib/apiClient", () => ({
-  api: {
-    getChannelReviewsStrict: (accountId: string, params: unknown) => getChannelReviewsStrict(accountId, params),
-    getChannelReviewStrict: (accountId: string, reviewId: string) => getChannelReviewStrict(accountId, reviewId),
-    startChannelReviewLocateRun: (accountId: string, reviewId: string) =>
-      startChannelReviewLocateRun(accountId, reviewId),
-    recordChannelReviewTriageBehavior: (accountId: string, events: unknown) => recordBehavior(accountId, events),
-    // 내 답변 작업 mounts on a reply-capable channel (A6); this file is about locate, so keep it empty.
-    getReplyWork: async () => ({ sellerAccountId: "acc-1", channel: "NAVER", coverage: "COVERED", todo: [], recentlyReported: [] }),
-  },
-  getToken: () => "token",
-}));
 
 const PAGE: ChannelReviewPageView = {
   page: 0,
@@ -119,29 +107,37 @@ function binding(over: Partial<ReviewLocateBinding> = {}): ReviewLocateBinding {
   };
 }
 
-function renderPage(locateBinding: ReviewLocateBinding) {
-  return render(
-    <MemoryRouter initialEntries={["/connect/channels/acc-1/reviews"]}>
-      <Routes>
-        <Route
-          path="/connect/channels/:accountId/reviews"
-          element={<ChannelReviews locateBinding={locateBinding} />}
-        />
-      </Routes>
-    </MemoryRouter>,
+/** The detail as the 리뷰 pane mounts it: the run, the progress and the unavailability belong to ONE review. */
+function Detail({ locate, page = PAGE, detail = DETAIL }: { locate: ReviewLocateBinding; page?: ChannelReviewPageView; detail?: ChannelReviewDetailView }) {
+  const pilotOn = page.aiPilotEnabled && page.channel.aiTriage;
+  return (
+    <MemoryRouter>
+      <ReviewReadDetail
+        pilotOn={pilotOn}
+        capability={page.channel}
+        word="상품평"
+        recordBehavior={(events) => void recordBehavior("acc-1", events)}
+        detail={detail}
+        locate={locate}
+        run={locate.reviewId === detail.id ? locate.view : null}
+        running={locate.reviewId === detail.id && locate.starting}
+        unavailable={locate.reviewId === detail.id ? locate.unavailable : null}
+      />
+    </MemoryRouter>
   );
 }
 
-/** Open the 상세 panel for the one review in the fixture. */
+function renderPage(locateBinding: ReviewLocateBinding, page: ChannelReviewPageView = PAGE, detail: ChannelReviewDetailView = DETAIL) {
+  return render(<Detail locate={locateBinding} page={page} detail={detail} />);
+}
+
+/** The pane shows the chosen review; nothing to press. Kept so each case still reads as the seller's steps. */
 async function selectTheReview(): Promise<void> {
-  await userEvent.click(await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요"));
   await screen.findByText("배송도 빠르고 포장도 꼼꼼했어요. 다음에도 구매할게요.");
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getChannelReviewsStrict.mockResolvedValue(PAGE);
-  getChannelReviewStrict.mockResolvedValue(DETAIL);
 });
 
 describe("[쿠팡에서 보기]", () => {
@@ -269,11 +265,10 @@ describe("[쿠팡에서 보기]", () => {
    */
   it("renders no locate control on a channel without a locate surface, and says so", async () => {
     for (const channelCode of ["NAVER", "CAFE24"]) {
-      getChannelReviewsStrict.mockResolvedValue({
+      const { unmount } = renderPage(binding(), {
         ...PAGE,
         channel: { channelCode, aiTriage: true, originalLocate: "NONE", replySupported: channelCode === "NAVER" },
       });
-      const { unmount } = renderPage(binding());
       await selectTheReview();
       expect(screen.queryByRole("button", { name: "쿠팡에서 보기" })).not.toBeInTheDocument();
       expect(screen.getByText(/원문 화면으로 바로 이동할 수 없습니다/)).toBeInTheDocument();
@@ -286,13 +281,13 @@ describe("[쿠팡에서 보기]", () => {
    * facts, two events, and the second fires once per run — not on the press, and not on every re-render.
    */
   it("records ORIGINAL_OPENED on the press and MARKETPLACE_LOCATED once when the run completes — pilot on, marked row", async () => {
-    getChannelReviewsStrict.mockResolvedValue({ ...PAGE, aiPilotEnabled: true });
-    getChannelReviewStrict.mockResolvedValue({
+    const pilotPage = { ...PAGE, aiPilotEnabled: true };
+    const marked = {
       ...DETAIL,
       aiMark: { classifierVersion: "v", reasonCode: "DEFECT_OR_DAMAGE", predictedAt: "2026-08-17T00:00:00Z" },
-    });
+    };
     const locate = binding();
-    const { rerender } = renderPage(locate);
+    const { rerender } = renderPage(locate, pilotPage, marked);
     await selectTheReview();
 
     await userEvent.click(screen.getByRole("button", { name: "쿠팡에서 보기" }));
@@ -304,13 +299,7 @@ describe("[쿠팡에서 보기]", () => {
     // The run completes; the page re-renders with it, twice.
     const done = binding({ reviewId: "r1", view: view() });
     for (let i = 0; i < 2; i++) {
-      rerender(
-        <MemoryRouter initialEntries={["/connect/channels/acc-1/reviews"]}>
-          <Routes>
-            <Route path="/connect/channels/:accountId/reviews" element={<ChannelReviews locateBinding={done} />} />
-          </Routes>
-        </MemoryRouter>,
-      );
+      rerender(<Detail locate={done} page={pilotPage} detail={marked} />);
     }
     await waitFor(() =>
       expect(recordBehavior).toHaveBeenCalledWith("acc-1", [{ reviewId: "r1", kind: "MARKETPLACE_LOCATED" }]),
