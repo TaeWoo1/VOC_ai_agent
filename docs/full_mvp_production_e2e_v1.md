@@ -226,3 +226,75 @@ production 조합(원문+재진술)에서는 0.0640이라 **이 정리만으로�
 | backend 전체 | **4,800 tests · 실패 0** |
 
 marketplace 호출 **0** · WRITE **0** · DB write **0** · 마이그레이션 **0** · Stage 2 재실행 **없음**.
+
+## 3. Stage 2 rerun — `PASS` (2026-09-23)
+
+### 3-0. 승인과 범위
+
+- approvalId **`apr-resp-e2e2-d7c190f2edc59568`** · runId `resp-full-e2e-2r` · mode READ_ONLY (+ 모델) · Demo Org
+- 코드 **`31ec02ec`**(§2-5 수정 포함) · 실행기 `resp-e2e2-run.sh` sha256 `fb4aa95a68fb797a…`(stage 2와 **바이트 동일**) ·
+  스냅샷 `snapshot2.sql` sha256 `adce51e747253be5…`(동일)
+- stage 2의 승인은 코드 `e7e79354`에 묶여 있었으므로 계약대로 `REVOKED`로 보고 새 단일 사용 승인을 받았다.
+
+### 3-1. 실행 전 재검증 — 새 문의가 유일한 대상임을 쿼리로 확정
+
+후보 창은 15일이 아니라 `since = max(firstSettledObservation, now−15d)` = **2026-09-21 21:44:14**.
+그 창 안의 REAL 문의는 4건이고 **넷 다 모델 호출 0**으로 예측했다 — `89d24480`·`59c7c80c`는 signature 불변이라
+`OperationsCaseProcessor.handle`에서 단락되고, `bf624a8b`·`a5bc25e0`는 `ANSWERED`라 케이스가 열리지 않는다.
+**run 로그가 그대로 확인했다**: `변화없음=2 새Case=1 갱신=0 조사=0 조사생략=1 초안=1`.
+
+8080 백엔드는 `SELLEROPS_*` 환경변수가 **하나도 없고** `responsibility.scheduler-enabled`·`collect.scheduler-enabled`
+기본값이 둘 다 false라 run을 시작할 수 없다(확인 후 그대로 두었다 — pause/resume 조작 0).
+
+### 3-2. 절차 — 조작 없이 «정확히 하나»
+
+18080을 03:30:32에 기동(responsibility scheduler만 ON, 과금 상한 `used=1 → limit=7`). `next_run_at`이
+**04:00:00**이었으므로 상태를 건드리지 않고 그 시각을 기다렸다 — **88회 연속 정숙 폴링(약 29분) 동안 새 run 0건**,
+04:00:13에 run `1ab54bc8` 시작 → 04:00:37 `SUCCESS` → 04:01:18 프로세스 종료. stage 1·2가 쓴 pause 가드는
+필요 없었다: 「정확히 하나」를 스케줄 자체가 보증한다.
+
+### 3-3. 결과 — 단계별
+
+| 단계 | 결과 |
+|---|---|
+| 수집 | CAFE24 문의 `COMPLETE` **관측 1 / 새 1**(수신 1 저장 1, 비밀글·창밖·스레드답글 제외 0) · NAVER 문의 0 · CAFE24 리뷰 0 · COUPANG 문의 0 |
+| 새 문의 | `11b6a729` REAL · ROOT · UNANSWERED. 제목 「문의 드립니다」 + 본문에 이중 이스케이프된 `<meta charset="utf-8">` — **두 결함의 조건이 그대로 재현된 입력** |
+| Case | `e1df3bb5` `PREPARED` (새 케이스 1, 기존 2건은 변화없음) |
+| Goal | `INTERPRETED`, `customer-goal-interpreter/v3`, goal 2건 — evidence가 고객의 두 문장 그대로(markup·「드립니다」 **불포함**) |
+| Knowledge | **FOUND** — 근거 2건, `ORG_POLICY 교환·반품 기준` + `ORG_POLICY 배송교환정책` |
+| Eligibility | **실제로 호출됨** 2회(passages 2 · 1), 둘 다 `answered=true`, 거절 0 |
+| Resolution | **`REPLY_TO_CUSTOMER`** |
+| Investigation | OFF — `조사=0 조사생략=1` |
+| Draft | work item `4c53cbee` **`PROPOSED`** · 초안 **v1 `MODEL`** · **`answer_basis=GROUNDED`** · `prepared=DRAFT_PREPARED` |
+
+초안 본문(132자)은 판매자 자신의 정책만 인용한다 — 「…수령하신 날로부터 **7일 이내**에 신청 … **개봉하지 않은**
+미사용 상품에 한해 교환 및 반품이 가능합니다」. 두 문서의 사실이 한 문장으로 합쳐졌고 지어낸 수치는 없다.
+
+**§2-5 수정이 라이브에서 확인된 지점은 근거 목록이다** — 서로를 배경으로 지워 corpus를 침묵시키던 두 문서가
+이제 **둘 다 근거로 인용된다**.
+
+### 3-4. 호출과 쓰기 (실측)
+
+- vendor **7 / 문의당 상한 12 / run 상한 36**: goal 1 · knowledge intent 1 · knowledge embedding(QUESTION) 2 ·
+  **knowledge eligibility 2** · agent draft 1. PASSAGE embedding **0**(문단 벡터 36행 캐시 적중 — 예측대로).
+  과금(goal+draft) **2 / 6**. 켜지 않은 capability 호출 **0**.
+- marketplace: NAVER 상품 문의·고객 문의 · CAFE24 게시판 · COUPANG READ만. **WRITE 0 · 승인 0 · execution 0**
+  (로그에 publish/approval/execute 마커 0). ERROR/WARN **0**.
+- DB diff: inquiries +1 · work_items +1(**PROPOSED +1, OPEN 불변**) · wi_audit +2 · cases +1 · case_events +3 ·
+  goal_interp +1 · proposals +1 · inq_drafts +1 · **draft_evidence +2** · llm_usage +2 · customer_memory +1 ·
+  run +1 · run_source +4 · sync_jobs +4.
+  **불변**: knowledge_embedding 36 · **knowledge_candidate 3**(gap 적재 0 ⇒ GROUNDED와 일관) · approvals 3 ·
+  executions 3 · reviews · review_triage · sync_cursors · item_analyses · answer_memory · wi_open.
+- 화면: 문의 큐 `totalElements` **25 → 26**.
+
+### 3-5. 판정
+
+**`PASS`** — 성공 기준 8개 전부 충족. 새 inquiry 1 · Case 1 · Goal 저장 · 교환·반품 정책 FOUND/GROUNDED ·
+`REPLY_TO_CUSTOMER` · work item `PROPOSED` · 초안 v1 `MODEL` · draft evidence에 실제 정책 2건 인용 ·
+approval/execution/marketplace WRITE 0. 중단 조건 발동 0. 신규 문의 1 / 상한 3.
+
+### 3-6. 이 run이 증명하지 않는 것
+
+- 초안 **문장**은 결정론이 아니다. 고정된 것은 어떤 근거가 실렸는가이지 모델이 쓴 문장이 아니다.
+- retrieval 세 단계 중 둘이 매 검색마다 새 모델 호출이므로 경계선 비결정성은 남는다.
+- **전송은 증명하지 않았다**(WRITE 0). 판매자가 초안을 복사해 채널에 올리는 단계는 이 run의 범위 밖이다.
