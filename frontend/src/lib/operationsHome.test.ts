@@ -84,9 +84,20 @@ describe("지금 확인할 리뷰", () => {
 });
 
 describe("반복 문제", () => {
-  it("asks only about problems that are somebody's move", () => {
-    expect(problemLine(problems())).toContain("1건");
-    expect(problemLine(problems())).not.toContain("19건");
+  /**
+   * Both populations are DRAWN under this line, so both are named — but as two sentences, never as one number.
+   * Stating only the decidable half put 「1건 있습니다」 over a list of two rows and left the seller counting;
+   * adding them would print 「20건」, which is the sum this line has never been allowed to say.
+   */
+  it("names both populations it draws, and never their sum", () => {
+    const line = problemLine(problems());
+    expect(line).toContain("판단이 필요한 반복 문제가 1건");
+    expect(line).toContain("19건은 지켜보고 있습니다");
+    expect(line).not.toContain("20건");
+  });
+
+  it("says nothing about 관찰 중 when there is none, rather than 「0건」", () => {
+    expect(problemLine(problems({ observing: 0 }))).not.toContain("지켜보고");
   });
 
   /**

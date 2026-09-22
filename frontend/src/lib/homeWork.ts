@@ -1,5 +1,6 @@
 import { REASON, reasonOfCase, sourceLabel, waitSince, DRAFT_UNSENT, type Reason } from "./copy/customerOps";
 import { subjectFallback } from "./customerOperations";
+import { isOldBacklog as isOldInquiryBacklog } from "./inquiryWorkspace";
 import type { CustomerOperationsDecisionRow, CustomerOperationsHome } from "./customerOperationsTypes";
 import type { InquiryQueueResponse, OperationsHome } from "./types";
 
@@ -86,6 +87,7 @@ export function mergeHomeWork(
   co: CustomerOperationsHome | null | undefined,
   ops: OperationsHome | null | undefined,
   queue: InquiryQueueResponse | null | undefined,
+  now: Date = new Date(),
 ): HomeWork {
   const byOwner = new Map<string, HomeWorkRow>();
   const settled = new Set<string>((co?.handled.rows ?? []).map((r) => r.to));
@@ -131,8 +133,31 @@ export function mergeHomeWork(
   }
   if (queue && queue.totalElements > queue.content.length) truncated = true;
 
-  const rows = [...byOwner.values()].sort((a, b) => waitSince(a.since) - waitSince(b.since));
+  const rows = [...byOwner.values()].sort(
+    (a, b) => Number(isOldBacklog(a, now)) - Number(isOldBacklog(b, now)) || waitSince(a.since) - waitSince(b.since),
+  );
   return { rows, truncated };
+}
+
+/**
+ * Whether this row is year-plus backlog — <b>the 문의 화면's rule, read here rather than restated.</b>
+ *
+ * <p>Longest-waiting-first is the one urgency criterion this product has, and applied across a whole list it is the
+ * wrong shape: measured on this org, the Home's five briefed rows were five Cafe24 questions from 2016 — 「3838일
+ * 대기」 — while the case Reviewnary investigated last night, the three reviews it flagged and the inquiry that
+ * arrived this month all sat under 「+22」. A briefing whose visible half is a decade old answers 「오늘 무엇을
+ * 해야 하는가」 with 「2016년에 놓친 것」.
+ *
+ * <p>So the criterion is applied INSIDE two groups instead of across them, exactly as `/inquiries` has since
+ * Operational Workspace UX System v1 — {@link isOldBacklog} is that screen's own predicate, imported so the two
+ * lists cannot disagree about which rows are this morning's work. <b>Nothing is hidden, dropped or reordered
+ * away</b>: the old rows keep their place in the same single list, after the recent ones, and the counts above
+ * still count all of them.
+ *
+ * <p>A row with no timestamp is not backlog: absence of a date is not evidence of age.
+ */
+function isOldBacklog(row: HomeWorkRow, now: Date): boolean {
+  return row.since != null && isOldInquiryBacklog({ receivedAt: row.since }, now);
 }
 
 /** 「교환·환불 1」, 「정보 부족 1」… — the reasons of the rows drawn, in a fixed order, zeros left out. */

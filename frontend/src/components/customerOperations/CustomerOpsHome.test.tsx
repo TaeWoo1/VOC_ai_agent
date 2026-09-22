@@ -161,6 +161,31 @@ describe("mergeHomeWork — one list from three reads", () => {
     expect(work.truncated).toBe(false);
   });
 
+  /**
+   * <b>Longest-waiting-first, applied INSIDE two groups rather than across them.</b> Measured on the demo org, the
+   * five rows this Home briefs were five Cafe24 questions from 2016 — 「3838일 대기」 — while the case Reviewnary
+   * investigated last night, the three reviews it flagged and the inquiries from this month all sat under 「+22」.
+   * The predicate is `/inquiries`'s own {@code isOldBacklog}, imported rather than restated, so the two lists cannot
+   * disagree about which rows are this morning's work.
+   *
+   * <p>Nothing is hidden or dropped: the old rows keep their place in the same single list, after the recent ones.
+   */
+  it("한 해 넘게 묵은 백로그는 뒤로 간다 — 숨기지 않고, 오늘 일 뒤에", () => {
+    const old2016 = {
+      workItemId: "w-9", inquiryId: "i-2016", sellerAccountId: "a", channelId: "ch", channelCode: "CAFE24",
+      channelNameKo: "카페24", productId: null, productName: null, phase: "OPEN" as const,
+      status: "UNANSWERED" as const, title: "현금영수증해주세요", snippet: null,
+      receivedAt: "2016-03-19T04:38:27Z", hasDraft: false,
+    };
+    const work = mergeHomeWork(co(), ops(), queue({ content: [...queue().content, old2016] }), NOW);
+    const keys = work.rows.map((r) => r.key);
+    // It is still there, and it is last — the row that waited longest of all.
+    expect(keys).toContain("inquiry:i-2016");
+    expect(keys[keys.length - 1]).toBe("inquiry:i-2016");
+    // And this morning's work still leads, in its own oldest-first order.
+    expect(keys.slice(0, 4)).toEqual(["review:r-1", "case:c-2", "case:c-1", "inquiry:i-3"]);
+  });
+
   it("says when a read knows of more than it returned", () => {
     expect(mergeHomeWork(co(), null, queue({ totalElements: 80 })).truncated).toBe(true);
     const more = co();

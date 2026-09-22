@@ -135,6 +135,14 @@ export function reasonOfCase(
       return REASON.exchange;
     case "ADD_KNOWLEDGE":
       return REASON.info;
+    // A recommendation Reviewnary DID take on itself, and the only one in this vocabulary that names an action the
+    // seller performs on the customer rather than a judgement they must first make. `DECISION` below has always
+    // read it as 「답변 확인 후 발송」 and the case screen prints exactly that, so tagging the same field 「판단 보류」
+    // in the list made one DTO field say two opposite things: measured, the demo org's one case carried a prepared
+    // draft and 「등록된 지식으로 답변할 수 있는 문의입니다」 under a 「판단 보류」 tag. 「답변 필요」 is the tag the raw
+    // inquiry rows already wear for the same work — no new word, and the case now reads like what it is.
+    case "REPLY_TO_CUSTOMER":
+      return REASON.reply;
     case null:
       if (missingInformation.length > 0) return REASON.info;
       return subjectKind === "REVIEW" ? REASON.review : REASON.withheld;

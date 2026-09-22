@@ -7,6 +7,7 @@ import { WorkFlowCard } from "../../components/ui/WorkFlowCard";
 import { api } from "../../lib/apiClient";
 import { actionKo, subjectFallback } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, decisionOf, photoWord, shortDate, sourceLabel, waitLabel } from "../../lib/copy/customerOps";
+import { plainText } from "../../lib/plainText";
 import type { OperationsCaseDetail, OperationsCaseNeed } from "../../lib/customerOperationsTypes";
 
 /** The queue the case was opened from, carried in router state by the Home list — never re-read here. */
@@ -62,7 +63,7 @@ export function OperationsCase() {
     setError(message ?? COPY.saveFailed);
   };
 
-  const title = detail.title?.trim() || firstLine(detail.body) || subjectFallback(detail.subjectKind);
+  const title = detail.title?.trim() || firstLine(plainText(detail.body)) || subjectFallback(detail.subjectKind);
   const wait = waitLabel(detail.receivedOn);
   const index = queue ? queue.indexOf(caseId) : -1;
   const showTeach = Boolean(detail.gap) && !receipt;
@@ -123,8 +124,13 @@ export function OperationsCase() {
       <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[auto_auto_1fr] xl:gap-x-6">
         <div className="min-w-0 xl:col-start-1 xl:row-start-1">
           <Block title={detail.subjectKind === "INQUIRY" ? COPY.inquiryBody : COPY.reviewBody}>
+            {/* The channel's own markup is stripped HERE and nowhere else — the stored row keeps what the channel
+                sent, and the same helper the 문의 화면 has used since Demo UX Polish v1 does the stripping, so the
+                two screens cannot show the same customer different words. Measured: this case's body arrives as
+                `<meta charset="utf-8">교환 신청은 언제까지 가능한가요?`, and the tag was the first thing a seller
+                read on the first case they opened. */}
             <p className="whitespace-pre-wrap break-keep text-[17px] font-medium leading-[1.8] text-ink [overflow-wrap:anywhere]">
-              {detail.body ?? "내용 없음"}
+              {plainText(detail.body) || "내용 없음"}
             </p>
             {detail.media && detail.media.length > 0 ? (
               <ul className="mt-4 flex flex-wrap gap-3" aria-label="고객이 올린 사진">
@@ -273,6 +279,13 @@ function Missing({ children }: { children: string }) {
 
 function Evidence({ detail }: { detail: OperationsCaseDetail }) {
   if (detail.knowledgeUsed.length === 0) {
+    // 「사용한 근거 없음」 is a claim about this case, and the draft standing beside it can already disprove it:
+    // measured on the demo org, a case whose draft cites 「운영 정책 · 교환·반품 기준」 rendered 「사용한 근거
+    // 없음」 two blocks below that citation. `knowledgeUsed` is empty because the rule lane does not record it,
+    // which is a fact about our bookkeeping and not about the case. Where the screen is already showing the
+    // evidence, this block says nothing rather than denying it — it does not restate the citation either, since
+    // the draft card owns that and a second copy is the next thing to disagree.
+    if ((detail.draft?.evidence.length ?? 0) > 0) return null;
     return (
       <p className="rounded-[14px] bg-surface px-5 py-3.5 text-sm text-muted shadow-[0_0_0_1px_#E4E7EC]">{COPY.noEvidence}</p>
     );

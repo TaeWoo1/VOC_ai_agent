@@ -443,4 +443,44 @@ describe("OperationsCase", () => {
     // The note is said once, in the card.
     expect(screen.getAllByText("별점은 높지만 글이 있어 바로 닫지 않고 지켜봅니다.")).toHaveLength(1);
   });
+
+  /**
+   * The channel sends markup and the stored row keeps it; the screen is where it comes off. Measured on the demo
+   * org, this case's body arrived as `<meta charset="utf-8">교환 신청은 언제까지 가능한가요?` and the tag was the
+   * first thing a seller read on the first case they opened — while `/inquiries`, showing the same customer,
+   * stripped it. One helper, so the two screens cannot show one customer different words.
+   */
+  it("채널이 보낸 마크업은 화면에서 벗겨진다 — 문의 화면과 같은 문장을 보인다", async () => {
+    api.getOperationsCase.mockResolvedValue(
+      detail({ title: null, body: '<meta charset="utf-8">교환 신청은 언제까지 가능한가요?' }),
+    );
+    renderCase();
+    // The headline falls through the same body, so the stripped sentence stands in both places.
+    expect(await screen.findAllByText("교환 신청은 언제까지 가능한가요?")).not.toHaveLength(0);
+    expect(document.body.textContent).not.toContain("<meta");
+    expect(document.body.textContent).not.toContain("charset");
+  });
+
+  /**
+   * 「사용한 근거 없음」 is a claim about the case, and the draft standing on the same screen can already disprove
+   * it: `knowledgeUsed` is empty because the rule lane does not record it, which is a fact about our bookkeeping.
+   * Measured: a case whose draft cited 「운영 정책 · 교환·반품 기준」 rendered 「사용한 근거 없음」 two blocks below
+   * that citation. It stays silent there — it does not restate the citation either, because the draft card owns it.
+   */
+  it("초안이 근거를 인용하는 동안 「사용한 근거 없음」이라고 말하지 않는다", async () => {
+    api.getOperationsCase.mockResolvedValue(
+      detail({
+        knowledgeUsed: [], gap: null, missingInformation: [],
+        draft: {
+          version: 1, title: "교환 신청 가능 기간 안내", body: "상품 수령 후 7일 이내입니다.",
+          authorKind: "MODEL", answerBasis: "GROUNDED",
+          evidence: [{ kind: "ORG_POLICY", scopeLabel: "운영 정책", title: "교환·반품 기준", snippet: null }],
+        },
+      }),
+    );
+    renderCase();
+    // The draft card names the evidence it stood on.
+    expect(await screen.findByText(/운영 정책/)).toBeInTheDocument();
+    expect(screen.queryByText("사용한 근거 없음")).toBeNull();
+  });
 });

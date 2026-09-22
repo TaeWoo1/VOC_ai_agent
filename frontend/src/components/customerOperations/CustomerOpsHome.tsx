@@ -63,7 +63,7 @@ export function CustomerOpsHome({
     };
   }, []);
 
-  const work = mergeHomeWork(co, ops, queue);
+  const work = mergeHomeWork(co, ops, queue, now);
   const shown = expanded ? work.rows : work.rows.slice(0, HOME_ROWS);
   const hidden = work.rows.length - shown.length;
   const caseIds = work.rows.map((r) => r.caseId).filter((id): id is string => id !== null);

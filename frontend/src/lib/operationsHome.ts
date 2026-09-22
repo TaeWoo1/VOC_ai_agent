@@ -48,7 +48,13 @@ export function watchLine(reviews: HomeReviewAttention): string | null {
  */
 export function problemLine(problems: HomeRepeatedProblems): string {
   if (problems.decidable > 0) {
-    return `지금 판단이 필요한 반복 문제가 ${problems.decidable.toLocaleString("ko-KR")}건 있습니다.`;
+    // The observing clause is not decoration: both populations are DRAWN below this sentence, so stating only the
+    // decidable one put 「1건 있습니다」 over two rows and left the seller counting. They stay two sentences because
+    // they are two facts the server returns separately and documents as un-addable — 「2건」 would be the sum this
+    // line has never been allowed to print.
+    const watching =
+      problems.observing > 0 ? ` ${problems.observing.toLocaleString("ko-KR")}건은 지켜보고 있습니다.` : "";
+    return `지금 판단이 필요한 반복 문제가 ${problems.decidable.toLocaleString("ko-KR")}건 있습니다.${watching}`;
   }
   if (problems.observing > 0) {
     return `지금 판단이 필요한 반복 문제는 없습니다. ${problems.observing.toLocaleString("ko-KR")}건을 지켜보고 있습니다.`;
