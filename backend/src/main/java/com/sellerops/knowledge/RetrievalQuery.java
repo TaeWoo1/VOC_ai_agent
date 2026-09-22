@@ -199,6 +199,29 @@ public final class RetrievalQuery {
         return List.copyOf(out);
     }
 
+    /**
+     * The words of a question that could NAME what the seller has not written down: its topic words,
+     * minus the ones that are predicates, each quoted as the noun inside it.
+     *
+     * <p>{@link #residualTopicWords} answers 「what is this question about」 for a SCORER, which wants
+     * the customer's verb because a passage may have written the same verb. This answers 「what noun do
+     * we ask the seller for」, and a verb is never the answer to that (Full MVP E2E stage 2, 2026-09-23:
+     * a Cafe24 post titled 「문의 드립니다」 produced the gap subject 「드립니다」).
+     */
+    public static List<String> subjectNouns(String text, String discountedSubject) {
+        List<String> out = new ArrayList<>();
+        for (String word : residualTopicWords(text, discountedSubject, Set.of())) {
+            if (QueryWords.isPredicateForm(word)) {
+                continue;
+            }
+            String noun = QueryWords.nounStem(word);
+            if (noun != null && noun.length() >= 2 && !out.contains(noun)) {
+                out.add(noun);
+            }
+        }
+        return List.copyOf(out);
+    }
+
     private static void add(List<Candidate> out, Set<String> seen, String text, Origin origin) {
         if (text == null || text.isBlank() || out.size() >= MAX_CANDIDATES) {
             return;

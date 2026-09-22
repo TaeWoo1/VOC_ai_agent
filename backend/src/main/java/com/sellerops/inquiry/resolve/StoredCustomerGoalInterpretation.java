@@ -107,6 +107,23 @@ public class StoredCustomerGoalInterpretation implements CustomerGoalInterpretat
         return parsed.refused() ? Optional.empty() : Optional.of(parsed.set());
     }
 
+    /**
+     * A stored reading, or empty. Everything this touches is a row; no branch here can reach a vendor, which is why
+     * a caller that must not spend the seller's budget can ask it.
+     */
+    @Override
+    public Optional<CustomerGoalSet> stored(UUID orgId, Inquiry inquiry) {
+        if (orgId == null || inquiry == null || inquiry.getId() == null) {
+            return Optional.empty();
+        }
+        String message = messageOf(inquiry);
+        if (message.isBlank()) {
+            return Optional.empty();
+        }
+        return read(orgId, inquiry.getId(), sha256(message), goals.promptVersion())
+                .flatMap(row -> setOf(row, message));
+    }
+
     /** The sentence the interpreter reads, and the sentence its quotes are checked against. One definition. */
     public static String messageOf(Inquiry inquiry) {
         String title = MarkupText.toPlainText(inquiry.getTitle());

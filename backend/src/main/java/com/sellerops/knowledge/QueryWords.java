@@ -195,6 +195,50 @@ final class QueryWords {
             "이나", "나", "이란", "란", "이라", "라", "랑", "이랑", "하고", "보다", "처럼", "만큼",
             "이며", "며", "와의", "과의", "인", "님");
 
+    /**
+     * Whether this token is a PREDICATE form — a verb or adjective wearing one of the sentence endings
+     * in {@link #ENDINGS} — rather than a noun.
+     *
+     * <p>Not a new list and not a stop word: the same closed endings {@link #isFunctionWord} already
+     * knows, asked a different question. That method drops a token only when what precedes the ending
+     * is one syllable of scaffolding (되나요), because a long stem before an ending is usually the
+     * question's own verb and a query wants it (「가능한가요」 has to reach 「가능합니다」). Naming what a
+     * gap is ABOUT is the opposite job: 「문의 드립니다」 · 「부담하나요」 are things the customer DID, and a
+     * sentence that asks the seller to write down 「'드립니다' 관련 내용」 quotes the customer's manners
+     * back at them as if they were the topic.
+     */
+    static boolean isPredicateForm(String word) {
+        if (word == null || word.isEmpty()) {
+            return false;
+        }
+        for (String ending : ENDINGS) {
+            if (word.length() > ending.length() && word.endsWith(ending)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The noun inside a token that wears a case particle — 교환이나 → 교환, 배송도 → 배송.
+     *
+     * <p>The shortest stem of two or more characters whose tail is a whole particle
+     * ({@link #PARTICLE_TAILS}), so a noun that merely ENDS in a particle syllable (무료배송) keeps all
+     * of itself. Used where a word is QUOTED to the seller; the scorer matches by prefix and never
+     * needed it.
+     */
+    static String nounStem(String word) {
+        if (word == null || word.length() < 3) {
+            return word;
+        }
+        for (int i = 2; i < word.length(); i++) {
+            if (isParticleTail(word.substring(i))) {
+                return word.substring(0, i);
+            }
+        }
+        return word;
+    }
+
     /** Whether what was left over after a partial match is grammar rather than the rest of a word. */
     static boolean isParticleTail(String tail) {
         return PARTICLE_TAILS.contains(tail);

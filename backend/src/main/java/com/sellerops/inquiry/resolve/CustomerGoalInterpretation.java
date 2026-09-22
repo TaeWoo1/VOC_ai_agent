@@ -35,4 +35,16 @@ public interface CustomerGoalInterpretation {
      * interpretation was unavailable, and an unavailable interpretation is an absence like any other.
      */
     Optional<CustomerGoalSet> interpret(UUID orgId, Inquiry inquiry);
+
+    /**
+     * The goals ALREADY READ for this inquiry, without reading it.
+     *
+     * <p>Same answer as {@link #interpret} when there is a stored reading, and empty instead of a vendor call when
+     * there is not. It exists for callers that want to know what the customer asked for but must not spend a model
+     * call to find out — the gap subject is one: it describes an answer that has already been decided, and a
+     * question nobody interpreted is answered exactly as it was before.
+     */
+    default Optional<CustomerGoalSet> stored(UUID orgId, Inquiry inquiry) {
+        return Optional.empty();
+    }
 }

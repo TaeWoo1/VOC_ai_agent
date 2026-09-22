@@ -39,7 +39,10 @@ import com.sellerops.product.ProductVariantRepository;
 import com.sellerops.product.library.ProductKnowledgeChunkRepository;
 import com.sellerops.product.library.ProductKnowledgeLibraryService;
 import com.sellerops.product.library.ProductKnowledgeSourceRepository;
+import com.sellerops.inquiry.resolve.CustomerGoalInterpretation;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Optional;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -170,6 +173,74 @@ class LiveExchangeQuestionReplayTest {
                 .as("the English shipping note also says 'exchanges are accepted within 7 days' — the fix must "
                         + "not simply admit more, so that note still loses to the rule that is about 교환")
                 .allSatisfy(passage -> assertThat(passage.text()).contains("7일 이내"));
+    }
+
+    /**
+     * The live Cafe24 post of the stage-2 run: a courtesy title, the editor's escaped {@code <meta>} literal, and
+     * two questions in the body. It reaches the same policy — and when a question this library cannot answer
+     * arrives in the same shape, what the seller is asked for is a noun from the question, never the title's verb.
+     */
+    private Inquiry saved(String title, String rawBody) {
+        Inquiry q = new Inquiry();
+        q.setOrgId(org);
+        q.setChannelId(UUID.randomUUID());
+        q.setTitle(title);
+        q.setBody(MarkupText.toPlainText(rawBody));
+        q.setStatus("UNANSWERED");
+        q.setReceivedAt(Instant.parse("2026-09-23T01:08:00Z"));
+        return inquiries.save(q);
+    }
+
+    private void readingGoals(String... requests) {
+        List<CustomerGoal> goals = new ArrayList<>();
+        for (int i = 0; i < requests.length; i++) {
+            goals.add(new CustomerGoal("g" + (i + 1), requests[i], RequestedOutcome.ANSWER, Referent.ORGANIZATION,
+                    RequestBasis.STATED, List.of(), requests[i]));
+        }
+        CustomerGoalSet set = new CustomerGoalSet(goals, List.of());
+        assessor.setGoals(new CustomerGoalInterpretation() {
+            @Override
+            public Optional<CustomerGoalSet> interpret(UUID orgId, Inquiry inquiry) {
+                return Optional.of(set);
+            }
+
+            @Override
+            public Optional<CustomerGoalSet> stored(UUID orgId, Inquiry inquiry) {
+                return Optional.of(set);
+            }
+        });
+    }
+
+    @Test
+    @DisplayName("the stage-2 post — courtesy title, two questions — still reaches the same policy")
+    void theStageTwoPostFindsTheSamePolicy() {
+        readingGoals("교환이나 반품은 언제까지 가능한가요?", "개봉하지 않은 상품 기준도 함께 알려주세요.");
+        Inquiry post = saved("문의 드립니다",
+                "<p>&lt;meta charset=&quot;utf-8&quot;&gt;상품을 받은 뒤 교환이나 반품은 언제까지 가능한가요? "
+                        + "개봉하지 않은 상품 기준도 함께 알려주세요.</p>");
+
+        InquiryKnowledgeAssessor.Assessment assessed = assessor.assess(org, post, OrderFactLookup.STORED_ONLY);
+
+        assertThat(assessed.retrieved().policyOutcome()).isEqualTo(RetrievalOutcome.FOUND);
+        assertThat(assessed.basis().name()).isEqualTo("GROUNDED");
+        assertThat(assessed.missingSubject()).isNull();
+    }
+
+    @Test
+    @DisplayName("a question this library cannot answer is missing a NOUN from the question, not the title's verb")
+    void theGapNamesANounTheCustomerAskedAbout() {
+        readingGoals("해외 배송도 가능한가요?", "관부가세는 누가 부담하나요?");
+        Inquiry post = saved("문의 드립니다",
+                "<p>&lt;meta charset=&quot;utf-8&quot;&gt;해외 배송도 가능한가요? 관부가세는 누가 부담하나요?</p>");
+
+        InquiryKnowledgeAssessor.Assessment assessed = assessor.assess(org, post, OrderFactLookup.STORED_ONLY);
+
+        assertThat(assessed.basis().name())
+                .as("no shipping rule of this org speaks to 해외 배송 or 관부가세")
+                .isEqualTo("NO_ANSWER_BASIS");
+        assertThat(assessed.missingSubject())
+                .as("the live defect quoted 드립니다 — the post's greeting — back at the seller")
+                .isEqualTo("해외");
     }
 
     @Test

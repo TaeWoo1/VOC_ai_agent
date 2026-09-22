@@ -108,6 +108,32 @@ public class InquiryKnowledgeAssessor {
     private com.sellerops.inquiry.authority.CapabilityRegistry registry;
     private com.sellerops.inquiry.authority.AuthorityFenceProperties fence;
 
+    private com.sellerops.inquiry.resolve.CustomerGoalInterpretation goals;
+
+    /**
+     * What this inquiry's customer asked for, when something has already read the message.
+     *
+     * <p>Read-only by contract ({@code stored} never reaches a vendor) and optional: without it, or before any
+     * reading exists, the gap subject is taken from the question as it always was. It is here rather than at the
+     * three call sites because the subject is decided here, and a rule about what may be quoted to the seller that
+     * holds in one caller and not the others is the defect it fixes wearing a different shape.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setGoals(com.sellerops.inquiry.resolve.CustomerGoalInterpretation goals) {
+        this.goals = goals;
+    }
+
+    private com.sellerops.inquiry.goal.CustomerGoalSet goalsOf(java.util.UUID orgId, Inquiry inquiry) {
+        if (goals == null) {
+            return null;
+        }
+        try {
+            return goals.stored(orgId, inquiry).orElse(null);
+        } catch (RuntimeException unreadable) {
+            return null;   // an unavailable reading is an absence; the question itself is still evidence
+        }
+    }
+
     /**
      * Inquiry v3 WP-1: the deterministic authority layer over the v2 verdicts. Optional and default OFF — without it, or
      * with the flag off, the decision is v2.2 exactly.
@@ -153,7 +179,8 @@ public class InquiryKnowledgeAssessor {
         }
         String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null
                 : catalogueFinding != null ? catalogueFinding.question().subject()
-                : subjectOf(verdict, title, details, productName(orgId, productId), asked);
+                : GapSubject.of(verdict, title, details, productName(orgId, productId), asked,
+                        goalsOf(orgId, inquiry));
         KnowledgeGapView gap = KnowledgeGapView.of(found.lanes(), verdict, asked, named).asking(subject);
         if (basis == AnswerBasisState.NO_ANSWER_BASIS && catalogueFinding != null) {
             gap = gap.catalogueChecked(catalogueFinding.checkedKo());
@@ -197,7 +224,8 @@ public class InquiryKnowledgeAssessor {
         List<com.sellerops.inquiry.decision.NeedResult> open = decision.unresolved();
         String subject = basis != AnswerBasisState.NO_ANSWER_BASIS ? null
                 : !open.isEmpty() ? open.get(0).need().ask()
-                : subjectOf(verdict, title, details, productName(orgId, productId), asked);
+                : GapSubject.of(verdict, title, details, productName(orgId, productId), asked,
+                        goalsOf(orgId, inquiry));
         KnowledgeGapView gap = KnowledgeGapView.of(found.lanes(), verdict, asked, named).asking(subject)
                 .withNeeds(views(decision));
         if (basis == AnswerBasisState.NO_ANSWER_BASIS) {
@@ -252,21 +280,6 @@ public class InquiryKnowledgeAssessor {
         }
     }
 
-    /**
-     * The noun to ask the seller about. The 규격 classifier's word first — it is the one the existing screens already
-     * say — then the question's own remaining topic words, then the topic's name. Nothing is invented: every source
-     * here is a word the customer wrote or a label this product already uses.
-     */
-    static String subjectOf(SpecApplicability.Verdict verdict, String title, String details, String productName,
-                            KnowledgeTopic asked) {
-        if (verdict.topicWord() != null && !verdict.topicWord().isBlank()) {
-            return verdict.topicWord();
-        }
-        List<String> residual = RetrievalQuery.residualTopicWords(
-                ((title == null ? "" : title) + " " + (details == null ? "" : details)).strip(), productName,
-                Set.of());
-        return residual.isEmpty() ? (asked == null ? null : asked.labelKo()) : residual.get(0);
-    }
 
     private String productName(UUID orgId, UUID productId) {
         return productId == null || products == null ? null : products.findById(productId)
