@@ -113,3 +113,55 @@ manifest가 예상한 것:
   1줄), COUPANG `throughDate` 09-05 → 09-23(09-06 ~ 09-16 미관측, 7일 상한). 두 구간은 routine 수집이 다시 보지 않으며
   복구는 별도 bounded backfill 승인이 필요하다.
 - Home의 다음 확인 시각(02:00 KST)은 scheduler가 꺼진 로컬 환경에서는 실행되지 않는다(기존 성질).
+
+## Stage 2 — 새 REAL 문의 1건이 Case → Goal → Knowledge → Resolution → Draft를 지나는가 (2026-09-23 02:08 KST) · `PARTIAL`
+
+### 2-0. 승인과 범위
+
+- 승인 **`apr-resp-e2e2-2f33eab5166f93e0`** · runId `resp-full-e2e-2` · Demo Org — operator 「Seated and ready.」. 단일 사용, 소진됨.
+- 코드 `e7e79354`(제품 코드는 `e396ee1e`와 동일, 워크트리 clean). 코드 변경 0.
+- 실행 방식은 stage 1과 같다(8080 pause → 18080 responsibility scheduler만 ON → 80초 run 0 → resume → run 1개 → 즉시 종료).
+- 모델 ON(Demo Org allow-list, access scope `ALLOW_LIST`): Inquiry Goal · Agent Draft · Knowledge embedding · intent ·
+  eligibility. OFF + key 제거: 나머지 12개(Investigation · Inquiry decision · 상세 enrichment 포함). 과금 호출 상한은
+  daily quota로 강제(오늘 사용량 0 + 6). Goal key는 operator 지시로 같은 vendor의 기존 draft key를 **참조**로 설정
+  (값 복사·출력 0).
+- 테스트 문의: operator가 Cafe24 문의 게시판에 직접 작성 — 「상품을 받은 뒤 교환이나 반품은 언제까지 가능한가요?
+  개봉하지 않은 상품 기준도 함께 알려주세요.」
+
+### 2-1. 결과 — 단계별
+
+run `ae8d0d3c` RESUME · window 02:00–04:00 · 02:08:15–02:08:32 · `SUCCESS` · 18080 종료 02:08:40.
+
+| 단계 | 결과 |
+|---|---|
+| 수집 | CAFE24 문의 COMPLETE 1/새 1 (테스트 문의, ROOT·UNANSWERED·REAL) · NAVER · CAFE24 리뷰 · COUPANG COMPLETE 0 |
+| Case | `d14a492c` 새로 열림 — CUSTOMER_WORK · NEEDS_DECISION · decided_by RULE · UNANSWERED_INQUIRY |
+| Goal | `INTERPRETED`(contract `customer-goal-interpreter/v3`, 3.9 s) — goal 2개, 둘 다 subject ORGANIZATION · ANSWER · STATED; g2는 constraint `미개봉`. **해석은 정확했다** |
+| Knowledge | 두 goal 모두 `KNOWLEDGE.ORG`를 조회했고 근거 0 |
+| Resolution | `NEEDS_SELLER` → **`ADD_KNOWLEDGE`**, knowledge gap `{basis: NO_ANSWER_BASIS, topic: EXCHANGE_RETURN, suggestedScope: ORG, missingSubject: "드립니다"}` |
+| Investigation | `INVESTIGATION_SKIPPED CAPABILITY_OFF` (설계대로) |
+| Draft | **도달하지 않음** — 초안은 `REPLY_TO_CUSTOMER`에서만 준비된다. work item OPEN 유지, proposal·draft 0 |
+
+### 2-2. 호출과 쓰기 (실측)
+
+- vendor 호출 4 / 상한 36: goal 1 · knowledge embedding(QUESTION) 2 · knowledge intent 1 · **eligibility 0**(판정에
+  넘어온 문단이 없었다). 과금 호출 1 / 상한 6. Investigation · decision · 나머지 capability 0.
+- marketplace READ ≈11–12 / 상한 22 — NAVER 토큰 1 + GET 2 · CAFE24 토큰 갱신 2 + 목록 2 + 답변 관측(발견 1 + 댓글 ≤1) ·
+  COUPANG GET 2(마지막 두 항목은 요청 로그가 없어 코드 경로 기준). WRITE 0.
+- 신규 문의 1 / 상한 3 — 다른 REAL 문의 유입 0.
+- DB: inquiries +1 · work item +1(OPEN) · audit +1 · case +1 · case event +2(OPENED · INVESTIGATION_SKIPPED) ·
+  goal interpretation +1 · agent_llm_usage +1 · customer_memory +1 · run +1 · run_source +4 · sync_jobs +4.
+  proposal · draft · draft evidence · knowledge_candidate · knowledge_embedding · approval · execution **+0**.
+  부팅 시 answer memory 백필 러너 재실행(stage 1과 같은 부수 효과).
+- Home: sources 4(CAFE24 문의 1/새 1) · decisions 1 → 2 · gaps 0 → 0 · 확인할 일 문의 큐 24 → 25.
+
+### 2-3. 판정과 남은 결함 (이 기록 시점, 수정 전)
+
+`PARTIAL` — Case · Goal · Resolution은 production 경로로 증명됐고 Draft는 도달하지 않았다. 중단 조건 발동 0,
+승인 · 전송 · marketplace WRITE 0.
+
+1. **Knowledge retrieval miss** — Demo Org에는 「수령 후 7일 이내, 개봉하지 않은 상품에 한해 교환과 반품 가능」
+   정책(`EXCHANGE_REFUND_POLICY`)이 있는데 두 goal 모두 근거 0으로 `ADD_KNOWLEDGE`가 됐다. eligibility가 호출되지
+   않았으므로 문단은 그 앞 단계에서 사라졌다. 원인 미확정 — 후속 trace에서 닫는다.
+2. **근거 없는 gap 낱말** — knowledge gap의 `missingSubject`가 고객이 쓰지 않은 「드립니다」였다. 이 값은 판매자에게
+   「무엇이 부족한가」로 보이는 문장의 재료다.
