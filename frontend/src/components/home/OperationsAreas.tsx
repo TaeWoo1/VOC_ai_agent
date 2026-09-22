@@ -7,6 +7,7 @@ import {
   watchLine,
 } from "../../lib/operationsHome";
 import { RepeatedProblemList } from "./RepeatedProblemList";
+import { PreparedWorkList } from "./PreparedWorkList";
 import { ratingLabel } from "../../lib/reviewRecord";
 import type { OperationsHome } from "../../lib/types";
 
@@ -114,31 +115,8 @@ export function OperationsAreas({ home }: { home: OperationsHome }) {
           // because nothing here may create work that no record supports.
           <p className="break-keep leading-relaxed text-muted">지금 준비된 작업은 없습니다.</p>
         )}
-        {prepared.rows.length > 0 ? (
-          <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
-            {prepared.rows.map((row) => (
-              <li key={`${row.kind}-${row.id}`} className="p-3">
-                <Link
-                  to={row.to}
-                  className="block rounded break-keep text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-                >
-                  {/* The distinguishing fact leads when there is one — four rows reading 「승인된 리뷰
-                      답변」 are four links a seller cannot choose between. The kind of work follows it
-                      as the quieter half. */}
-                  {row.detail ? (
-                    <>
-                      <span className="break-keep">{row.detail}</span>
-                      <span className="ml-2 text-sm text-muted">{row.label}</span>
-                    </>
-                  ) : (
-                    <span className="break-keep">{row.label}</span>
-                  )}
-                  <span className="ml-1 text-brand-700" aria-hidden="true">›</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {/* The rows are shared with 고객 운영 관리's 실행 대기 — see PreparedWorkList for why one renderer. */}
+        <PreparedWorkList rows={prepared.rows} />
       </Area>
       </div>
     </div>

@@ -4,11 +4,12 @@ import { Btn } from "../ui/Btn";
 import { DecisionList, DecisionRow } from "../ui/DecisionRow";
 import { WorkFlowCard } from "../ui/WorkFlowCard";
 import { RepeatedProblemList } from "../home/RepeatedProblemList";
+import { PreparedWorkList } from "../home/PreparedWorkList";
 import { api } from "../../lib/apiClient";
 import { problemLine } from "../../lib/operationsHome";
 import { dataTypeKo, kstClock } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate, waitLabel } from "../../lib/copy/customerOps";
-import { mergeHomeWork, reasonCounts } from "../../lib/homeWork";
+import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import type { InquiryQueueResponse, OperationsHome } from "../../lib/types";
 
@@ -23,9 +24,13 @@ export function coHomeApplies(co: CustomerOperationsHome | null | undefined): co
 }
 
 /**
- * <b>Home (Customer Operations v3.1)</b>: a title line, 「자동 확인 → 내 확인 필요」, the one 「확인 필요」 list, and
- * 「반복 문제」 — the patterns, stated below the work and never added to it. Nothing here decides, sends or resolves;
- * every row opens the screen that does.
+ * <b>Home (Customer Operations v3.1)</b>: a title line, 「자동 확인 → 내 확인 필요」, the one 「확인 필요」 list,
+ * 「실행 대기」 — what the seller already decided and has not finished — and 「반복 문제」, the patterns, stated below
+ * the work and never added to it. Nothing here decides, sends or resolves; every row opens the screen that does.
+ *
+ * <p>The three sections are three different questions in the order a morning asks them: 어떻게 할까 · 아까 정한 걸
+ * 끝내자 · 무엇이 반복되나. They are never summed and never merged — a decision and its own unfinished follow-up are
+ * the same item at two moments, and 「확인 필요」 deduplicates against exactly that.
  *
  * `ops` is the Operations Home read AgentHome already made — it carries the repeated problems too, which is why this
  * Home can name them without a read of its own. The queue is read here because the list needs more rows than the
@@ -203,8 +208,72 @@ export function CustomerOpsHome({
         </section>
       ) : null}
 
+      <AwaitingExecution ops={ops} work={work} />
       <RepeatedProblems ops={ops} />
     </div>
+  );
+}
+
+/**
+ * <b>실행 대기 — 판매자가 이미 결정했고, 아직 끝나지 않은 일.</b>
+ *
+ * <p>Everything here rests on a record the seller themselves wrote: an approval that stands, a draft that exists,
+ * an improvement they accepted. That is what separates this from 「확인 필요」 above it — there the question is
+ * 「어떻게 할까」, here it is 「아까 정한 걸 끝냅시다」 — and it is why these rows are worth their own heading rather
+ * than being mixed into the decision list.
+ *
+ * <p><b>Measured, not supposed.</b> On the live org three approved replies had been standing for seventeen days
+ * with no submission recorded and a fourth carried four aborted attempts, and this Home drew none of them: it never
+ * read {@code ops.prepared} at all. They could not surface through 「확인 필요」 either, because that list is built
+ * from cases, UNDECIDED reviews and the inquiry queue — and an approved reply is, by definition, decided.
+ *
+ * <p><b>Nothing is re-run and nothing is written.</b> Every row is a link to the surface that owns finishing it.
+ * This product has no dispatcher: approving freezes the text and marks it copy-ready, and the posting is the
+ * seller's own action on the marketplace. A control here that looked like 「보내기」 would promise a send no
+ * approval covers.
+ *
+ * <p><b>Reported-as-sent work is already gone before it reaches this component</b> — the server's standing-approval
+ * predicate excludes an approval whose approved fingerprint has an {@code OPERATOR_REPORTED_SUBMITTED} outcome. An
+ * aborted attempt is not such an outcome: it is one guided run ending at the submit barrier, which posts nothing
+ * and withdraws nothing, so the reply is still waiting and still belongs here.
+ */
+function AwaitingExecution({ ops, work }: { ops: OperationsHome | null | undefined; work: HomeWork }) {
+  const prepared = ops?.prepared;
+  if (!prepared) return null;
+
+  // Anything 확인 필요 is already offering is not offered again, by the same key that list deduped itself with.
+  // In practice this is the inquiry-draft kind: a draft-ready inquiry is AWAITING_SELLER, so the work queue above
+  // is already showing it — with 「초안 있음 · 미발송」 on the row, which says more than a second row here would.
+  const claimed = new Set(work.rows.map((row) => row.owner));
+  const rows = prepared.rows.filter((row) => !claimed.has(row.to));
+  if (rows.length === 0) return null;
+
+  // The server caps its list; the counts above it are org-wide. Only the review-reply kind is compared, because it
+  // is the only one this section never expects to lose rows to the dedupe above — inferring a remainder for the
+  // others would be counting the rows we deliberately dropped as missing.
+  const drawnReplies = rows.filter((row) => row.kind === "REVIEW_REPLY").length;
+  const moreReplies = prepared.reviewRepliesApproved - drawnReplies;
+
+  return (
+    <section aria-label="실행 대기">
+      <div className="mb-3 mt-8 flex items-center gap-2">
+        <h2 className="text-[17px] font-bold tracking-tight text-ink">실행 대기</h2>
+        <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">
+          승인함 · 등록 전
+        </span>
+      </div>
+      <PreparedWorkList rows={rows} />
+      {moreReplies > 0 ? (
+        <p className="mt-2 px-1 text-sm">
+          <Link
+            to="/reviews"
+            className="font-medium text-brand-700 underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            승인한 리뷰 답변 {moreReplies.toLocaleString("ko-KR")}건 더 보기
+          </Link>
+        </p>
+      ) : null}
+    </section>
   );
 }
 

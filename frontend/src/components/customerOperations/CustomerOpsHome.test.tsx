@@ -105,7 +105,16 @@ function ops(): OperationsHome {
       ],
     },
     collection: [],
-    prepared: { reviewRepliesApproved: 0, inquiryDraftsReady: 0, rows: [] },
+    prepared: {
+      reviewRepliesApproved: 2, inquiryDraftsReady: 1, improvementDraftsReady: 0,
+      rows: [
+        // Approved and unposted — decided, so it can never reach 확인 필요 above.
+        { kind: "REVIEW_REPLY", id: "rev-approved", label: "승인된 리뷰 답변", detail: "컵 뚜껑 12oz · 2026-09-05", channelCode: "NAVER", to: "/reviews/reply/rev-approved" },
+        { kind: "REVIEW_REPLY", id: "rev-approved-2", label: "승인된 리뷰 답변", detail: "선바로 전선몰딩 · 2026-09-05", channelCode: "NAVER", to: "/reviews/reply/rev-approved-2" },
+        // A draft-ready inquiry — AWAITING_SELLER, so the work queue above is ALREADY showing it (w-1/i-1).
+        { kind: "INQUIRY_REPLY", id: "w-1", label: "초안이 준비된 문의", detail: "뚜껑이 깨져서 왔어요", channelCode: null, to: "/inquiries/i-1" },
+      ],
+    },
   } as never;
 }
 
@@ -258,6 +267,55 @@ describe("CustomerOpsHome", () => {
     await waitFor(() => expect(api.resumeCustomerOperations).toHaveBeenCalled());
     expect(onChanged).toHaveBeenCalled();
     expect(screen.queryByTestId("work-flow-card")).toBeNull();
+  });
+
+  /*
+   * 실행 대기 — work the seller already decided and has not finished. Measured on the live org: three approved
+   * replies standing seventeen days with no submission recorded, a fourth with four aborted attempts, and this
+   * Home drew none of them because it never read `prepared` at all.
+   */
+  it("shows approved-but-unposted work and opens the screen that finishes it", async () => {
+    draw();
+    const section = await screen.findByRole("region", { name: "실행 대기" });
+
+    expect(within(section).getByRole("link", { name: /컵 뚜껑 12oz/ }))
+      .toHaveAttribute("href", "/reviews/reply/rev-approved");
+    expect(section).toHaveTextContent("승인된 리뷰 답변");
+  });
+
+  it("does not offer anything 확인 필요 is already offering", async () => {
+    draw();
+    const section = await screen.findByRole("region", { name: "실행 대기" });
+    const queueList = await screen.findByRole("region", { name: "확인 필요" });
+
+    // The draft-ready inquiry is AWAITING_SELLER, so it is a 확인 필요 row — with 「초안 있음 · 미발송」 on it,
+    // which says more than a second row here would. It must appear in exactly one of the two sections.
+    expect(queueList).toHaveTextContent("뚜껑이 깨져서 왔어요");
+    expect(section).not.toHaveTextContent("뚜껑이 깨져서 왔어요");
+    expect(within(section).queryByRole("link", { name: /초안이 준비된 문의/ })).toBeNull();
+
+    // And no row is offered from both places under two different links.
+    const hrefs = [
+      ...within(section).getAllByRole("link"),
+      ...within(queueList).getAllByRole("link"),
+    ].map((a) => a.getAttribute("href"));
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+
+  it("never dispatches: it links, and it holds no control that could post anything", async () => {
+    draw();
+    const section = await screen.findByRole("region", { name: "실행 대기" });
+
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(section).not.toHaveTextContent("보내기");
+    expect(section).not.toHaveTextContent("발송");
+    expect(section).not.toHaveTextContent("등록하기");
+  });
+
+  it("renders nothing when the operations read failed, rather than claiming nothing is waiting", async () => {
+    draw(co(), null);
+    await screen.findByRole("region", { name: "확인 필요" });
+    expect(screen.queryByRole("region", { name: "실행 대기" })).toBeNull();
   });
 
   /*

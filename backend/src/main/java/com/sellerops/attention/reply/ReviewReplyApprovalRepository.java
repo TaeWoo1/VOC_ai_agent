@@ -86,16 +86,40 @@ public interface ReviewReplyApprovalRepository extends JpaRepository<ReviewReply
      *
      * <p>{@code APPROVED} only, for the reason stated above — a withdrawn approval is the operator's
      * work but not a thing waiting to be sent.
+     *
+     * <p><b>And not one the operator already reported sending.</b> The state alone cannot say that: approving
+     * freezes the text, and reporting a submission writes a {@link ReviewReplyOutcome} without moving the approval,
+     * so «APPROVED» stayed true forever and this list went on describing work that was finished. The docblock on
+     * {@code PreparedWork.reviewRepliesApproved} has always claimed «has not yet reported as sent»; this predicate
+     * is what makes the claim true.
+     *
+     * <p><b>{@link OperatorOutcome#SUBMISSION_ABORTED} is deliberately NOT an exclusion.</b> Aborting is one guided
+     * run ending at the submit barrier — the enum itself calls it «a normal end, not a failure» — and it neither
+     * posts the reply nor withdraws the approval. The text still stands, approved and unposted, which is precisely
+     * what this list is for. Measured on the live org: one approval carried four aborted attempts and nothing else.
+     *
+     * <p><b>Matched on the fingerprint, not merely on the review.</b> A reply reported as sent, then edited and
+     * approved again, is a different text waiting to go out; excluding by review id alone would retire it for good.
+     * A null approved fingerprint matches no outcome and so keeps the row — the safe direction, because the failure
+     * that matters here is a waiting reply vanishing, not one being offered twice.
      */
     @Query("select a from ReviewReplyApproval a "
             + "where a.orgId = :orgId "
             + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED "
+            + "and not exists (select 1 from ReviewReplyOutcome o "
+            + "where o.orgId = a.orgId and o.reviewId = a.reviewId "
+            + "and o.operatorOutcome = com.sellerops.attention.reply.OperatorOutcome.OPERATOR_REPORTED_SUBMITTED "
+            + "and o.recordedFingerprint = a.approvedFingerprint) "
             + "order by a.decidedAt desc, a.reviewId asc")
     List<ReviewReplyApproval> findStandingByOrgId(@Param("orgId") UUID orgId, Pageable pageable);
 
     /** The count behind {@link #findStandingByOrgId}, same predicate. */
     @Query("select count(a) from ReviewReplyApproval a "
             + "where a.orgId = :orgId "
-            + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED")
+            + "and a.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED "
+            + "and not exists (select 1 from ReviewReplyOutcome o "
+            + "where o.orgId = a.orgId and o.reviewId = a.reviewId "
+            + "and o.operatorOutcome = com.sellerops.attention.reply.OperatorOutcome.OPERATOR_REPORTED_SUBMITTED "
+            + "and o.recordedFingerprint = a.approvedFingerprint)")
     long countStandingByOrgId(@Param("orgId") UUID orgId);
 }

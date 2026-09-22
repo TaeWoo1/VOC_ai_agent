@@ -27,6 +27,14 @@ export interface HomeWorkRow {
   since: string | null;
   /** Where the row opens: the case screen for a case, the owning screen otherwise. */
   to: string;
+  /**
+   * The screen that owns the customer item — the dedupe key this list is built on, kept on the row.
+   *
+   * Deliberately not the same field as `to`: a case OPENS its own case screen while being ABOUT an inquiry, so the
+   * two differ exactly where it matters. It is carried because another section of the same Home has to be able to
+   * ask 「is this already in 확인 필요?」, and the only honest way to ask is with the key this list deduped by.
+   */
+  owner: string;
   caseId: string | null;
   verb: string;
 }
@@ -68,6 +76,7 @@ export function caseWorkRow(row: CustomerOperationsDecisionRow): HomeWorkRow {
     line: line || null,
     since: row.openedAt,
     to: `/customer-operations/cases/${row.caseId}`,
+    owner: row.to,
     caseId: row.caseId,
     verb: reason === REASON.info ? "정보 입력" : "검토",
   };
@@ -98,6 +107,7 @@ export function mergeHomeWork(
       line: row.productName,
       since: row.occurredOn,
       to: owner,
+      owner,
       caseId: null,
       verb: "검토",
     });
@@ -114,6 +124,7 @@ export function mergeHomeWork(
       line: row.hasDraft ? `초안 있음 · ${DRAFT_UNSENT}` : "답변 초안 없음",
       since: row.receivedAt,
       to: owner,
+      owner,
       caseId: null,
       verb: "검토",
     });
