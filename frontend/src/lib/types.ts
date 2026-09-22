@@ -2174,6 +2174,12 @@ export interface HomeProblem {
 export interface HomeRepeatedProblems {
   decidable: number;
   observing: number;
+  /**
+   * Problems whose newest evidence predates the observation window — counted, never listed. Nothing about them
+   * changed to get here and they are all still in 고객운영 메모리 with their evidence. It exists so that
+   * 「없습니다」 can be true: an org whose problems all went quiet months ago has problems, just not today's.
+   */
+  dormant: number;
   rows: HomeProblem[];
 }
 

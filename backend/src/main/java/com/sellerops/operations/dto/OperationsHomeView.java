@@ -87,12 +87,29 @@ public record OperationsHomeView(
      * 관찰 중 means reviewnary has not concluded anything needs doing. A seller may still act there —
      * that is a separate decision, taken on the problem's own screen — but a Home that presented 20
      * observed problems as 20 pending tasks would be manufacturing urgency out of an evidence trickle.
+     *
+     * <p><b>All three counts are about problems still happening.</b> The Home is 「지금 볼 일」, so a problem whose
+     * newest evidence predates the observation window is counted under {@code dormant} and appears in none of the
+     * others — the screen would otherwise print a number for 「지금」 that includes a problem last seen last year.
      */
     public record RepeatedProblems(
-            /** 확인 필요 + 조치 중 — problems that are somebody's move right now. */
+            /** 확인 필요 + 조치 중, still happening — problems that are somebody's move right now. */
             long decidable,
-            /** 관찰 중. Reported, never presented as pending work. */
+            /** 관찰 중, still happening. Reported, never presented as pending work. */
             long observing,
+            /**
+             * Problems whose newest evidence is older than the observation window — counted here, listed nowhere.
+             *
+             * <p><b>It exists so that «none» can tell the truth.</b> Without it an org whose problems all went quiet
+             * months ago reads 「아직 모인 반복 문제가 없습니다」, and that is false: the problems are there, in
+             * 고객운영 메모리, with every piece of their evidence. Nothing about them changed to get here — no row
+             * was written, no lifecycle moved, nothing was dismissed — so this number is a statement about what this
+             * screen is showing, never about the problem itself.
+             *
+             * <p>Not addable to the other two, like everything else in this view: a dormant problem is neither
+             * somebody's move today nor under observation today.
+             */
+            long dormant,
             /**
              * The problems worth drawing, each with the full repeat context the workspace shows —
              * severity, trend, evidence count, per-product denominators and the rating spread. Bounded

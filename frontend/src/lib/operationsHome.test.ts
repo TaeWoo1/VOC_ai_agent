@@ -18,7 +18,7 @@ function reviews(over: Partial<HomeReviewAttention> = {}): HomeReviewAttention {
   return { needsAttentionUndecided: 13, needsAttentionTotal: 15, watchTotal: 122, rows: [], ...over };
 }
 function problems(over: Partial<HomeRepeatedProblems> = {}): HomeRepeatedProblems {
-  return { decidable: 1, observing: 19, rows: [], ...over };
+  return { decidable: 1, observing: 19, dormant: 0, rows: [], ...over };
 }
 function prepared(over: Partial<HomePreparedWork> = {}): HomePreparedWork {
   return { reviewRepliesApproved: 4, inquiryDraftsReady: 2, improvementDraftsReady: 0, rows: [], ...over };
@@ -100,8 +100,29 @@ describe("반복 문제", () => {
     expect(line).toContain("19건을 지켜보고 있습니다");
   });
 
-  it("says nothing has gathered when there is nothing", () => {
-    expect(problemLine(problems({ decidable: 0, observing: 0 }))).toBe("아직 모인 반복 문제가 없습니다.");
+  /**
+   * The Home only carries problems whose evidence is still inside the observation window. That makes 「없습니다」
+   * two different situations, and only one of them is an empty library: an org whose problems all went quiet
+   * months ago still HAS them, and would be told by this line that it does not — while 고객운영 메모리, one click
+   * away, lists every one with its evidence.
+   */
+  it("separates 「아직 없다」 from 「최근에 없다」, because only one of them is an empty library", () => {
+    const quiet = problemLine(problems({ decidable: 0, observing: 0, dormant: 19 }));
+    expect(quiet).toContain("최근에 다시 확인된 반복 문제는 없습니다");
+    expect(quiet).toContain("이전에 모인 19건");
+    expect(quiet).toContain("고객운영 메모리");
+    // Never the sentence for an org that has none at all.
+    expect(quiet).not.toContain("아직 모인");
+    // It says how many and where, never which — naming them here would be listing them, which is what the
+    // window decided not to do.
+    expect(quiet).not.toContain("·");
+
+    // The window's length lives in ReviewIssueThresholds; a second copy of it here is the one that goes stale.
+    expect(quiet).not.toMatch(/\d+\s*주|\d+\s*일/);
+  });
+
+  it("says nothing has gathered only when there is genuinely nothing", () => {
+    expect(problemLine(problems({ decidable: 0, observing: 0, dormant: 0 }))).toBe("아직 모인 반복 문제가 없습니다.");
   });
 });
 

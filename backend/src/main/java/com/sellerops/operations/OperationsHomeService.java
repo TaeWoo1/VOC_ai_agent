@@ -24,6 +24,7 @@ import com.sellerops.review.ReviewRepository;
 import com.sellerops.review.triage.pilot.AiTriagePilotService;
 import com.sellerops.reviewissue.IssueLifecycleState;
 import com.sellerops.reviewissue.ReviewIssueQueryService;
+import com.sellerops.reviewissue.ReviewIssueThresholds;
 import com.sellerops.reviewissue.dto.ReviewIssueView;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -204,8 +205,15 @@ public class OperationsHomeService {
         // ordering exists to prevent.
         List<ReviewIssueView> all = issues.list(orgId, on);
 
-        long decidable = all.stream().filter(OperationsHomeService::isDecidable).count();
-        long observing = all.stream()
+        // The Home is 「지금 볼 일」, so a problem reaches it only while it is still happening — last evidence inside
+        // the observation window the persistence judgement already uses. Nothing is closed, resolved or hidden here:
+        // no row is written, the issue keeps its lifecycle state, and 고객운영 메모리 still lists every one of them.
+        // What changes is only which of them THIS screen claims are today's.
+        List<ReviewIssueView> live = all.stream().filter(issue -> stillHappening(issue, on)).toList();
+        long dormant = all.size() - live.size();
+
+        long decidable = live.stream().filter(OperationsHomeService::isDecidable).count();
+        long observing = live.stream()
                 .filter(issue -> IssueLifecycleState.OBSERVING.name().equals(issue.lifecycleState()))
                 .count();
 
@@ -213,8 +221,8 @@ public class OperationsHomeService {
         // presentation rule over an order the server already fixed, not a second ranking: nothing is
         // scored, and within each group the sequence is exactly the one the list screen shows.
         List<ReviewIssueView> shown = java.util.stream.Stream
-                .concat(all.stream().filter(OperationsHomeService::isDecidable),
-                        all.stream().filter(issue -> !isDecidable(issue)))
+                .concat(live.stream().filter(OperationsHomeService::isDecidable),
+                        live.stream().filter(issue -> !isDecidable(issue)))
                 .limit(MAX_PROBLEMS)
                 .toList();
 
@@ -223,7 +231,24 @@ public class OperationsHomeService {
                         issue, repeatContext.context(orgId, issue.id(), on)))
                 .toList();
 
-        return new OperationsHomeView.RepeatedProblems(decidable, observing, rows);
+        return new OperationsHomeView.RepeatedProblems(decidable, observing, dormant, rows);
+    }
+
+    /**
+     * Last evidence inside the observation window — 「이 문제가 아직 일어나고 있나」, which is the question
+     * {@link ReviewIssueThresholds#PERSIST_LOOKBACK_WEEKS} was chosen to answer and the reason it is six weeks and
+     * not one: a single quiet week is a holiday, a slow sales period or a missed import, none of which is an ending.
+     *
+     * <p><b>Reused rather than given a number of its own.</b> A second freshness constant would let this screen and
+     * the persistence judgement disagree about whether a problem is current, and a seller would have two answers to
+     * one question with nothing to choose between them.
+     *
+     * <p>A null date is inside no window. It can only belong to an issue with no evidence at all, which
+     * {@code IssueOrdering.hasLiveEvidence} has already removed from this list.
+     */
+    static boolean stillHappening(ReviewIssueView issue, LocalDate on) {
+        LocalDate last = issue.lastEvidenceOn();
+        return last != null && !last.isBefore(on.minusDays(ReviewIssueThresholds.persistLookbackDays()));
     }
 
     /** 확인 필요 or 조치 중 — a problem that is somebody's move right now. */
