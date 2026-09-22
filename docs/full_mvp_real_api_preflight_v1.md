@@ -1,0 +1,41 @@
+# Full MVP · REAL API read preflight v1 (2026-09-22)
+
+Demo Org(`7146c50f…`)의 세 연결 채널이 **이 환경에서 공식 API READ에 실제로 응답하는가**를, run을 만들지 않고 잰 기록.
+UI/UX는 Phase 4에서 freeze; 이 문서는 E2E 검증의 첫 관문이다.
+
+## 0. 승인과 범위
+
+- 승인 `apr-api-read-9066f36a7e463ef5` · run `preflight-12cc0cac` · commit `12cc0cac` · mode **READ_ONLY** · operator 「Seated and ready.」
+- **operator가 승인에 좁힌 범위**: Coupang은 미답변/답변 endpoint 각 **1페이지까지만**. 이 commit의 Coupang `fetch()`는
+  한 구간을 페이지가 빌 때까지 넘기므로 그 상한을 보장할 수 없고, 코드를 고치면 승인이 무효가 된다(계약 §1.6) ⇒ **Coupang live 승인
+  id를 넣지 않고** 실행했다. 코드 게이트(`CoupangLiveCallGuard`, `signedGet` 첫 줄)가 서명·HTTP 이전에 막았다 — **Coupang 요청 0**.
+- 프로세스: `.env.local`(값 미출력) + 덮어쓰기 — collect/responsibility scheduler · self-pilot · proactive · 모든 모델 capability ·
+  publish execution **OFF**, self-pilot READ grant **unset**. 러너는 스케줄러가 하나라도 켜져 있으면 실행을 거절한다.
+- 방식: API 계정 × {INQUIRY, REVIEW} 중 **코드가 제공하는 것만** 커넥터 `fetch()` **1회**(최근 7일 KST, limit 50), 건수만 세고 버림.
+
+## 1. 결과 — 코드상 지원 vs 이번 환경 실제 API
+
+| 채널 | 계정 · 토큰(메타데이터만) | 커넥터 스위치 | 문의: 코드 | 문의: **이번 환경 실제** | 리뷰: 코드 | 리뷰: **이번 환경 실제** |
+|---|---|---|---|---|---|---|
+| NAVER | CONNECTED · API_KEY(client credentials, 저장 만료 없음) | ON(상품 문의·고객 문의 lane ON) | 지원 | **SUCCESS · 1건**(상품 문의 lane 1페이지, 1.2s; 고객 문의 lane은 다음 페이지라 이번에 읽지 않음) | **공식 API 없음** | 호출 안 함(NOT_OFFERED) |
+| CAFE24 | CONNECTED · OAUTH2 · 읽기 스코프 보유 | ON | 지원 | **SUCCESS · 0건**(board 6, 0.6s — 7일 창에 새 글 없음) | 지원 | **SUCCESS · 0건**(board 4, 0.6s) |
+| COUPANG | CONNECTED · HMAC(저장 만료 없음) | ON | 지원 | **미실행 — 요청 0**(SETTING: `CoupangLiveApprovalRequiredException`, 좁혀진 승인 범위를 지키려 게이트를 열지 않음) | **공식 API 없음** | 호출 안 함(NOT_OFFERED) |
+
+**ResponsibilitySources(커넥터 ON에서 해석)** = `NAVER:INQUIRY · CAFE24:INQUIRY · CAFE24:REVIEW · COUPANG:INQUIRY` — 템플릿 네 개 전부.
+09-22 00:34 실행에 CAFE24 둘만 있었던 것은 그 프로세스(backend 18080, 인덱스 해당 행)가 NAVER/COUPANG을 끈 상태였기 때문이다.
+
+## 2. 부수 효과 (실측)
+
+- **Cafe24 토큰 갱신 1회**(22:57:01 KST, `last_rotated_at` 갱신) — manifest가 선언한 유일한 쓰기, 성공.
+- sync job **0** · 새 문의/리뷰 행 **0** · 커서 변경 **0** · 연결 상태 변경 **0** · 스케줄 변경 **0** · 모델 호출 **0** · WRITE **0** ·
+  Coupang 요청 **0** · Cafe24 댓글 확인 GET **0**(새 글이 없어 후보 없음).
+
+## 3. 실패·이상 분류
+
+| 항목 | 분류 | 내용 |
+|---|---|---|
+| COUPANG 문의 미실행 | **설정**(의도) | 승인 범위(각 1페이지)를 코드가 보장할 수 없어 게이트를 열지 않음. 다음 관문: 1페이지 상한을 가진 preflight 경로 + 새 manifest |
+| 부팅 후 기동 거부 | **설정** | preflight가 끝난 뒤 `PilotConfigValidator`가 `SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI`가 로컬 기본값이라며 기동을 거부. 운영자 `.env.local`로는 이 커밋의 백엔드가 서비스로 뜨지 않는다(Contextual Agent Workspace v1이 보고한 그 P0) |
+| 러너가 검증기보다 먼저 돎 | **코드 결함(경미)** | 기동을 거부할 프로세스에서 live 읽기가 먼저 실행됐다 — preflight는 설정 검증 뒤에 돌아야 한다 |
+| NAVER 리뷰 · COUPANG 리뷰 | **capability** | 공식 API 없음(가이드/Aside 경로 — 이번 범위 밖) |
+| 인증 실패 | 없음 | — |
