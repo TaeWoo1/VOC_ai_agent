@@ -161,6 +161,29 @@ npm run serve                         # http://127.0.0.1:8787
   for the AI pilot `SELLEROPS_AI_TRIAGE_PILOT_ENABLED=true`, `SELLEROPS_AI_TRIAGE_PILOT_ORG_IDS=<demo org
   uuid>`, `SELLEROPS_AI_TRIAGE_API_KEY=<vendor key>` (`review_ai_triage_demo.md` §3). Nothing else is
   required for the product surface.
+- **고객 운영 관리 (Customer Operations) needs `RESPONSIBILITY_RUNTIME_ORG_IDS`, and without it the demo
+  silently loses its first screen.** The rollout list is blank by default and blank means *nobody* — never
+  everybody, and there is no wildcard (`ResponsibilityRollout`). With it unset, `GET
+  /api/responsibilities/customer-operations/home` answers `available: false`, `coHomeApplies` is false, and
+  `/` falls back to the legacy four-area Operations home: 확인 필요 · 실행 대기 · the case screens are all
+  absent. Nothing logs a complaint, because refusing an organisation nobody named is the correct behaviour.
+
+  ```bash
+  # backend/.env.local — names and the demo org's own uuid; restart bootRun after editing
+  RESPONSIBILITY_RUNTIME_ORG_IDS=7146c50f-ff6d-4c83-ae96-18c930e6d8e0   # 데모 제조사
+  ```
+
+  **Two conditions, not one.** The organisation must be named here **and** its responsibility row must be
+  `ACTIVE` — seller acceptance alone opens nothing, and so does the rollout alone. The demo org's row is
+  already ACTIVE in the local PG (`select status from responsibility where org_id = …`); if a fresh snapshot
+  has none, press 시작 on `/customer-operations` once, which is the same activation a seller performs.
+
+  **`SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED` is a separate switch and the demo does not need it.** The
+  rollout makes the surface visible and lets it read the runs already stored; the scheduler is what makes
+  *new* runs happen. Left at its default `false`, the walkthrough renders from the stored runs — with one
+  visible consequence: 「다음 확인」 keeps naming the last computed window, so on a snapshot older than two
+  hours it prints a time that has passed. Set it to `true` only if the demo is meant to show a run starting.
+
 - **Do NOT set** `VITE_AW_FIXTURE_PREVIEW` for a demo. It brings back the developer chrome (scenario
   selector, bridge diagnostics, simulated reply runtime) — see §5.
 - `VITE_USE_MOCKS` stays unset/false: the demo runs against the real backend and the demo org's PG data.

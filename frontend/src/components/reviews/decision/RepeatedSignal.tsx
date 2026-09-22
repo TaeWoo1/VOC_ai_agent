@@ -18,6 +18,11 @@ import type { IssueSeverity, ReviewDecisionProblem } from "../../../lib/types";
  * read renders nothing at all, because a screen that could not see the issue memory has nothing to say
  * about it.
  *
+ * <b>And it says which records.</b> The triage note a few centimetres above counts a different thing —
+ * how many of this channel's reviews share one stored analysis category — and used to call that 반복
+ * too, so this section's 「아직 …않았습니다」 read as a denial of the sentence directly above it. The
+ * clause names the other mechanism instead of arguing with it; neither judgement moved.
+ *
  * <b>No count is invented.</b> `evidenceCount` is org-wide and all-time, exactly as the 고객운영 메모리
  * list means it, and the per-problem 근거 전체 보기 link is where the whole set is measured.
  */
@@ -35,7 +40,8 @@ export function RepeatedSignal({
     return (
       <Section title="반복 신호">
         <p className="break-keep text-sm leading-relaxed text-muted">
-          이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다. 같은 이야기가 쌓이면 고객운영 메모리에 문제로 모입니다.
+          이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다. 같은 문제를 말한 리뷰가 쌓이면 고객운영 메모리에 문제로
+          모입니다 — 위의 자동 분류와는 다른 기준입니다.
         </p>
       </Section>
     );

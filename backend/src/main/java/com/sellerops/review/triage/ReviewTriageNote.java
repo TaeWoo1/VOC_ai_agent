@@ -103,11 +103,20 @@ public record ReviewTriageNote(
      *
      * <p>참고 gets {@code null} rather than a reassuring sentence. A row with nothing to do should say
      * nothing — filling the slot would make the column look uniformly actionable.
+     *
+     * <p><b>None of these may say 반복 either.</b> 반복 문제 is this product's name for the issue memory's
+     * aspect+problem signature, and the review workspace prints 「반복 신호」 as a section of its own a few
+     * centimetres below this line. What {@link #REPEAT_MIN} counts is a different mechanism over a different
+     * input — three or more reviews sharing one stored analysis category — and its own declaration already says
+     * so. Measured on the demo org, a review carrying 「같은 분류의 상품평이 반복됩니다」 sat directly above
+     * 「이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다」: the same word, two mechanisms, and a seller left
+     * to decide which of the two sentences was lying. So this one names the bucket it actually counted.
+     * {@code ReviewTriageNoteTest} pins the absence of the word.
      */
     private static String action(ReviewTriageTier tier, boolean textless, boolean repeated) {
         return switch (tier) {
             case NEEDS_ATTENTION -> repeated
-                    ? "같은 분류의 상품평이 반복됩니다. 상품·포장 상태를 확인해 보세요."
+                    ? "같은 자동 분류의 상품평이 여러 건 있습니다. 상품·포장 상태를 확인해 보세요."
                     : "내용을 읽고 상품 상태를 확인해 보세요.";
             case WATCH -> textless
                     ? "별점만 남긴 상품평입니다. 같은 상품의 다른 상품평과 함께 보세요."

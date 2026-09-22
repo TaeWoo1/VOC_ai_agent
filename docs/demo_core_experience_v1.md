@@ -224,3 +224,43 @@ frontend **161 files / 2,244 tests** · `tsc` clean (frontend·agent-runtime).
   써서 매칭되지 않는다. 실패 방향은 정직(「해당 내용이 없습니다」)하지만 recall 손실이다.
 - 상품 중복 제목(데모 org의 알려진 사실)이라 「선바로 일체형 전선몰딩」은 두 canonical 상품 중
   먼저 걸리는 쪽으로 해결된다. 20 vs 69 상품 결정과 마찬가지로 범위 밖.
+
+## 12. FEATURE FREEZE (2026-09-22, product-owner decision)
+
+**Demo Core는 이 커밋에서 얼린다.** 남은 작업은 결함 수정과 리허설뿐이고, 새 기능·새 우선순위 기준·
+새 화면·새 backend capability는 이 범위에서 추가하지 않는다.
+
+**얼린 것 — 판매자가 걷는 순서 그대로**
+
+| # | 화면 | 소유하는 질문 |
+|---|---|---|
+| 1 | 홈 `/` (`CustomerOpsHome`) | 자동 확인 → 내 확인 필요 · 확인 필요 · 실행 대기 · 반복 문제 |
+| 2 | 확인할 일 `/customer-operations/cases` | 홈이 줄인 그 목록의 전부 — **같은 composer, 같은 건수** |
+| 3 | Inquiry Case `/customer-operations/cases/{id}` | 무엇을 확인했고 무엇이 판매자의 결정인가 |
+| 4 | Review Case `/reviews/reply/{id}` | 이 리뷰를 어떻게 판단하고 무엇을 할 것인가 |
+| 5 | 실행 대기 (홈 안) | 승인했고 아직 등록하지 않은 것 |
+| 6 | 반복 문제 (홈 안) → `/memory/{id}` | 무엇이 반복되고 근거는 무엇인가 |
+| 7 | Memory `/memory` | 반복 문제 전체와 그 판단·조치 기록 |
+
+**얼린 계약**
+
+- **확인 필요는 하나의 목록이다.** 케이스 · 확인 필요 리뷰 · 문의 큐를 소유 화면으로 dedupe한
+  `mergeHomeWork` 하나이고, 홈과 확인할 일이 같은 수를 말한다.
+- **정렬 기준은 하나다** — 기다린 시간, 두 그룹(이번 해 · 한 해 넘은 백로그) **안에서만**.
+  `/inquiries`의 `isOldBacklog`를 읽는다. 새 우선순위 점수는 만들지 않는다.
+- **이 제품에 dispatcher는 없다.** 실행 대기의 모든 행은 링크이고, 승인은 문장을 얼릴 뿐
+  등록은 판매자가 판매자센터에서 한다.
+- **반복 문제는 일이 아니다.** 확인 필요 아래에 서고, 동사도 버튼도 갖지 않는다.
+- **두 「반복」을 섞지 않는다** — `REPEAT_MIN`이 세는 것은 자동 분류 버킷이고 반복 문제는 이슈
+  메모리의 aspect+problem signature다. triage 문구는 「반복」을 쓰지 않으며 테스트가 고정한다.
+
+**freeze 밖으로 올리는 것 (product-owner 결정)**
+
+- 홈의 5줄 브리핑 컷에서 **간밤에 조사된 케이스가 보이지 않는다** — 「오래된 순」 규칙대로 recent
+  그룹의 맨 뒤에 선다. 바꾸려면 새 우선순위 기준이 필요하고 그것이 이 freeze가 금지하는 것이다.
+  확인할 일에는 있다.
+- 케이스 화면의 「원문 보기 ↗」와 「발송 화면으로 ↗」가 **같은 URL**이다.
+- `SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED=false`로 도는 데모에서 「다음 확인」이 지난 시각을
+  말한다(`docs/demo_runbook_v1.md` §1).
+- 미결정 리뷰의 `investigated`·`knowledgeUsed`를 rule lane이 기록하지 않는다 — 화면은 초안이
+  인용하는 동안 침묵할 뿐, 빈 칸 자체는 backend의 것이다.

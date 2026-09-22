@@ -50,7 +50,8 @@ class ReviewTriageNoteTest {
     void atTheFloorItIsRepeatedAndTheActionChanges() {
         ReviewTriageNote note = ReviewTriageNote.of(1, BODY, "설치", ReviewTriageNote.REPEAT_MIN);
         assertThat(note.reason()).contains("같은 분류 3건");
-        assertThat(note.recommendedAction()).isEqualTo("같은 분류의 상품평이 반복됩니다. 상품·포장 상태를 확인해 보세요.");
+        assertThat(note.recommendedAction())
+                .isEqualTo("같은 자동 분류의 상품평이 여러 건 있습니다. 상품·포장 상태를 확인해 보세요.");
     }
 
     @Test
@@ -136,6 +137,11 @@ class ReviewTriageNoteTest {
         assertThat(emitted).isNotEmpty();
         for (String text : emitted) {
             assertThat(text).doesNotContain("답변").doesNotContain("답글").doesNotContain("회신");
+            // 반복 belongs to the issue memory's aspect+problem signature, which is a different mechanism over a
+            // different input and gets its own 「반복 신호」 section on the same screen. What REPEAT_MIN counts is
+            // three reviews sharing one stored analysis category; measured on the demo org, one review showed
+            // 「같은 분류의 상품평이 반복됩니다」 directly above 「아직 반복 문제의 근거로 기록되지 않았습니다」.
+            assertThat(text).doesNotContain("반복");
         }
     }
 
