@@ -652,6 +652,13 @@ sellerops:
       # 429s, whole-API scope (verified 2026-06-12). Reserved for request
       # pacing in the order-collection slice.
       rate-limit-rps: ${SELLEROPS_CONNECTOR_COUPANG_RATE_LIMIT_RPS:5}
+      # The operator id Coupang requires on an inquiry answer (`replyBy`). Configuration, not a vault
+      # secret — it identifies who at the seller is answering, not how we authenticate. Blank by default
+      # and CoupangChannelReplyAdapter refuses to send while it is blank rather than inventing a value,
+      # so this is a precondition of the Coupang answer lane. It was previously reachable only through
+      # PublishExecutionWiring's @Value default, which left it invisible in the file that declares every
+      # other configuration name — an operator reading this file could not learn the lane needed it.
+      reply-by: ${SELLEROPS_CONNECTOR_COUPANG_REPLY_BY:}
     cafe24:
       # Cafe24 Admin API connector (Phase 3D-3 auth skeleton). Off by default —
       # beans absent, CAFE24 keeps resolving to the mock connector. The

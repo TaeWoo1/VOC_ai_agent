@@ -72,14 +72,29 @@ services:
       SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED: ${SELLEROPS_CONNECTOR_MOCK_FALLBACK_ENABLED:-false}
       SELLEROPS_CONNECTOR_NAVER_ENABLED: ${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}
       SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS: ${SELLEROPS_CONNECTOR_NAVER_ADVERTISED_EGRESS_IPS:-}
+      # The two NAVER 문의 lanes have their OWN flags — turning the connector on does not turn them on,
+      # and without these names a deployed host cannot reach them however the operator writes its env file.
+      # They are separate contracts (상품 문의 PUT vs 고객 문의 POST, non-overlapping identifier spaces), which
+      # is why there are two switches and not one.
+      SELLEROPS_CONNECTOR_NAVER_INQUIRY_PRODUCT_QNA_ENABLED: ${SELLEROPS_CONNECTOR_NAVER_INQUIRY_PRODUCT_QNA_ENABLED:-false}
+      SELLEROPS_CONNECTOR_NAVER_INQUIRY_CUSTOMER_ENABLED: ${SELLEROPS_CONNECTOR_NAVER_INQUIRY_CUSTOMER_ENABLED:-false}
       SELLEROPS_CONNECTOR_COUPANG_ENABLED: ${SELLEROPS_CONNECTOR_COUPANG_ENABLED:-false}
       SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID: ${SELLEROPS_CONNECTOR_COUPANG_LIVE_APPROVAL_ID:-}
+      # The operator id Coupang requires on an answer. Blank and the adapter refuses to send rather than
+      # inventing one, so this name is a precondition of the Coupang answer lane, not a tuning knob.
+      SELLEROPS_CONNECTOR_COUPANG_REPLY_BY: ${SELLEROPS_CONNECTOR_COUPANG_REPLY_BY:-}
       SELLEROPS_CONNECTOR_CAFE24_ENABLED: ${SELLEROPS_CONNECTOR_CAFE24_ENABLED:-false}
       SELLEROPS_CONNECTOR_CAFE24_CLIENT_ID: ${SELLEROPS_CONNECTOR_CAFE24_CLIENT_ID:-}
       SELLEROPS_CONNECTOR_CAFE24_CLIENT_SECRET: ${SELLEROPS_CONNECTOR_CAFE24_CLIENT_SECRET:-}
       SELLEROPS_CONNECTOR_CAFE24_API_VERSION: ${SELLEROPS_CONNECTOR_CAFE24_API_VERSION:-}
       SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI: ${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:-}
       SELLEROPS_CONNECTOR_CAFE24_RESULT_URL: ${SELLEROPS_CONNECTOR_CAFE24_RESULT_URL:-}
+      # The scope the seller re-consents to before an answer may be written (`mall.write_community`). Without
+      # this name a deployed host cannot configure that re-consent, which is the precondition of the one
+      # marketplace WRITE lane this repository has verified live (Cafe24 inquiry answer, 2026-08-25). Blank
+      # keeps the connection read-only, exactly as before. The read scope keeps its own default in
+      # application.yml — restating that literal here would make a second place to change it.
+      SELLEROPS_CONNECTOR_CAFE24_ANSWER_EXECUTION_SCOPES: ${SELLEROPS_CONNECTOR_CAFE24_ANSWER_EXECUTION_SCOPES:-}
       # ── Agent AI capabilities (Pilot Readiness Closure v1 §3) ────────────────────────────────
       # Without these names here the backend container cannot SEE them however carefully an operator
       # writes them into the host's env file, so the /agent lane is off on every deployed host and
@@ -118,6 +133,10 @@ services:
       SELLEROPS_SELF_PILOT_ORG_IDS: ${SELLEROPS_SELF_PILOT_ORG_IDS:-}
       SELLEROPS_SELF_PILOT_READ_GRANT_ID: ${SELLEROPS_SELF_PILOT_READ_GRANT_ID:-}
       SELLEROPS_SELF_PILOT_DEFAULT_INTERVAL_MINUTES: ${SELLEROPS_SELF_PILOT_DEFAULT_INTERVAL_MINUTES:-60}
+      # Self-pilot CREATES the schedules; this poller is what EXECUTES them. Without this name a deployed host
+      # can turn self-pilot on, watch schedules appear, and never collect anything — the two halves of routine
+      # collection were not reachable from the same env file.
+      SELLEROPS_COLLECT_SCHEDULER_ENABLED: ${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}
       SELLEROPS_PROACTIVE_ENABLED: ${SELLEROPS_PROACTIVE_ENABLED:-false}
       SELLEROPS_PROACTIVE_ORG_IDS: ${SELLEROPS_PROACTIVE_ORG_IDS:-}
       SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED: ${SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED:-false}
@@ -130,6 +149,16 @@ services:
       SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID:-}
       SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP:-}
       SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO: ${SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO:-0}
+      # Review replies are a SECOND execution lane with its own flag and its own approval id — the inquiry
+      # names above do not reach it. Five inquiry names were here and zero review names were, so the Cafe24
+      # review comment adapter was unreachable on every deployed host. Off by default, exactly as before.
+      SELLEROPS_REVIEW_PUBLISH_EXECUTION_ENABLED: ${SELLEROPS_REVIEW_PUBLISH_EXECUTION_ENABLED:-false}
+      SELLEROPS_REVIEW_PUBLISH_CAFE24_LIVE_APPROVAL_ID: ${SELLEROPS_REVIEW_PUBLISH_CAFE24_LIVE_APPROVAL_ID:-}
+      # SELLEROPS_REVIEW_PUBLISH_CAFE24_SHOP_NO is deliberately NOT passed through. Its property reads
+      # `${SELLEROPS_REVIEW_PUBLISH_CAFE24_SHOP_NO:${SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO:0}}` — it inherits
+      # the inquiry shop number. Naming it here would hand the backend an explicit value on every host and
+      # silently replace that inheritance with 0, so the review lane would aim at no shop while the inquiry
+      # lane aimed at the right one. A deployment that genuinely needs a different shop sets it on the host.
     ports:
       - "8080:8080"
     depends_on:
