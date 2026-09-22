@@ -224,4 +224,19 @@ class PilotConfigValidatorTest {
         assertThat(validator.problems())
                 .anySatisfy(p -> assertThat(p).contains("NAVER_ADVERTISED_EGRESS_IPS"));
     }
+
+    /** The live preflight asks this; it must never read true for a process the validator refused. */
+    @Test
+    void passedIsSetOnlyAfterAValidationThatFoundNothing() {
+        PilotConfigValidator refusing = v(false, false, true, "key", "", "id", "secret", LOOPBACK);
+        assertThat(refusing.passed()).isFalse();
+        org.assertj.core.api.Assertions.assertThatThrownBy(refusing::validate).isInstanceOf(IllegalStateException.class);
+        assertThat(refusing.passed()).isFalse();
+
+        PilotConfigValidator ok = v(false, false, true, "key", "", "id", "secret", HTTPS);
+        assertThat(ok.passed()).isFalse();
+        ok.validate();
+        assertThat(ok.passed()).isTrue();
+    }
+
 }

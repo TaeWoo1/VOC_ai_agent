@@ -2,6 +2,7 @@ package com.sellerops.preflight;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.config.PilotConfigValidator;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.responsibility.ResponsibilitySources;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -22,7 +23,7 @@ public class ApiReadPreflightConfiguration {
     @Bean
     ApiReadPreflightRunner apiReadPreflightRunner(
             ConnectorRegistry registry, SellerAccountRepository accounts, ChannelRepository channels,
-            ResponsibilitySources sources, ObjectMapper json,
+            ResponsibilitySources sources, ObjectMapper json, PilotConfigValidator validator,
             @Value("${sellerops.preflight.api-read.approval-id}") String approvalId,
             @Value("${sellerops.preflight.api-read.org-id:}") String orgId,
             @Value("${sellerops.preflight.api-read.days:7}") int days,
@@ -34,6 +35,6 @@ public class ApiReadPreflightConfiguration {
             @Value("${sellerops.proactive.enabled:false}") boolean proactive) {
         ApiReadPreflight preflight = new ApiReadPreflight(registry, accounts, channels, sources, Clock.systemUTC());
         return new ApiReadPreflightRunner(preflight, approvalId, orgId, days, limit, output,
-                collectScheduler || responsibilityScheduler || selfPilot || proactive, json);
+                collectScheduler || responsibilityScheduler || selfPilot || proactive, validator::passed, json);
     }
 }

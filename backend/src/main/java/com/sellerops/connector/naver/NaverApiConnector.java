@@ -33,7 +33,7 @@ import java.util.Set;
  * only then the first HTTP call (token mint, then the order queries). A
  * credential problem can never produce an outbound request.
  */
-public class NaverApiConnector implements PullConnector, ConnectionVerifier {
+public class NaverApiConnector implements PullConnector, ConnectionVerifier , com.sellerops.connector.BoundedReadProbe {
 
     public static final String KIND = "NAVER_API";
     public static final String CONNECTOR_CLASS = "API";
@@ -220,6 +220,35 @@ public class NaverApiConnector implements PullConnector, ConnectionVerifier {
             // Cursor unchanged — a throttled attempt must re-request the same position.
             return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfterFor(e), KIND);
         }
+    }
+
+    /**
+     * NAVER's two inquiry lanes, each asked for its first page once (live preflight). Credential shape is checked
+     * before any HTTP, and one token is minted for both lanes — a token failure fails both, because neither lane was
+     * asked. Nothing is persisted and no cursor moves.
+     */
+    @Override
+    public java.util.List<SourcePage> probeFirstPagePerSource(java.util.UUID orgId, java.util.UUID sellerAccountId,
+                                                              DataType dataType, java.time.LocalDate from,
+                                                              java.time.LocalDate to, int pageSize) {
+        if (dataType != DataType.INQUIRY || !inquiryReachable()) {
+            throw new UnsupportedDataTypeException(CHANNEL_CODE, dataType);
+        }
+        String accessToken;
+        try {
+            DecryptedCredential credential = vault.open(orgId, sellerAccountId);
+            String clientId = credential.secrets().get("client_id");
+            String clientSecret = credential.secrets().get("client_secret");
+            if (isBlank(clientId) || isBlank(clientSecret)) {
+                throw new IllegalStateException("네이버 자격 증명에 client_id 또는 client_secret이 없습니다.");
+            }
+            accessToken = tokenClient.accessToken(clientId, clientSecret);
+        } catch (RuntimeException e) {
+            return java.util.List.of(
+                    new SourcePage(NaverInquiryCursor.SOURCE_PRODUCT_QNA, SourcePage.FAILED, null, null, e, 0),
+                    new SourcePage(NaverInquiryCursor.SOURCE_CUSTOMER, SourcePage.FAILED, null, null, e, 0));
+        }
+        return inquiryCollector.probeFirstPages(accessToken, from, to);
     }
 
     /**

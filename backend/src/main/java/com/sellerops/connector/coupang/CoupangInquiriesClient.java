@@ -234,6 +234,43 @@ public class CoupangInquiriesClient {
                 serialize(next), sweep.more(), CoupangApiConnector.KIND);
     }
 
+    /** What one answered-type bucket's first page showed: its size, and the provider's own word on a next page. */
+    public record FirstPage(int records, Boolean morePages) {
+    }
+
+    /**
+     * <b>Exactly one signed GET</b> — page 1 of one {@code answeredType} bucket for one window (live preflight).
+     *
+     * <p>{@link #fetchInquiryPage} is collection: it sweeps both buckets page by page until the window is exhausted,
+     * and it stays exactly that. This is its bounded sibling for a READ approval written in pages. It takes no page
+     * number and has no loop, so a second page is not something a caller can ask for — the request's
+     * {@code pageNum=1} is a literal. The window is clamped to the official 7-day cap rather than refused, and the
+     * rows are counted, never mapped or kept.
+     *
+     * <p>{@code morePages} is the provider's pagination total when it sent one; without it a short page means no
+     * more, and a full page means <i>unknown</i> ({@code null}) — the same ambiguity {@link #fetchInquiryPage} fails
+     * closed on, reported here rather than resolved by asking again.
+     */
+    public FirstPage probeFirstPage(String accessKey, String secretKey, String vendorId, String answeredType,
+                                    LocalDate from, LocalDate to, int pageSize) {
+        if (!ANSWERED_TYPES.contains(answeredType)) {
+            throw new IllegalArgumentException("unknown answeredType");
+        }
+        LocalDate floor = to.minusDays(CoupangInquiryCursor.MAX_WINDOW_DAYS - 1L);
+        LocalDate start = from.isBefore(floor) ? floor : from;
+        int size = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
+        CoupangInquiryCursor.DateWindow window = new CoupangInquiryCursor.DateWindow(start, to);
+        String path = String.format(ONLINE_INQUIRIES_PATH_FMT, vendorId);
+        String query = inquiriesQuery(answeredType, window.fromParam(), window.toParam(), 1, size);
+        InquiryEnvelope envelope = getInquiries(accessKey, secretKey, vendorId, path, query);
+        int count = envelope.contentOrEmpty().size();
+        // Boxed on both arms: a primitive on one side would unbox the unknown (null) arm and throw.
+        Boolean more = envelope.hasPagination()
+                ? Boolean.valueOf(envelope.hasPageAfter(1))
+                : (count < size ? Boolean.FALSE : null);
+        return new FirstPage(count, more);
+    }
+
     private InquiryEnvelope getInquiries(String accessKey, String secretKey, String vendorId,
                                          String path, String query) {
         CoupangHttpClient.Response response = signedGet(path, query, accessKey, secretKey, vendorId);

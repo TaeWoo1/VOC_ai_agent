@@ -2,6 +2,7 @@ package com.sellerops.preflight;
 
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.connector.BoundedReadProbe;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
@@ -27,7 +28,11 @@ import java.util.stream.Collectors;
  * READ in THIS environment, and what does the customer-operations responsibility resolve to here?
  *
  * <p><b>A preflight, not a run.</b> For each API seller account on NAVER / CAFE24 / COUPANG and each of INQUIRY and
- * REVIEW it asks the resolved pull connector for <i>one</i> page and counts what came back. The page is discarded:
+ * REVIEW it asks the resolved pull connector for <i>one</i> page per official source and counts what came back. A
+ * connector that implements {@link BoundedReadProbe} (Coupang's two answered-type buckets, NAVER's two inquiry lanes)
+ * is asked only through it — its collection-shaped {@code fetch} is never called here, because that one's page count
+ * is a collection decision this class cannot bound. A connector without it (Cafe24) is asked through {@code fetch},
+ * which for that connector is one board page by construction. The page is discarded:
  * nothing is ingested, no cursor advances, no sync job or run row is written. The one write it cannot avoid is the
  * connector's own — a channel whose access token has expired refreshes it through the vault, exactly as any read
  * would — and the manifest says so.
@@ -52,6 +57,8 @@ public class ApiReadPreflight {
             String channelCode,
             UUID sellerAccountId,
             String dataType,
+            /** The official source this row asked — a Coupang answered-type bucket, a NAVER lane, or {@code ONE_PAGE}. */
+            String source,
             boolean connectorResolved,
             boolean codeSupports,
             String window,
@@ -90,7 +97,7 @@ public class ApiReadPreflight {
             if (account.isFileUpload() || !CHANNELS.contains(code)) continue;
             Optional<PullConnector> connector = registry.resolvePullConnector(code);
             for (DataType type : TYPES) {
-                rows.add(probe(orgId, account.getId(), code, type, connector, days, limit));
+                rows.addAll(probe(orgId, account.getId(), code, type, connector, days, limit));
             }
         }
         List<String> resolved = sources.resolve(orgId, ResponsibilityTemplate.CUSTOMER_OPERATIONS_V1).stream()
@@ -99,34 +106,48 @@ public class ApiReadPreflight {
         return new Report(List.copyOf(rows), resolved);
     }
 
-    private Row probe(UUID orgId, UUID accountId, String code, DataType type, Optional<PullConnector> connector,
-                      int days, int limit) {
+    private List<Row> probe(UUID orgId, UUID accountId, String code, DataType type, Optional<PullConnector> connector,
+                            int days, int limit) {
         if (connector.isEmpty()) {
-            return new Row(code, accountId, type.name(), false, false, null, "CONNECTOR_OFF", null, null,
-                    Category.SETTING, null, 0);
+            return List.of(new Row(code, accountId, type.name(), null, false, false, null, "CONNECTOR_OFF", null, null,
+                    Category.SETTING, null, 0));
         }
         PullConnector c = connector.get();
         boolean supports = c.capabilities(code).supports(type);
         if (!supports) {
-            return new Row(code, accountId, type.name(), true, false, null, "NOT_OFFERED", null, null,
-                    Category.CAPABILITY, null, 0);
+            return List.of(new Row(code, accountId, type.name(), null, true, false, null, "NOT_OFFERED", null, null,
+                    Category.CAPABILITY, null, 0));
         }
         LocalDate end = LocalDate.now(clock.withZone(KST));
-        Optional<String> bounded = c.backfillCursor(type, end.minusDays(days - 1L), end);
-        String window = bounded.isPresent() ? "LAST_" + days + "_DAYS_KST" : "CONNECTOR_DEFAULT";
+        LocalDate start = end.minusDays(days - 1L);
+        // A connector that can hold itself to one page per official source is asked that way — never through the
+        // collection-shaped fetch, whose page count this class cannot bound (a Coupang sweep, a NAVER lane walk).
+        if (c instanceof BoundedReadProbe bounded) {
+            String window = "LAST_" + days + "_DAYS_KST";
+            return bounded.probeFirstPagePerSource(orgId, accountId, type, start, end, limit).stream()
+                    .map(p -> new Row(code, accountId, type.name(), p.source(), true, true,
+                            BoundedReadProbe.SourcePage.NOT_WIRED.equals(p.outcome()) ? null : window,
+                            p.outcome(), p.records(), p.morePages(),
+                            p.failure() == null ? (BoundedReadProbe.SourcePage.RATE_LIMITED.equals(p.outcome())
+                                    ? Category.TRANSIENT : null) : categorize(p.failure()),
+                            p.failure() == null ? null : p.failure().getClass().getSimpleName(), p.elapsedMs()))
+                    .toList();
+        }
+        Optional<String> boundedCursor = c.backfillCursor(type, start, end);
+        String window = boundedCursor.isPresent() ? "LAST_" + days + "_DAYS_KST" : "CONNECTOR_DEFAULT";
         long started = clock.millis();
         try {
-            FetchPage page = c.fetch(new FetchRequest(orgId, accountId, code, type, bounded.orElse(null), limit));
+            FetchPage page = c.fetch(new FetchRequest(orgId, accountId, code, type, boundedCursor.orElse(null), limit));
             long elapsed = clock.millis() - started;
             if (page.rateLimited()) {
-                return new Row(code, accountId, type.name(), true, true, window, "RATE_LIMITED", 0, true,
-                        Category.TRANSIENT, null, elapsed);
+                return List.of(new Row(code, accountId, type.name(), "ONE_PAGE", true, true, window, "RATE_LIMITED",
+                        0, true, Category.TRANSIENT, null, elapsed));
             }
-            return new Row(code, accountId, type.name(), true, true, window, "SUCCESS", page.records().size(),
-                    page.hasMore(), null, null, elapsed);
+            return List.of(new Row(code, accountId, type.name(), "ONE_PAGE", true, true, window, "SUCCESS",
+                    page.records().size(), page.hasMore(), null, null, elapsed));
         } catch (RuntimeException e) {
-            return new Row(code, accountId, type.name(), true, true, window, "FAILED", null, null,
-                    categorize(e), e.getClass().getSimpleName(), clock.millis() - started);
+            return List.of(new Row(code, accountId, type.name(), "ONE_PAGE", true, true, window, "FAILED", null, null,
+                    categorize(e), e.getClass().getSimpleName(), clock.millis() - started));
         }
     }
 

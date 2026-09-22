@@ -112,6 +112,47 @@ public class NaverInquiryCollector {
     }
 
     /**
+     * <b>Each wired source's first page, asked once</b> — the two official NAVER inquiry lanes verified
+     * independently (live preflight). {@link #fetchInquiryPage} reads whichever lane is outstanding and advances; this
+     * builds the same bounded window {@link #boundedWindowSeed} would, takes each lane's page-1 {@code Lane} and asks
+     * its client exactly once. No lane is advanced — there is no cursor to return — so a second page cannot follow.
+     * One lane failing does not stop the other.
+     */
+    public List<com.sellerops.connector.BoundedReadProbe.SourcePage> probeFirstPages(String accessToken,
+                                                                                    LocalDate startDate,
+                                                                                    LocalDate endDate) {
+        NaverInquiryCursor window = NaverInquiryCursor.bounded(startDate, endDate, qnaClient != null);
+        List<com.sellerops.connector.BoundedReadProbe.SourcePage> pages = new java.util.ArrayList<>();
+        pages.add(qnaClient == null
+                ? com.sellerops.connector.BoundedReadProbe.SourcePage.notWired(NaverInquiryCursor.SOURCE_PRODUCT_QNA)
+                : firstPage(NaverInquiryCursor.SOURCE_PRODUCT_QNA, () -> qnaClient.fetchPage(accessToken, window.qna())));
+        pages.add(customerClient == null
+                ? com.sellerops.connector.BoundedReadProbe.SourcePage.notWired(NaverInquiryCursor.SOURCE_CUSTOMER)
+                : firstPage(NaverInquiryCursor.SOURCE_CUSTOMER,
+                        () -> customerClient.fetchPage(accessToken, window.customer())));
+        return pages;
+    }
+
+    private com.sellerops.connector.BoundedReadProbe.SourcePage firstPage(
+            String source, java.util.function.Supplier<NaverInquiryPage> oneRequest) {
+        long started = clock.millis();
+        try {
+            NaverInquiryPage page = oneRequest.get();
+            return new com.sellerops.connector.BoundedReadProbe.SourcePage(source,
+                    com.sellerops.connector.BoundedReadProbe.SourcePage.SUCCESS, page.rows().size(), !page.last(),
+                    null, clock.millis() - started);
+        } catch (NaverRateLimitedException e) {
+            return new com.sellerops.connector.BoundedReadProbe.SourcePage(source,
+                    com.sellerops.connector.BoundedReadProbe.SourcePage.RATE_LIMITED, null, null, e,
+                    clock.millis() - started);
+        } catch (RuntimeException e) {
+            return new com.sellerops.connector.BoundedReadProbe.SourcePage(source,
+                    com.sellerops.connector.BoundedReadProbe.SourcePage.FAILED, null, null, e,
+                    clock.millis() - started);
+        }
+    }
+
+    /**
      * Seed an operator's bounded window over both sources.
      *
      * <p>Bounded, so it is never recomputed and never walks past its end; the routine lane's position

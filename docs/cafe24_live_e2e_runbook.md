@@ -82,7 +82,10 @@ fail-closed rule working, and knowing them saves two boots:
    `PilotConfigValidator:91`: *「카페24 OAuth callback 주소가 아직 기본값(로컬 주소)입니다」*. The rule is an
    absolute HTTPS URL that is not the loopback default.
 
-`SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI` and `SELLEROPS_CONNECTOR_CAFE24_SCOPES` are **not present** in
+**2026-09-22:** `SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI` is now **present** in the operator's `backend/.env.local`
+with the registered value above, so a boot from that file passes the validator without an extra export
+(verified by a connector-on boot with no preflight: validator passed, zero connector requests). The validator is
+unchanged. `SELLEROPS_CONNECTOR_CAFE24_SCOPES` is still **not present** in
 `backend/.env.local`; the scopes fall back to the read-only default
 `mall.read_community,mall.read_order,mall.read_product`, which is what a READ-only run wants.
 

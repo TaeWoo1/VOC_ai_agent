@@ -7,17 +7,26 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
+import java.util.function.BooleanSupplier;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 
 /**
  * Runs {@link ApiReadPreflight} once at boot, and only when a READ approval id and an org id are both given.
+ *
+ * <p><b>After every setting was validated, never before</b> (2026-09-22). It was an {@code ApplicationRunner}, and
+ * runners run before {@code ApplicationReadyEvent} — the event {@code PilotConfigValidator} refuses a misconfigured
+ * process on. The first live preflight therefore made its marketplace reads in a process that refused to boot a
+ * moment later. It is now the last ready listener, and it also asks the validator whether it passed: order is the
+ * first guard, the explicit {@code settingsValidated} answer is the second, and either alone stops the read.
  *
  * <p><b>Fails closed on concurrency.</b> A preflight whose counts could be another collector's is not a preflight
  * (live approval contract §6b), so it refuses while the collect scheduler, the responsibility scheduler, the
  * self-pilot reconciler or the proactive tick is armed in this process.
  */
-public class ApiReadPreflightRunner implements ApplicationRunner {
+public class ApiReadPreflightRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ApiReadPreflightRunner.class);
     private static final String TAG = "[api-read-preflight]";
@@ -31,10 +40,12 @@ public class ApiReadPreflightRunner implements ApplicationRunner {
     private final int limit;
     private final String outputPath;
     private final boolean anySchedulerArmed;
+    private final BooleanSupplier settingsValidated;
     private final ObjectMapper json;
 
     public ApiReadPreflightRunner(ApiReadPreflight preflight, String approvalId, String orgId, int days, int limit,
-                                  String outputPath, boolean anySchedulerArmed, ObjectMapper json) {
+                                  String outputPath, boolean anySchedulerArmed, BooleanSupplier settingsValidated,
+                                  ObjectMapper json) {
         this.preflight = preflight;
         this.approvalId = approvalId;
         this.orgId = orgId;
@@ -42,11 +53,21 @@ public class ApiReadPreflightRunner implements ApplicationRunner {
         this.limit = limit;
         this.outputPath = outputPath;
         this.anySchedulerArmed = anySchedulerArmed;
+        this.settingsValidated = settingsValidated;
         this.json = json;
     }
 
-    @Override
-    public void run(ApplicationArguments args) throws Exception {
+    @EventListener(ApplicationReadyEvent.class)
+    @Order(Ordered.LOWEST_PRECEDENCE)
+    public void onReady() throws Exception {
+        run();
+    }
+
+    void run() throws Exception {
+        if (settingsValidated == null || !settingsValidated.getAsBoolean()) {
+            log.warn("{} REFUSED settings were not validated in this process — no marketplace call.", TAG);
+            return;
+        }
         if (approvalId == null || !APPROVAL_ID.matcher(approvalId.strip()).matches()) {
             log.warn("{} REFUSED approval id missing or malformed — no marketplace call.", TAG);
             return;

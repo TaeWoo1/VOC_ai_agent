@@ -1,6 +1,7 @@
 package com.sellerops.connector.coupang;
 
 import com.sellerops.connector.ChannelApiGapRegistry;
+import com.sellerops.connector.BoundedReadProbe;
 import com.sellerops.connector.ConnectionVerifier;
 import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.DataType;
@@ -45,7 +46,7 @@ import org.slf4j.LoggerFactory;
  * never misreported as an IP problem (or vice versa); an ungranted order scope is the hedged
  * {@code ORDER_ACCESS_DENIED}, never guessed into a specific code.
  */
-public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
+public class CoupangApiConnector implements PullConnector, ConnectionVerifier, BoundedReadProbe {
 
     public static final String KIND = "COUPANG_API";
     public static final String CONNECTOR_CLASS = "API";
@@ -156,6 +157,46 @@ public class CoupangApiConnector implements PullConnector, ConnectionVerifier {
             return FetchPage.rateLimited(
                     request.dataType(), request.cursorValue(), e.effectiveRetryAfterSeconds(), KIND);
         }
+    }
+
+    /**
+     * Coupang's two inquiry buckets, each asked for its first page once (live preflight). The credential opens once,
+     * before either request — the same fail-closed order as {@link #fetch}: no credential, no request. A bucket that
+     * fails does not stop the other from being asked.
+     */
+    @Override
+    public List<SourcePage> probeFirstPagePerSource(java.util.UUID orgId, java.util.UUID sellerAccountId,
+                                                    DataType dataType, java.time.LocalDate from,
+                                                    java.time.LocalDate to, int pageSize) {
+        if (dataType != DataType.INQUIRY) {
+            throw new UnsupportedDataTypeException(CHANNEL_CODE, dataType);
+        }
+        List<SourcePage> pages = new java.util.ArrayList<>();
+        Credential credential;
+        try {
+            credential = openAndValidate(orgId, sellerAccountId);
+        } catch (RuntimeException e) {
+            for (String type : CoupangInquiriesClient.ANSWERED_TYPES) {
+                pages.add(new SourcePage("INQUIRY_" + type, SourcePage.FAILED, null, null, e, 0));
+            }
+            return pages;
+        }
+        for (String type : CoupangInquiriesClient.ANSWERED_TYPES) {
+            long started = System.currentTimeMillis();
+            try {
+                CoupangInquiriesClient.FirstPage page = inquiriesClient.probeFirstPage(credential.accessKey(),
+                        credential.secretKey(), credential.vendorId(), type, from, to, pageSize);
+                pages.add(new SourcePage("INQUIRY_" + type, SourcePage.SUCCESS, page.records(), page.morePages(),
+                        null, System.currentTimeMillis() - started));
+            } catch (CoupangRateLimitedException e) {
+                pages.add(new SourcePage("INQUIRY_" + type, SourcePage.RATE_LIMITED, null, null, e,
+                        System.currentTimeMillis() - started));
+            } catch (RuntimeException e) {
+                pages.add(new SourcePage("INQUIRY_" + type, SourcePage.FAILED, null, null, e,
+                        System.currentTimeMillis() - started));
+            }
+        }
+        return pages;
     }
 
     /**

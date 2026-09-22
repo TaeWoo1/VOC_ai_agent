@@ -8,6 +8,8 @@ import java.util.Locale;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
@@ -81,7 +83,20 @@ public class PilotConfigValidator {
         this.agentCapabilities = agentCapabilities == null ? List.of() : List.copyOf(agentCapabilities);
     }
 
+    /**
+     * Whether this process's settings were checked and found usable. Only {@link #validate} sets it, and only after
+     * finding no problem — a reader that must not act on an unvalidated deployment (the live API preflight) asks
+     * this rather than trusting listener order alone.
+     */
+    private volatile boolean passed;
+
+    /**
+     * First among the ready listeners (Full MVP live preflight, 2026-09-22): anything else that acts on
+     * {@code ApplicationReadyEvent} — a live marketplace read above all — runs only if this has not refused the
+     * process. The conditions are unchanged; only their place in the order moved forward.
+     */
     @EventListener(ApplicationReadyEvent.class)
+    @Order(Ordered.HIGHEST_PRECEDENCE)
     public void validate() {
         List<String> problems = problems();
         if (!problems.isEmpty()) {
@@ -90,6 +105,11 @@ public class PilotConfigValidator {
                             + "아래를 채우거나 해당 기능을 끈 뒤 다시 시작하세요:\n  - "
                             + String.join("\n  - ", problems));
         }
+        passed = true;
+    }
+
+    public boolean passed() {
+        return passed;
     }
 
     /** The conditions, in one list, so a test can read them without starting a context. */

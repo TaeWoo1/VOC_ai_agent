@@ -57,7 +57,7 @@ class ApiReadPreflightTest {
     }
 
     /** A connector that serves INQUIRY only; `boom` makes it throw a failure carrying a provider-looking message. */
-    static final class FakeConnector implements PullConnector {
+    static class FakeConnector implements PullConnector {
         final List<FetchRequest> calls = new ArrayList<>();
         RuntimeException boom;
 
@@ -145,14 +145,69 @@ class ApiReadPreflightTest {
     }
 
     @Test
-    void theRunnerRefusesWithoutAWellFormedApproval_orWhileASchedulerIsArmed() throws Exception {
+    void theRunnerRefusesWithoutAWellFormedApproval_orWhileASchedulerIsArmed_orBeforeSettingsWereValidated() throws Exception {
         ApiReadPreflight preflight = mock(ApiReadPreflight.class);
         ObjectMapper json = new ObjectMapper();
         String org = ORG.toString();
-        new ApiReadPreflightRunner(preflight, null, org, 7, 50, null, false, json).run(null);
-        new ApiReadPreflightRunner(preflight, "Seated and ready.", org, 7, 50, null, false, json).run(null);
-        new ApiReadPreflightRunner(preflight, "apr-api-read-0a1b2c3d", org, 7, 50, null, true, json).run(null);
-        new ApiReadPreflightRunner(preflight, "apr-api-read-0a1b2c3d", org, 7, 500, null, false, json).run(null);
+        new ApiReadPreflightRunner(preflight, null, org, 7, 50, null, false, () -> true, json).run();
+        new ApiReadPreflightRunner(preflight, "Seated and ready.", org, 7, 50, null, false, () -> true, json).run();
+        new ApiReadPreflightRunner(preflight, "apr-api-read-0a1b2c3d", org, 7, 50, null, true, () -> true, json).run();
+        new ApiReadPreflightRunner(preflight, "apr-api-read-0a1b2c3d", org, 7, 500, null, false, () -> true, json).run();
+        // A process whose settings were not validated (or failed validation) never reaches a marketplace.
+        new ApiReadPreflightRunner(preflight, "apr-api-read-0a1b2c3d", org, 7, 50, null, false, () -> false, json).run();
+        new ApiReadPreflightRunner(preflight, "apr-api-read-0a1b2c3d", org, 7, 50, null, false, null, json).run();
         verify(preflight, never()).run(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void itIsTheLastReadyListener_andTheValidatorIsTheFirst() throws Exception {
+        java.lang.reflect.Method onReady = ApiReadPreflightRunner.class.getMethod("onReady");
+        assertThat(onReady.getAnnotation(org.springframework.context.event.EventListener.class)).isNotNull();
+        assertThat(onReady.getAnnotation(org.springframework.core.annotation.Order.class).value())
+                .isEqualTo(org.springframework.core.Ordered.LOWEST_PRECEDENCE);
+        java.lang.reflect.Method validate = com.sellerops.config.PilotConfigValidator.class.getMethod("validate");
+        assertThat(validate.getAnnotation(org.springframework.core.annotation.Order.class).value())
+                .isEqualTo(org.springframework.core.Ordered.HIGHEST_PRECEDENCE);
+        // No longer a runner: runners run before ApplicationReadyEvent, which is where the validator refuses.
+        assertThat(org.springframework.boot.ApplicationRunner.class.isAssignableFrom(ApiReadPreflightRunner.class)).isFalse();
+    }
+
+    /** A connector that can hold itself to one page per source is asked only that way — fetch is never called. */
+    static final class BoundedFake extends FakeConnector implements com.sellerops.connector.BoundedReadProbe {
+        final List<String> asked = new ArrayList<>();
+        @Override public List<SourcePage> probeFirstPagePerSource(UUID orgId, UUID accountId, DataType type,
+                java.time.LocalDate from, java.time.LocalDate to, int pageSize) {
+            asked.add(from + ".." + to + "/" + pageSize);
+            return List.of(new SourcePage("A", SourcePage.SUCCESS, 2, true, null, 5),
+                    new SourcePage("B", SourcePage.FAILED, null, null, new IllegalStateException("provider body"), 3),
+                    SourcePage.notWired("C"));
+        }
+    }
+
+    @Test
+    void aBoundedConnectorIsAskedPerSource_andItsCollectionFetchIsNeverCalled() {
+        Channel naver = channel("NAVER");
+        SellerAccount nv = account(naver);
+        ChannelRepository channels = mock(ChannelRepository.class);
+        when(channels.findAll()).thenReturn(List.of(naver));
+        SellerAccountRepository accounts = mock(SellerAccountRepository.class);
+        when(accounts.findAllByOrgId(ORG)).thenReturn(List.of(nv));
+        BoundedFake bounded = new BoundedFake();
+        ConnectorRegistry registry = mock(ConnectorRegistry.class);
+        when(registry.resolvePullConnector("NAVER")).thenReturn(Optional.of(bounded));
+        ResponsibilitySources sources = mock(ResponsibilitySources.class);
+        when(sources.resolve(any(), any())).thenReturn(List.of());
+
+        ApiReadPreflight.Report r = new ApiReadPreflight(registry, accounts, channels, sources, CLOCK).run(ORG, 7, 50);
+
+        assertThat(bounded.calls).isEmpty();
+        assertThat(bounded.asked).containsExactly("2026-09-16..2026-09-22/50");
+        assertThat(r.rows()).filteredOn(x -> x.dataType().equals("INQUIRY")).extracting(ApiReadPreflight.Row::source,
+                ApiReadPreflight.Row::outcome).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("A", "SUCCESS"),
+                org.assertj.core.groups.Tuple.tuple("B", "FAILED"),
+                org.assertj.core.groups.Tuple.tuple("C", "NOT_WIRED"));
+        assertThat(r.rows()).filteredOn(x -> "B".equals(x.source())).singleElement()
+                .satisfies(x -> assertThat(x.failureType()).isEqualTo("IllegalStateException"));
     }
 }
