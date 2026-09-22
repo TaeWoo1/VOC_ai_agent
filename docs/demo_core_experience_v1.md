@@ -264,3 +264,7 @@ frontend **161 files / 2,244 tests** · `tsc` clean (frontend·agent-runtime).
   말한다(`docs/demo_runbook_v1.md` §1).
 - 미결정 리뷰의 `investigated`·`knowledgeUsed`를 rule lane이 기록하지 않는다 — 화면은 초안이
   인용하는 동안 침묵할 뿐, 빈 칸 자체는 backend의 것이다.
+
+**외부 판매자 검증 준비는 `docs/demo_seller_validation_v1.md`가 소유한다** — preflight, 10~15분 시나리오,
+장면별 가치 한 줄, 관찰 항목, 장애 runbook 링크. 그 문서는 제품을 정의하지 않고 이 §12를 보이는 방법만
+적는다.

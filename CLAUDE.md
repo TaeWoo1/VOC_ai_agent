@@ -145,7 +145,9 @@ locator는 여전히 화면에 없다); 발췌는 드래프터가 실제로 본 
 첫 화면은 운영 Dashboard, 상품 화면과 Product Knowledge/RAG는 데모 필수, Agent는 어디서든, 그리고
 Agent reasoning graph는 여전히 **WRITE 0**(marketplace WRITE는 승인 뒤 별도 Action Executor). 기존
 canonical technical 문서를 덮어쓰지 않고 그 위에서 **화면과 경험의 순서**만 정한다. 매출 semantics는
-채널마다 다르며 그 감사 결과가 §4.1에 있다. UX 감사와 재설계 원칙: `docs/frontend_ux_audit_v1.md` ·
+채널마다 다르며 그 감사 결과가 §4.1에 있다. **2026-09-22 freeze는 §12**이고, 그것을 외부 판매자에게
+보이는 방법(preflight · 10~15분 시나리오 · 장면별 가치 · 관찰 항목 · 장애 runbook)은
+**`docs/demo_seller_validation_v1.md`**가 소유한다 — 제품을 정의하지 않는다. UX 감사와 재설계 원칙: `docs/frontend_ux_audit_v1.md` ·
 **`docs/demo_ux_polish_v1.md`** (Demo UX Polish v1 — 기능 추가 0, `frontend/` 전용. 실제 Demo Org로
 16개 화면을 렌더 기준 감사한 뒤 P0/P1만 고쳤다: 채널이 보낸 **원본 HTML/엔티티가 문의·리뷰 본문에
 그대로 노출**되던 것을 표시 단계에서만 벗기고(`lib/plainText.ts` — 저장된 행 무변경, 태그는 해석하지

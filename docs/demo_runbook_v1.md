@@ -210,6 +210,13 @@ npm run serve                         # http://127.0.0.1:8787
 
 ## 3. Screen order (the walkthrough)
 
+> **This table is the A7 (2026-08-18) product assembly's walkthrough, and it is not the only one.**
+> Demo Core froze a different seven-screen order on 2026-09-22 (홈 → 확인할 일 → Inquiry Case → Review
+> Case → 실행 대기 → 반복 문제 → Memory): `docs/demo_core_experience_v1.md` §12 owns it, and
+> `docs/demo_seller_validation_v1.md` §2 is the script for showing it to an outside seller. Which of the
+> two a session shows is a **product-owner decision**; neither table is deleted here. Everything else in
+> this runbook — start, env, demo org, proof levels, failures — serves both.
+
 | # | Screen | Show | Say |
 |---|---|---|---|
 | 1 | 홈 `/` | 오늘 확인하거나 조치할 일: 확인이 필요한 리뷰 N건 (channel shares), 답변이 필요한 문의 N건, 확인이 필요한 연결 N건; 참고 (메모리 · 리포트); 리뷰 수집 strip | "Every number here is the number the destination screen shows." |
