@@ -104,10 +104,21 @@ export function CapabilityBadges({ channelCode }: { channelCode: string }) {
         <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
           수집 지원 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
-      ) : !data.autoCollectSupported ? (
+      ) : !data.autoCollectSupported && data.deploymentAvailability === "OFF_IN_THIS_DEPLOYMENT" ? (
+        // The channel has an official connector; THIS deployment has it switched off. Saying 「이 채널은 자동 수집을
+        // 지원하지 않습니다」 here told a seller whose channel was connected and collecting something false about the
+        // channel to describe a setting of the service (Full MVP truth fix).
+        <p className="break-keep text-base text-muted" data-testid="capability-deployment-off">
+          이 채널은 공식 API 자동 수집을 지원하지만, 지금 이 서비스 환경에서는 자동 수집이 꺼져 있습니다. 켜는 일은 운영자가 합니다.
+        </p>
+      ) : !data.autoCollectSupported && data.deploymentAvailability === "NO_OFFICIAL_CONNECTOR" ? (
         <p className="text-base text-muted">
           이 채널은 자동 수집을 지원하지 않습니다. 파일 업로드를 이용해 주세요.
         </p>
+      ) : !data.autoCollectSupported ? (
+        // Not stated (an older backend, or a switched-on connector that did not resolve): say what is observed —
+        // nothing collects automatically here — without claiming why.
+        <p className="break-keep text-base text-muted">지금 이 서비스 환경에서는 이 채널을 자동으로 수집하지 않습니다.</p>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">

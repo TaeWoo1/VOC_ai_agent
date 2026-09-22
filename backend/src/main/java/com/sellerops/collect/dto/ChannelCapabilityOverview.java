@@ -50,7 +50,42 @@ public record ChannelCapabilityOverview(
         boolean autoCollectSupported,
         List<DataTypeCapability> dataTypes,
         List<ScopeNote> unsupportedScopes,
-        List<DataTypeCapability> backgroundDataTypes) {
+        List<DataTypeCapability> backgroundDataTypes,
+        String deploymentAvailability) {
+
+    /**
+     * <b>{@code deploymentAvailability} — this deployment, not the channel</b> (Full MVP truth fix, 2026-09-22).
+     *
+     * <p>{@code autoCollectSupported} is false whenever no pull connector resolved here, and a connector does not
+     * resolve when its deployment switch is off. The screen read that one boolean as a statement about the channel
+     * and told a seller whose NAVER was connected and collected 「이 채널은 자동 수집을 지원하지 않습니다」 —
+     * true of this process, false of NAVER. The two facts are separate fields: {@code autoCollectSupported} is
+     * unchanged, and this one says why nothing resolved —
+     *
+     * <ul>
+     *   <li>{@code ON} — a connector resolved in this deployment;</li>
+     *   <li>{@code OFF_IN_THIS_DEPLOYMENT} — the product has an official connector for this channel and this
+     *       deployment has it switched off;</li>
+     *   <li>{@code NO_OFFICIAL_CONNECTOR} — the product has none (file upload, not integrated);</li>
+     *   <li>{@code null} — not stated (a reader that was not given the deployment's switches).</li>
+     * </ul>
+     */
+    public ChannelCapabilityOverview(
+            String channelCode,
+            String channelNameKo,
+            String connectorClass,
+            boolean autoCollectSupported,
+            List<DataTypeCapability> dataTypes,
+            List<ScopeNote> unsupportedScopes,
+            List<DataTypeCapability> backgroundDataTypes) {
+        this(channelCode, channelNameKo, connectorClass, autoCollectSupported, dataTypes, unsupportedScopes,
+                backgroundDataTypes, null);
+    }
+
+    public ChannelCapabilityOverview withDeploymentAvailability(String availability) {
+        return new ChannelCapabilityOverview(channelCode, channelNameKo, connectorClass, autoCollectSupported,
+                dataTypes, unsupportedScopes, backgroundDataTypes, availability);
+    }
 
     /**
      * One data type, with the pull connector's answer and — separately — how SellerOps actually

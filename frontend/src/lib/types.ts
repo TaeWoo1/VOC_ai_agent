@@ -643,6 +643,11 @@ export interface ChannelCapabilityOverview {
   autoCollectSupported: boolean;
   dataTypes: DataTypeCapability[];
   unsupportedScopes: ScopeNote[];
+  /**
+   * Why a connector did or did not resolve in THIS deployment — a fact about the process, not the channel
+   * (Full MVP truth fix). Absent from older backends; absent means 「not stated」.
+   */
+  deploymentAvailability?: "ON" | "OFF_IN_THIS_DEPLOYMENT" | "NO_OFFICIAL_CONNECTOR" | null;
 }
 
 // Mirrors com.sellerops.collect.dto.AccountDashboardSummary. Window-scoped totals
