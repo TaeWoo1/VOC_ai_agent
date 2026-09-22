@@ -69,7 +69,14 @@ export function CustomerMemory() {
   // Master-detail (UI/UX v2 Phase 1): on a wide screen the first problem is open when none is chosen. The old
   // first screen was two thirds 「왼쪽에서 이슈를 고르면…」 — an empty panel asking for a click before it said
   // anything. The list order is the server's (worst first), so 「first」 is not a new ranking.
-  const selection = resolveIssueSelection(all, issueId ?? (wide ? groupIssues(visible)[0]?.issues[0]?.id : undefined));
+  // The default is pinned once chosen: acting on a problem can move it to another group, and a default recomputed
+  // from the new order would swap the pane to a different problem under the seller's cursor.
+  const [pinned, setPinned] = useState<string | null>(null);
+  const firstId = groupIssues(visible)[0]?.issues[0]?.id ?? null;
+  useEffect(() => {
+    if (wide && !issueId && pinned === null && firstId) setPinned(firstId);
+  }, [wide, issueId, pinned, firstId]);
+  const selection = resolveIssueSelection(all, issueId ?? (wide ? pinned ?? firstId ?? undefined : undefined));
   const found = selection.kind === "FOUND" ? selection.issue : null;
 
   const head = (

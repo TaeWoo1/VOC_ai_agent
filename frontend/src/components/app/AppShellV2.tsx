@@ -20,7 +20,11 @@ const AGENT_BRIDGE_ENABLED = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true"
 const AGENT_PROJECTION_ENABLED = import.meta.env.VITE_ENABLE_AGENT_PROJECTION === "true";
 
 /** Pages drawn as a list beside a detail pane — each column scrolls on its own. */
-const MASTER_DETAIL_ROUTES = [/^\/customer-operations\/cases\/?$/, /^\/memory(\/[^/]+)?\/?$/];
+const MASTER_DETAIL_ROUTES = [
+  /^\/customer-operations\/cases\/?$/,
+  /^\/memory(\/[^/]+)?\/?$/,
+  /^\/inquiries(\/[^/]+)?\/?$/,
+];
 
 /**
  * Application shell for the v2 product surface.
@@ -81,7 +85,7 @@ export function AppShellV2() {
             <main
               id="main-content"
               tabIndex={-1}
-              className="flex-1 overflow-y-auto px-4 pb-28 pt-5 outline-none md:px-8 md:pb-10 md:pt-6"
+              className="relative flex-1 overflow-y-auto px-4 pb-28 pt-5 outline-none md:px-8 md:pb-10 md:pt-6"
             >
               {/* Left-aligned content column, 1120px (docs/reviewnary_design.md §2): a work surface reads
                   from the top-left, and a centred column on a wide monitor floats the page away from the

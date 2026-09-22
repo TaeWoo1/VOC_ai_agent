@@ -354,6 +354,31 @@ describe("고객운영 메모리 — 우리가 써 둔 것", () => {
   });
 });
 
+describe("반복 문제 — the list follows the detail (UI/UX v2 Phase 2)", () => {
+  it("a state change that succeeded shows in the list at once — the row does not keep its old word", async () => {
+    const acting = { ...SURGING, lifecycleState: "ACTING" as const, lifecycleLabelKo: "조치 중" };
+    startReviewIssueAction.mockResolvedValue(acting);
+    const restore = stubWide(true);
+    try {
+      renderMemory("/memory/issue-1");
+      const list = await screen.findByLabelText("반복 이슈 목록");
+      const before = within(list).getByRole("link", { name: /접착력이 약하다는/ });
+      expect(before).toHaveTextContent("확인 필요");
+
+      fireEvent.click(await screen.findByRole("button", { name: "조치 시작" }));
+
+      await waitFor(() =>
+        expect(within(screen.getByLabelText("반복 이슈 목록")).getByRole("link", { name: /접착력이 약하다는/ }))
+          .toHaveTextContent("조치 중"),
+      );
+      // The pane still shows the same problem — acting on it must not swap the selection.
+      expect(screen.getByLabelText("선택한 이슈")).toHaveTextContent(SURGING.title);
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe("고객운영 메모리 — 판단과 조치", () => {
   /**
    * The note is why this section exists. Both transitions have accepted an operator note since the

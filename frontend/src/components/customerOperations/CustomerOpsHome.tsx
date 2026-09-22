@@ -14,7 +14,7 @@ import { dataTypeKo, kstClock } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
-import type { HomePreparedItem, InquiryQueueResponse, OperationsHome } from "../../lib/types";
+import type { HomePreparedItem, InquiryQueueResponse, OperationsHome, ReviewIssueView } from "../../lib/types";
 
 /** How many rows the list shows before 「+N」. */
 export const HOME_ROWS = 5;
@@ -250,12 +250,15 @@ export function TodayWorkspace({
   ops,
   now = new Date(),
   onChanged,
+  onProblemChanged,
   dock,
 }: {
   co: CustomerOperationsHome;
   ops: OperationsHome | null | undefined;
   now?: Date;
   onChanged: () => void;
+  /** A repeated problem changed state in the pane — the list beside it must say so at once. */
+  onProblemChanged?: (next: ReviewIssueView) => void;
   dock: ReactNode;
 }) {
   const wide = useWideLayout();
@@ -275,7 +278,7 @@ export function TodayWorkspace({
       detail = <ReviewCaseView key={key} reviewId={prepared.id} variant="pane" />;
     } else if (problem) {
       selectedKey = key;
-      detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={() => undefined} />;
+      detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={onProblemChanged ?? (() => undefined)} />;
     } else {
       const row = selectedRow(work.rows.slice(0, HOME_ROWS), key) ?? null;
       const any = key ? work.rows.find((r) => r.key === key) : undefined;

@@ -48,6 +48,7 @@ import type {
   TriageEventView,
   ChannelReviewLocateRun,
   ChannelReviewPageView,
+  ReviewRecordPageView,
   ReviewTriageTier,
   ConnectionInfoView,
   ConnectionCapabilityView,
@@ -2096,6 +2097,30 @@ export const api = {
    * rendering invented reviews would be the one failure a seller cannot detect — they have no other
    * copy of what buyers wrote to check it against.
    */
+  /**
+   * One page of the organisation's review record (UI/UX v2 Phase 2) — every seller-visible channel, or the one in
+   * `channel`. The server orders, filters, pages and counts; nothing is merged here. No mock fallback, for the same
+   * reason the channel record has none.
+   */
+  async getReviewRecordStrict(
+    params: {
+      channel?: string;
+      sort?: "attention" | "newest" | "lowest";
+      tier?: ReviewTriageTier;
+      page?: number;
+      size?: number;
+    } = {},
+  ): Promise<ReviewRecordPageView> {
+    const query = new URLSearchParams();
+    if (params.channel) query.set("channel", params.channel);
+    if (params.sort) query.set("sort", params.sort);
+    if (params.tier) query.set("tier", params.tier);
+    if (params.page !== undefined) query.set("page", String(params.page));
+    if (params.size !== undefined) query.set("size", String(params.size));
+    const { data } = await http.get<ReviewRecordPageView>(`/api/reviews/record${query.toString() ? `?${query}` : ""}`);
+    return data;
+  },
+
   async getChannelReviewsStrict(
     accountId: string,
     params: {

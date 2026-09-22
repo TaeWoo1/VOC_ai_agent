@@ -21,7 +21,7 @@ import { COPY } from "../../lib/copy/customerOps";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import { hasAnythingToShow } from "../../lib/operationsHome";
 import type { InquiryListArtifact, InquiryListArtifact as InquiryList, ListArtifact } from "../../lib/conversation/types";
-import type { InquiryQueueResponse, MetricKpi, OperationsHome, OverviewResponse, ProactiveCaseListResponse } from "../../lib/types";
+import type { InquiryQueueResponse, MetricKpi, OperationsHome, OverviewResponse, ProactiveCaseListResponse, ReviewIssueView } from "../../lib/types";
 
 /**
  * 홈 — the Agent operating workspace (Agentic Operating Workspace v2 §3-C).
@@ -80,6 +80,29 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
     return () => {
       live = false;
     };
+  }, []);
+
+  /**
+   * A repeated problem changed state in the 오늘 pane (UI/UX v2 Phase 2). The server's answer is the new truth, so
+   * the row in the list is replaced with it at once — no stale lifecycle word beside a pane that says otherwise —
+   * and the Home read runs again for the counts only it can recompute. A failed re-read keeps what is on screen.
+   */
+  const onProblemChanged = useCallback((next: ReviewIssueView) => {
+    setHome((current) =>
+      current
+        ? {
+            ...current,
+            problems: {
+              ...current.problems,
+              rows: current.problems.rows.map((row) => (row.issue.id === next.id ? { ...row, issue: next } : row)),
+            },
+          }
+        : current,
+    );
+    void api
+      .getOperationsHomeStrict()
+      .then((r) => setHome(r))
+      .catch(() => undefined);
   }, []);
 
   /**
@@ -347,7 +370,16 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
       // four chips under the box every morning were the same four sentences, and the box already says what it takes.
       emptyLayout={
         coHome
-          ? (dock) => <TodayWorkspace co={coHome} ops={home} now={now} onChanged={() => void loadCo()} dock={dock} />
+          ? (dock) => (
+              <TodayWorkspace
+                co={coHome}
+                ops={home}
+                now={now}
+                onChanged={() => void loadCo()}
+                onProblemChanged={onProblemChanged}
+                dock={dock}
+              />
+            )
           : undefined
       }
     />

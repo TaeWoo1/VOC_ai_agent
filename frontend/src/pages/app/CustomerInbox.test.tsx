@@ -414,3 +414,50 @@ describe("accessibility", () => {
     await expectNoAxeViolations(container);
   });
 });
+
+describe("master-detail (UI/UX v2 Phase 2) — the list and the chosen inquiry, side by side", () => {
+  it("on a wide screen opens the first row of 지금 처리할 일 beside the list, without a click", async () => {
+    const restore = stubWide(true);
+    try {
+      getInquiryQueueStrict.mockImplementation(
+        queueOf([
+          queued({ workItemId: "w-newest", inquiryId: "newest", receivedAt: new Date(Date.now() - 3_600_000).toISOString() }),
+          queued({ workItemId: "w1", inquiryId: "i1", receivedAt: new Date(Date.now() - 7 * 86_400_000).toISOString() }),
+        ]),
+      );
+      renderInbox();
+      // The row the list itself puts first — the one that has waited longest this year — is the one open.
+      const pane = await screen.findByLabelText("선택한 문의");
+      expect(pane).toBeInTheDocument();
+      await waitFor(() => expect(getInquiryDetailStrict).toHaveBeenCalledWith("w1"));
+      const queue = screen.getByLabelText("지금 처리할 일");
+      expect(within(queue).getAllByRole("link")[0]).toHaveAttribute("aria-current", "true");
+    } finally {
+      restore();
+    }
+  });
+
+  it("on a narrow screen the chosen inquiry takes the column, with the way back to the list", async () => {
+    renderInbox("/inquiries/i1");
+    expect(await screen.findByRole("link", { name: "← 문의 목록" })).toHaveAttribute("href", "/inquiries");
+    expect(screen.queryByLabelText("전체 문의")).toBeNull();
+  });
+});
+
+/** Stands the list and the detail side by side, as the layout does at 1200px and up. Returns the restore. */
+function stubWide(matches: boolean): () => void {
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  return () => {
+    window.matchMedia = original;
+  };
+}

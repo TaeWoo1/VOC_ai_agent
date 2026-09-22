@@ -86,14 +86,14 @@ export function shownRangeLabel(page: ChannelReviewPageView | null): string {
  * `word` + the particle that fits its last syllable — 리뷰를 / 상품평을. Hangul syllables encode the
  * final consonant in their code point; anything else (Latin, digits) takes the vowel form.
  */
-function josa(word: string, afterConsonant: string, afterVowel: string): string {
+export function josa(word: string, afterConsonant: string, afterVowel: string): string {
   const last = word.charCodeAt(word.length - 1);
   const hangul = last >= 0xac00 && last <= 0xd7a3;
   const hasBatchim = hangul && (last - 0xac00) % 28 !== 0;
   return `${word}${hasBatchim ? afterConsonant : afterVowel}`;
 }
 
-function parseTierParam(value: string | null): ReviewTriageTier | null {
+export function parseTierParam(value: string | null): ReviewTriageTier | null {
   return value !== null && (TRIAGE_TIERS as string[]).includes(value) ? (value as ReviewTriageTier) : null;
 }
 
@@ -343,7 +343,8 @@ export function ChannelReviews({
       */}
       {page ? (
         <TriageSummary
-          page={page}
+          summary={page.triageSummary}
+          newCount={page.newCount}
           word={word}
           showOnlyAttention={
             tier === "NEEDS_ATTENTION"
@@ -801,7 +802,7 @@ function ReviewDetail({
  * is ordered by, and a correction does not reorder anything. Emphasising it would make the row look
  * like it had moved.
  */
-function SellerCorrectionChip({ tier }: { tier: ReviewTriageTier }) {
+export function SellerCorrectionChip({ tier }: { tier: ReviewTriageTier }) {
   return (
     <span className="inline-flex items-center rounded-full bg-canvas px-2 py-0.5 text-xs font-medium text-muted">
       {TRIAGE_CORRECTION_COPY.sellerPrefix} {TRIAGE_CORRECTION_LABEL[tier]}
@@ -833,12 +834,15 @@ function TriageReason({ note }: { note: ReviewTriageNote }) {
  * Every number here describes the CHANNEL, never the page and never the active filter — so the chips
  * keep pointing at the parts of the record the operator is not currently looking at.
  */
-function TriageSummary({
-  page,
+export function TriageSummary({
+  summary,
+  newCount,
   word,
   showOnlyAttention,
 }: {
-  page: ChannelReviewPageView;
+  /** The UNFILTERED picture — the channel's on the channel record, the organisation's on the org record. */
+  summary: ChannelReviewPageView["triageSummary"];
+  newCount: number;
   word: string;
   /**
    * Narrows the list to 확인 필요, or null when it already is.
@@ -850,7 +854,7 @@ function TriageSummary({
    */
   showOnlyAttention?: (() => void) | null;
 }) {
-  const { needsAttention, repeatedCategories } = page.triageSummary;
+  const { needsAttention, repeatedCategories } = summary;
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
@@ -862,7 +866,7 @@ function TriageSummary({
           ) : (
             `지금 확인이 필요한 ${josa(word, "은", "는")} 없습니다`
           )}
-          {page.newCount > 0 ? <span className="text-sm font-normal text-muted"> · 새로 들어온 {page.newCount}건</span> : null}
+          {newCount > 0 ? <span className="text-sm font-normal text-muted"> · 새로 들어온 {newCount}건</span> : null}
         </p>
         {needsAttention > 0 && showOnlyAttention ? (
           <Btn size="sm" onClick={showOnlyAttention}>
@@ -922,7 +926,7 @@ function pad(n: number): string {
 }
 
 /** One segment of a segmented control — the same shape the sort control and the home window control use. */
-function SegmentBtn({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: React.ReactNode }) {
+export function SegmentBtn({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"

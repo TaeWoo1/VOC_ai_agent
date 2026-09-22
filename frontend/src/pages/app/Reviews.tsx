@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Empty } from "../../components/ui/Empty";
 import { BtnLink } from "../../components/ui/Btn";
@@ -9,6 +9,7 @@ import { reviewAccounts, type ReviewAccount } from "../../lib/reviewAccounts";
 import { reviewRecordPath } from "../../lib/reviewRecord";
 import type { ChannelResponse, SellerAccountResponse } from "../../lib/types";
 import { ChannelReviews } from "./ChannelReviews";
+import { ReviewRecord } from "./ReviewRecord";
 import { ProductReviews } from "../../components/reviews/ProductReviews";
 import { useAgentSurface } from "../../lib/agentPanel";
 
@@ -22,7 +23,6 @@ import { useAgentSurface } from "../../lib/agentPanel";
  */
 export function Reviews() {
   const { accountId } = useParams();
-  const { search } = useLocation();
   const [searchParams] = useSearchParams();
   // The product a doorway narrowed this surface to (Product Operations Continuity v1 §1). It is an
   // axis, not a destination of its own: with it the page answers 「이 상품의 리뷰」 across the org,
@@ -106,8 +106,21 @@ export function Reviews() {
       </>
     );
   }
+  // UI/UX v2 Phase 2 (product-owner decision): the default is the organisation's record over every channel, with
+  // the channel as a filter. It used to redirect into the FIRST account's record, so the screen's first answer was
+  // one channel the seller never chose. The channel record stays at `/reviews/:accountId` for what only one account
+  // can answer.
   if (!accountId) {
-    return <Navigate to={`${reviewRecordPath(targets[0].account.id)}${search}`} replace />;
+    return (
+      <div className="space-y-5">
+        <PageHead
+          title="리뷰"
+          meta={<span className="text-sm text-muted">{REVIEWS_DESCRIPTION}</span>}
+          action={<AgentLaunch context={{ surface: "reviews" }} label="리뷰에 대해 물어보기" />}
+        />
+        <ReviewRecord targets={targets} />
+      </div>
+    );
   }
 
   const selected = targets.find((t) => t.account.id === accountId) ?? null;
@@ -118,6 +131,11 @@ export function Reviews() {
         meta={<span className="text-sm text-muted">{REVIEWS_DESCRIPTION}</span>}
         action={
           <>
+            {/* The organisation's record is the default now; one account's record is a step in, so it offers the
+                way back out. */}
+            <BtnLink to="/reviews" variant="ghost" size="sm">
+              전체 채널 리뷰
+            </BtnLink>
             {targets.length > 1 ? <ChannelSwitcher targets={targets} selectedAccountId={accountId} /> : null}
             <AgentLaunch context={{ surface: "reviews" }} label="리뷰에 대해 물어보기" />
           </>

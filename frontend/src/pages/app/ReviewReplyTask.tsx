@@ -73,7 +73,13 @@ export function ReviewReplyTask() {
   const { reviewId = "" } = useParams();
   const [params] = useSearchParams();
   const from = params.get("from");
-  return <ReviewCaseView reviewId={reviewId} variant="page" from={from === "chat" || from === "work" ? from : null} />;
+  return (
+    <ReviewCaseView
+      reviewId={reviewId}
+      variant="page"
+      from={from === "chat" || from === "work" || from === "record" ? from : null}
+    />
+  );
 }
 
 /**
@@ -93,7 +99,7 @@ export function ReviewCaseView({
   reviewId: string;
   variant: CaseVariant;
   /** Where a full page was opened from — decides which way back it offers. */
-  from?: "chat" | "work" | null;
+  from?: "chat" | "work" | "record" | null;
 }) {
   const pane = variant === "pane";
 
@@ -213,6 +219,10 @@ export function ReviewCaseView({
       {from === "work" ? (
         <Link to="/customer-operations/cases" className="text-sm font-semibold text-muted hover:text-ink hover:underline">
           ← {COPY.listTitle}
+        </Link>
+      ) : from === "record" ? (
+        <Link to="/reviews" className="text-sm font-semibold text-muted hover:text-ink hover:underline">
+          ← 리뷰
         </Link>
       ) : (
         <Link to={recordPath} className="text-sm font-semibold text-muted hover:text-ink hover:underline">

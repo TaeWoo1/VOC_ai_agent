@@ -491,3 +491,98 @@ frontend **257 files / 3,084 tests / 실패 0** · typecheck clean · backend �
   (`onIssueChanged`가 AgentHome의 operations read를 다시 부르지 않음. 표시만 늦을 뿐 기록은 즉시 서버에 있다)
 - 문의 pane은 제목을 sr-only로 둔다(응답 패널이 고객 문장을 첫 줄로 이미 그리므로)
 - 1200px 미만에서는 master-detail이 아니다(좁은 화면은 예전처럼 행 → 전체 화면)
+
+---
+
+## 10. Phase 2 구현 결과 (2026-09-22)
+
+**결정**: backend 수정 허용, 제품 의미 변경 금지. 새 AI 기능·판정·workflow 의미 0.
+
+### 10-1. 리뷰 기록 — 조직 전체 목록, 채널은 필터
+
+- **backend: 읽기 전용 endpoint 하나** `GET /api/reviews/record?channel=&sort=&tier=&page=&size=`
+  (`ReviewRecordController` · `ChannelReviewService.record` · `ReviewRecordPageView`).
+  - 기존 채널 기록의 JPQL(`FINAL_TIER_RANK` 정렬, tier 필터, `최신순`, NULLS-LAST `낮은 평점순`)을 그대로 쓰고,
+    바꾼 것은 `r.channelId = :channelId` → `r.channelId in :channelIds` 한 곳이다. 새 repository 메서드를 두어
+    기존 채널 read는 바이트 그대로다.
+  - 채널 집합은 `ProductChannels.VISIBLE_CODES`다. 알 수 없는 채널과 알 수 없는 정렬은 400으로 거절하고 넓히지 않는다.
+  - 행의 「같은 분류 N건」은 **자기 채널 안에서** 센다(채널 기록과 같은 note). 「새로 들어온」도 자기 채널의 마지막
+    import 기준이다. 합산하는 것은 total · tier 수 · new 수 · 반복 분류뿐이다.
+  - 요약은 채널 기록과 마찬가지로 **필터 전** 그림이다. `summary()`는 `summaryOf()`로 나눠 두 scope가 같은 규칙을 쓴다.
+- **동등성 증명**(`ReviewRecordIT` 7개, 실제 DB):
+  - `channel=X` 결과가 그 채널 기록과 **행 순서 · total · 요약까지 동일**하다(세 정렬 모두).
+  - tier 필터 결과는 채널별 결과의 합이고, 요약은 채널별 요약의 합이다.
+  - 행 note는 채널 기록의 note와 같다.
+  - 페이지를 넘겨도 누락·중복이 없다.
+  - 알 수 없는 채널·정렬은 거절한다. 다른 조직 행은 제외된다.
+- **라이브 PostgreSQL**(Demo Org):
+  - 전체 4,599건(확인 필요 15 · 지켜보기 122 · 참고 4,462).
+  - `channel=NAVER` 4,432건(14 · 104 · 4,314)은 기존 계정 기록과 정확히 같다.
+  - `channel=COUPANG` 33건.
+  - backend.log ERROR 0.
+- **frontend** `ReviewRecord`:
+  - `/reviews`는 더 이상 첫 계정으로 redirect하지 않는다. 채널은 `?channel=` 필터(「전체 채널 · 네이버 · 쿠팡 · 카페24」)다.
+  - 분류 탭 · 정렬 · 페이지는 서버 의미 그대로다. **FE에서 목록을 합치지 않는다**(read 1회).
+  - 행은 3줄(상태 · ★ · 채널 · 날짜 / 고객 문장 / 상품)이고 Review Case(`?from=record` → 「← 리뷰」)를 연다.
+  - 「내 답변 작업」은 계정 단위라서 답변 흐름이 있는 **계정마다 따로**, 채널 이름을 붙여 그린다. 서로 다른 목록이며
+    합치지 않는다. 답변 가능 여부는 서버에 묻는다(계정별 size-1 read, 채널 코드로 추론하지 않음).
+  - 계정 기록(`/reviews/:accountId`)은 그대로다. `[쿠팡에서 보기]` · AI pilot 컨트롤처럼 계정만 답하는 것이
+    남아 있고, 「전체 채널 리뷰」로 나가는 길을 붙였다.
+
+### 10-2. 문의 기록 — master-detail
+
+- `/inquiries`와 `/inquiries/:id`는 `MasterDetail`로 바뀌었다. 목록과 상세가 **각자 스크롤**한다.
+- 상세는 `CaseLayout` pane 읽기 순서를 쓰고, 응답 패널(`InboxDetail` → `InquiryResponsePanel`)이 고객 문장 · 채널 ·
+  상품 · 시각을 자기 첫 블록으로 그리므로 layout은 **두 번째 사본을 그리지 않는다**.
+- 넓은 화면에서 아무것도 고르지 않았으면 「지금 처리할 일」 첫 행(목록 스스로 먼저 보라고 하는 행)이 열린다.
+- 1200px 미만에서는 고른 문의가 열 전체를 쓰고, 그 위에 「← 문의 목록」이 있다.
+- 부수로 찾은 결함: **절대 위치 `sr-only` 요소가 문서 기준으로 배치돼 페이지 자체가 viewport보다 길어지던 것**을 고쳤다
+  (before `/inquiries` 문서 1,967~2,403px, `/reviews` 1,715px). `MasterDetail`의 두 scroller와 셸 기본 `main`을
+  `relative`로 해서 담는 쪽이 containing block이 된다. after에서는 모든 route의 문서 높이가 viewport와 같다.
+
+### 10-3. 반복 문제 — 상태 변경 즉시 동기화
+
+- `/memory`: 상세의 성공 응답(`startReviewIssueAction` / `markReviewIssueRemediated`의 반환값)으로 목록 행을 곧바로
+  교체한다(원래 경로). 넓은 화면의 기본 선택은 **고정**했다. 상태가 바뀌어 그룹이 바뀌어도 pane이 다른 문제로
+  건너뛰지 않는다. 새 테스트가 행 단어 즉시 변경과 선택 유지를 단언한다.
+- **오늘 pane**: 예전에는 `onIssueChanged`가 no-op이었다. 이제 서버 응답으로 오늘의 반복 문제 행을 즉시 바꾸고,
+  건수를 위해 Home read를 한 번 더 한다(실패하면 화면에 있는 것을 유지).
+  **라이브 미검증**이다. 검증하려면 Demo Org 이슈 상태를 실제로 바꿔야 해서 하지 않았다.
+
+### 10-4. before / after
+
+| route | 폭 | 문서 높이 before → after | scroll 구조 before → after | axe | 가로 스크롤 |
+|---|---|---|---|---|---|
+| `/reviews` | 1440 | **1,715 → 900** | 네이버 계정 기록 4,830 → 조직 기록 3,884 | 0 | 0 |
+| `/reviews` | 1152 | **1,745 → 720** | 4,860 → 3,884 | 0 | 0 |
+| `/inquiries` | 1440 | **1,967 → 900** | 한 열 5,769 → 목록 6,824 ∥ 상세 1,103 (독립) | 0 | 0 |
+| `/inquiries` | 1152 | **1,967 → 720** | 5,769 → 목록 6,254 | 0 | 0 |
+| `/inquiries/:id` | 1440 | **2,403 → 900** | rail 340px 7,071 + 상세 → 목록 652px ∥ 상세 556px, 각자 스크롤 | 0 | 0 |
+| `/inquiries/:id` | 1152 | **2,403 → 720** | rail 340px + 상세 496px → **상세만 1,014** + 「← 문의 목록」 | 0 | 0 |
+| `/memory` | 1440 / 1152 | 900 / 720 (무변경) | 목록 ∥ 상세 / 목록 | 0 | 0 |
+
+off-host 요청 0 · page error 0. before는 Phase 1 커밋 상태를 같은 스크립트로 찍었다(작업 트리를 잠시 stash).
+
+### 10-5. route별 남은 문제
+
+| route | 문제 | 분류 |
+|---|---|---|
+| `/reviews` | 「내 답변 작업」(계정별 승인 대기 목록)이 첫 화면을 차지해 조직 기록이 fold 아래에서 시작한다. 행마다 「작업에서 제외」 밑줄 링크가 남아 있다 | 다음 단계. 이 목록을 확인할 일 쪽으로 옮길지는 IA 결정 |
+| `/reviews` | 리뷰 행은 Review Case **전체 화면**을 연다(master-detail 아님) | 이번 지시 범위 밖(리뷰는 목록만) |
+| `/reviews` | 채널 필터는 조직에 계정이 있는 채널만 보인다. 계정 없이 업로드만 된 GMARKET 리뷰 11건은 여전히 상품 범위 기록에서만 보인다 | 기존 product-owner 결정(ProductChannels) |
+| `/reviews/:accountId` | 옛 레이아웃(인라인 상세 · 행 5줄)이 그대로다 | Phase 3 |
+| `/inquiries` | 목록 열이 6,824px다. 큐 24 + 기록 50행이 한 열에 있다. 이제 독립 스크롤이지만 길이는 데이터의 길이다 | 기록을 탭으로 나눌지는 IA 결정 |
+| `/inquiries/:id` | 응답 패널 내부(초안 · 근거 · 답변 보내기)의 위계는 손대지 않았다 | 응답 패널 재조립은 별도 |
+| 오늘 | 반복 문제 즉시 동기화 **라이브 미검증** | 데이터 쓰기가 필요 |
+| 전체 | agent-runtime 미기동 시 콘솔 오류 2건(기존, 알려진 원인) | 해당 없음 |
+
+### 10-6. 테스트
+
+- **backend**: **4,764 tests / 실패 0 / 오류 0**(+7: `ReviewRecordIT`). 기존 `ChannelReviewTriageIT` ·
+  `ChannelReviewServiceTest` 그대로 통과. 마이그레이션 0.
+- **frontend**: **257 files / 3,089 tests / 실패 0**, typecheck clean.
+- **계약이 바뀌어 다시 쓴 테스트**: `Reviews.test` 2건(「첫 계정으로 redirect」 → 「조직 기록 + 채널 필터」, 단일 계정
+  switcher 테스트는 계정 route로 이동).
+- **새로 추가**: 리뷰 행이 Review Case를 연다 · 문의 넓은 화면 기본 선택 · 좁은 화면 되돌아가기 · 반복 문제 즉시 동기화와
+  선택 유지.
+- 안전 테스트 약화 0. 마켓플레이스 0 · WRITE 0 · 모델 0 · DB 행 변경 0.

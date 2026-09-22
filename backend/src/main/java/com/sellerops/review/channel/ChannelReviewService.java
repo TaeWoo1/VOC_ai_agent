@@ -17,6 +17,7 @@ import com.sellerops.review.channel.dto.ChannelReviewDetailView;
 import com.sellerops.review.channel.dto.ChannelReviewItemView;
 import com.sellerops.review.channel.dto.ChannelReviewPageView;
 import com.sellerops.review.channel.dto.ChannelReviewTriageSummaryView;
+import com.sellerops.review.channel.dto.ReviewRecordPageView;
 import com.sellerops.review.triage.ReviewTriageNote;
 import com.sellerops.review.triage.ReviewTriageRules;
 import com.sellerops.review.triage.ReviewTriageTier;
@@ -216,6 +217,119 @@ public class ChannelReviewService {
                 capabilityOf(orgId, account),
                 summary(orgId, channelId, categoryCounts),
                 items);
+    }
+
+    /**
+     * The organisation's record: {@link #list}'s answer over every seller-visible channel, or the one named by
+     * {@code channel} (UI/UX v2 Phase 2).
+     *
+     * <p><b>Nothing about a row changes with the scope.</b> The order is the same {@code FINAL_TIER_RANK}, the tier
+     * filter the same expression, a row's 「같은 분류 N건」 is still counted within ITS OWN channel, and 「새로
+     * 들어온」 is still dated against its own channel's last import. What is summed is only what is naturally a sum:
+     * the total, the tier counts, the new count and the repeating categories of the channels in scope.
+     *
+     * <p>An unknown channel is refused rather than widened — a seller who asked for one channel and silently got all
+     * three would read the answer as that channel's. A visible channel absent from the catalogue simply contributes
+     * nothing.
+     */
+    public ReviewRecordPageView record(UUID orgId, String channel, String sort, String tier, int page, int size) {
+        List<String> codes = visibleCodes(channel);
+        Map<UUID, Channel> byId = new LinkedHashMap<>();
+        for (String code : codes) {
+            channels.findByCode(code).ifPresent(c -> byId.put(c.getId(), c));
+        }
+        String requestedSort = sort == null || sort.isBlank() ? SORT_ATTENTION : sort;
+        Integer tierRank = tier == null || tier.isBlank() ? null
+                : ReviewTriageRules.rank(ReviewTriageTier.parse(tier));
+        Pageable pageable = PageRequest.of(Math.max(0, page), clampSize(size));
+        boolean aiEnabled = pilot.isEnabledFor(orgId);
+        if (byId.isEmpty()) {
+            return new ReviewRecordPageView(pageable.getPageNumber(), pageable.getPageSize(), 0, 0, aiEnabled,
+                    codes, new ChannelReviewTriageSummaryView(0, 0, 0, 0, List.of()), List.of());
+        }
+        List<UUID> channelIds = List.copyOf(byId.keySet());
+
+        Page<Review> found = findRecordPage(orgId, channelIds, requestedSort, tierRank, aiEnabled, pageable);
+
+        Map<UUID, Instant> newSince = new java.util.HashMap<>();
+        long newCount = 0;
+        for (UUID channelId : channelIds) {
+            Instant since = lastReviewImport(orgId, channelId).map(SyncJob::getStartedAt).orElse(null);
+            if (since != null) {
+                newSince.put(channelId, since);
+                newCount += reviews.countByOrgIdAndChannelIdAndCreatedAtGreaterThanEqual(orgId, channelId, since);
+            }
+        }
+
+        Map<UUID, Map<String, Long>> countsByChannel = new java.util.HashMap<>();
+        Map<String, Long> countsInScope = new LinkedHashMap<>();
+        for (Object[] row : reviews.countByChannelsGroupedByChannelAndCategory(orgId, channelIds)) {
+            if (row[1] == null) continue;
+            long n = ((Number) row[2]).longValue();
+            countsByChannel.computeIfAbsent((UUID) row[0], k -> new LinkedHashMap<>()).put((String) row[1], n);
+            countsInScope.merge((String) row[1], n, Long::sum);
+        }
+
+        Map<UUID, Product> byProduct = productsOf(orgId, found.getContent());
+        Map<UUID, String> categories = categoriesOf(orgId, found.getContent());
+        Map<UUID, AiTriageMarkView> marks = marksOf(orgId, found.getContent());
+        Map<UUID, TriageFeedbackRequests.CorrectionView> sellerCorrections = correctionsOf(orgId, found.getContent());
+        Map<UUID, com.sellerops.identity.ExecutableIdentity> identities =
+                identity.forReviews(orgId, found.getContent());
+
+        List<ReviewRecordPageView.Row> items = found.getContent().stream()
+                .map(r -> {
+                    Channel ch = byId.get(r.getChannelId());
+                    ChannelReviewItemView item = item(r, productOf(byProduct, r), newSince.get(r.getChannelId()),
+                            note(r, categories, countsByChannel.getOrDefault(r.getChannelId(), Map.of())),
+                            marks.get(r.getId()), sellerCorrections.get(r.getId()),
+                            identities.getOrDefault(r.getId(), com.sellerops.identity.ExecutableIdentity.NONE));
+                    return new ReviewRecordPageView.Row(ch == null ? null : ch.getCode(),
+                            ch == null ? null : ch.getNameKo(), item);
+                })
+                .toList();
+
+        Map<Integer, Long> byTier = new LinkedHashMap<>();
+        List<Object[]> grouped = aiEnabled
+                ? reviews.countByChannelsGroupedByFinalTierRank(orgId, channelIds)
+                : reviews.countByChannelsGroupedByTierRank(orgId, channelIds);
+        for (Object[] row : grouped) {
+            byTier.put(((Number) row[0]).intValue(), ((Number) row[1]).longValue());
+        }
+        ChannelReviewTriageSummaryView summary = summaryOf(byTier,
+                aiEnabled ? reviews.countAiAttentionByChannels(orgId, channelIds) : 0, countsInScope);
+
+        return new ReviewRecordPageView(found.getNumber(), found.getSize(), found.getTotalElements(), newCount,
+                aiEnabled, byId.values().stream().map(Channel::getCode).toList(), summary, items);
+    }
+
+    /** The seller-visible channel codes in scope: all of them, or the one asked for. */
+    private static List<String> visibleCodes(String channel) {
+        if (channel == null || channel.isBlank()) {
+            return com.sellerops.channel.ProductChannels.VISIBLE_CODES;
+        }
+        String code = channel.strip().toUpperCase(java.util.Locale.ROOT);
+        if (!com.sellerops.channel.ProductChannels.isVisible(code)) {
+            throw ApiException.badRequest("알 수 없는 채널입니다.");
+        }
+        return List.of(code);
+    }
+
+    /** {@link #findPage}, over a set of channels — the same three lenses and the same refusal of anything else. */
+    private Page<Review> findRecordPage(UUID orgId, List<UUID> channelIds, String sort, Integer tierRank,
+                                        boolean aiEnabled, Pageable pageable) {
+        if (SORT_ATTENTION.equals(sort)) {
+            return reviews.findByOrgIdAndChannelIdInTriaged(orgId, channelIds, tierRank, aiEnabled, pageable);
+        }
+        if (SORT_LOWEST.equals(sort)) {
+            return reviews.findByOrgIdAndChannelIdInTriagedLowestFirst(orgId, channelIds, tierRank, aiEnabled, pageable);
+        }
+        if (SORT_NEWEST.equals(sort)) {
+            return reviews.findByOrgIdAndChannelIdInTriagedSorted(orgId, channelIds, tierRank, aiEnabled,
+                    PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                            Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.asc("id"))));
+        }
+        throw ApiException.badRequest("정렬 방식을 알 수 없습니다. (attention / newest / lowest)");
     }
 
     /**
@@ -529,7 +643,17 @@ public class ChannelReviewService {
         for (Object[] row : grouped) {
             byTier.put(((Number) row[0]).intValue(), ((Number) row[1]).longValue());
         }
+        // Zero, and no query, when the pilot is off — the summary then reads as it always did.
+        return summaryOf(byTier, pilot.isEnabledFor(orgId) ? reviews.countAiAttentionByChannel(orgId, channelId) : 0,
+                categoryCounts);
+    }
 
+    /**
+     * The summary from its counts — shared by the channel record and the organisation's record, so the repeating
+     * categories are chosen by one rule whichever scope they were counted over.
+     */
+    private ChannelReviewTriageSummaryView summaryOf(Map<Integer, Long> byTier, long aiAttention,
+                                                     Map<String, Long> categoryCounts) {
         List<ChannelReviewTriageSummaryView.RepeatedCategory> repeated = categoryCounts.entrySet().stream()
                 // 기타 is a stored verdict meaning "we looked and it fitted nothing". Listing it as a
                 // repeating issue would turn the analyzer's shrug into a finding about the seller's product.
@@ -547,8 +671,7 @@ public class ChannelReviewService {
                 tierCount(byTier, ReviewTriageTier.NEEDS_ATTENTION),
                 tierCount(byTier, ReviewTriageTier.WATCH),
                 tierCount(byTier, ReviewTriageTier.FYI),
-                // Zero, and no query, when the pilot is off — the summary then reads as it always did.
-                pilot.isEnabledFor(orgId) ? reviews.countAiAttentionByChannel(orgId, channelId) : 0,
+                aiAttention,
                 repeated);
     }
 

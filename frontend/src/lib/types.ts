@@ -2344,6 +2344,30 @@ export interface ChannelReviewTriageSummaryView {
  * a list of reviews cannot say whether it is all of them, and an acquisition that stopped early
  * looks exactly like a channel with fewer reviews.
  */
+/**
+ * One page of the organisation's review record — `GET /api/reviews/record` (UI/UX v2 Phase 2). The same rows,
+ * order, tier filter and summary as {@link ChannelReviewPageView}, over every seller-visible channel or the one
+ * the seller filtered to. What only one channel can answer (its capability row, its last import) is not here;
+ * each row carries its own channel instead.
+ */
+export interface ReviewRecordPageView {
+  page: number;
+  size: number;
+  total: number;
+  newCount: number;
+  aiPilotEnabled: boolean;
+  /** The channel codes this page actually covered. */
+  channels: string[];
+  triageSummary: ChannelReviewTriageSummaryView;
+  items: ReviewRecordRow[];
+}
+
+export interface ReviewRecordRow {
+  channelCode: string | null;
+  channelNameKo: string | null;
+  review: ChannelReviewItemView;
+}
+
 export interface ChannelReviewPageView {
   page: number;
   size: number;

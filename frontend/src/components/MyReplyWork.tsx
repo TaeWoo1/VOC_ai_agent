@@ -26,8 +26,11 @@ const RECENT_LIMIT = 5;
 export function MyReplyWork({
   accountId,
   refreshKey = 0,
+  title = "내 답변 작업",
 }: {
   accountId: string;
+  /** The section heading — the organisation's record names the channel, since it can show more than one. */
+  title?: string;
   /** Bumped by the owner when a decision or outcome was recorded elsewhere on the page (the 리뷰 detail), so this list re-reads. */
   refreshKey?: number;
 }) {
@@ -102,7 +105,7 @@ export function MyReplyWork({
 
   return (
     <Section
-      title="내 답변 작업"
+      title={title}
       action={
         !loading && !uncertainty && waiting > 0 ? (
           <span className="text-sm font-semibold text-brand-700" data-testid="reply-work-waiting">

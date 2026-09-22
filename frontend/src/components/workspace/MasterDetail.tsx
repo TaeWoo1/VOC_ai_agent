@@ -54,7 +54,9 @@ export function MasterDetail({
   return (
     <div className="flex h-full min-h-0 flex-1" data-layout="master-detail">
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-28 pt-5 md:px-8 md:pb-10 md:pt-6" data-testid="master-list">
+        {/* `relative`: each scroller is the containing block of what it holds. Without it an absolutely positioned
+            descendant (an sr-only label) is placed against the document and stretches the PAGE past the viewport. */}
+        <div className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-28 pt-5 md:px-8 md:pb-10 md:pt-6" data-testid="master-list">
           <div className="mx-auto w-full max-w-[760px] space-y-5">{list}</div>
         </div>
         {footer}
@@ -62,7 +64,7 @@ export function MasterDetail({
       {wide && detail ? (
         <aside
           aria-label={detailLabel}
-          className="w-[46%] min-w-[440px] max-w-[620px] shrink-0 overflow-y-auto border-l border-line bg-surface px-7 pb-10 pt-6"
+          className="relative w-[46%] min-w-[440px] max-w-[620px] shrink-0 overflow-y-auto border-l border-line bg-surface px-7 pb-10 pt-6"
           data-testid="master-detail"
         >
           {detail}

@@ -2,7 +2,8 @@
 // The 리뷰 surface: one workflow door over per-account review records. What it owns is the question
 // "which channel's reviews?" — the record page underneath is tested in ChannelReviews.test.tsx.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { Reviews } from "./Reviews";
 import { expectNoAxeViolations } from "../../test/axe";
@@ -12,6 +13,7 @@ const getSellerAccountsStrict = vi.fn();
 const getChannelsStrict = vi.fn();
 const getChannelReviewsStrict = vi.fn();
 const getProductReviews = vi.fn();
+const getReviewRecordStrict = vi.fn();
 
 vi.mock("../../lib/apiClient", () => ({
   api: {
@@ -22,6 +24,7 @@ vi.mock("../../lib/apiClient", () => ({
     getChannelReviewStrict: vi.fn(),
     recordChannelReviewTriageBehavior: vi.fn(),
     getProductReviews: (productId: string, options: unknown) => getProductReviews(productId, options),
+    getReviewRecordStrict: (params: unknown) => getReviewRecordStrict(params),
     // 내 답변 작업 mounts on a reply-capable (NAVER) account since A6; keep it empty and off the wire here.
     getReplyWork: async (accountId: string) => ({
       sellerAccountId: accountId,
@@ -132,6 +135,38 @@ beforeEach(() => {
   getChannelReviewsStrict.mockImplementation(async (accountId: string) =>
     page(accountId === "acc-cp" ? "COUPANG" : "NAVER"),
   );
+  getReviewRecordStrict.mockResolvedValue({
+    page: 0,
+    size: 20,
+    total: 1,
+    newCount: 0,
+    aiPilotEnabled: false,
+    channels: ["NAVER", "COUPANG", "CAFE24"],
+    triageSummary: { needsAttention: 1, watch: 0, fyi: 0, aiAttention: 0, repeatedCategories: [] },
+    items: [
+      {
+        channelCode: "COUPANG",
+        channelNameKo: "쿠팡",
+        review: {
+          id: "rv-1",
+          writtenOn: "2026-09-01",
+          rating: 1,
+          negative: true,
+          preview: "접착이 약해요",
+          productName: "선바로 일체형 전선몰딩",
+          productId: null,
+          vendorItemId: null,
+          mediaCount: 0,
+          textless: false,
+          isNew: false,
+          triage: { tier: "NEEDS_ATTENTION", reason: "1점", recommendedAction: null, tags: [] },
+          aiMark: null,
+          sellerCorrection: null,
+          executableIdentity: "NONE",
+        },
+      },
+    ],
+  });
   getProductReviews.mockResolvedValue({
     productId: "p-1",
     productName: "선바로 일체형 전선몰딩",
@@ -176,15 +211,30 @@ afterEach(() => {
 });
 
 describe("리뷰 — the workflow surface", () => {
-  it("opens the first review-capable account in product order when no account is named", async () => {
+  it("opens the organisation's record over every channel when no account is named — the channel is a filter", async () => {
+    // UI/UX v2 Phase 2 (product-owner decision). It used to redirect into the FIRST account's record, so the
+    // screen's first answer was a channel the seller never chose.
     renderAt("/reviews");
-    const nav = await screen.findByRole("navigation", { name: "리뷰 채널" });
-    const current = within(nav).getByRole("link", { current: "page" });
-    expect(current).toHaveTextContent("네이버 스마트스토어");
-    expect(current).toHaveAttribute("href", "/reviews/acc-nv");
-    // The record underneath is the named account's, and it speaks the product's word.
-    expect(await screen.findByRole("heading", { level: 1, name: "리뷰" })).toBeInTheDocument();
-    expect(getChannelReviewsStrict).toHaveBeenCalledWith("acc-nv", expect.anything());
+    const filter = await screen.findByRole("group", { name: "채널 필터" });
+    expect(screen.getByRole("heading", { level: 1, name: "리뷰" })).toBeInTheDocument();
+    expect(within(filter).getByRole("button", { name: "전체 채널" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual(["전체 채널", "네이버", "쿠팡"]);
+    // One read, answered by the server over every channel — nothing merged on this side.
+    expect(getReviewRecordStrict).toHaveBeenCalledWith(expect.objectContaining({ channel: undefined, sort: "attention" }));
+    expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
+
+    // A channel narrows the same read.
+    await userEvent.click(within(filter).getByRole("button", { name: "쿠팡" }));
+    await waitFor(() =>
+      expect(getReviewRecordStrict).toHaveBeenLastCalledWith(expect.objectContaining({ channel: "COUPANG" })),
+    );
+  });
+
+  it("opens each row in the Review Case, carrying the way back to this record", async () => {
+    renderAt("/reviews");
+    const row = await screen.findByRole("link", { name: /접착이 약해요/ });
+    expect(row).toHaveAttribute("href", "/reviews/reply/rv-1?from=record");
+    expect(row).toHaveTextContent("쿠팡");
   });
 
   it("switches channel by account; the h1 stays 리뷰 and the record heading names the channel", async () => {
@@ -221,7 +271,7 @@ describe("리뷰 — the workflow surface", () => {
 
   it("shows no switcher for a single account — the record heading already names it", async () => {
     getSellerAccountsStrict.mockResolvedValue([account("acc-nv", "nv", "네이버 스마트스토어")]);
-    renderAt("/reviews");
+    renderAt("/reviews/acc-nv");
     expect(await screen.findByRole("heading", { level: 2, name: "네이버 스마트스토어" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "리뷰 채널" })).toBeNull();
   });

@@ -28,17 +28,21 @@ export function WorkItemPane({ row, now }: { row: HomeWorkRow; now?: Date }) {
       key={row.key}
       variant="pane"
       decisionLabel="판매자의 결정"
+      // The response panel prints the channel and the time with the question; drawn here too it was the same line
+      // twice, one block apart. Kept only when there is no panel to say it.
       meta={
-        <Facts>
-          <span>{row.source}</span>
-          {wait ? <span className="tabular-nums">{wait}</span> : null}
-        </Facts>
+        row.workItemId === null ? (
+          <Facts>
+            <span>{row.source}</span>
+            {wait ? <span className="tabular-nums">{wait}</span> : null}
+          </Facts>
+        ) : undefined
       }
       title={row.title}
       titleHidden={row.workItemId !== null}
       headerAction={
         <Link to={`/inquiries/${row.subjectId}`} className="rounded font-semibold text-muted hover:text-ink hover:underline">
-          전체 화면으로
+          문의에서 보기
         </Link>
       }
       decision={

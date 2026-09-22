@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { analytics } from "../../lib/analytics";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Section } from "../../components/ui/Section";
 import { Empty } from "../../components/ui/Empty";
@@ -9,6 +9,9 @@ import { Status } from "../../components/ui/Status";
 import { WorkItem } from "../../components/ui/WorkItem";
 import { AgentLaunch } from "../../components/ui/AgentLaunch";
 import { InboxDetail } from "../../components/inbox/InboxDetail";
+import { Facts } from "../../components/ui/ObjectRow";
+import { MasterDetail, useWideLayout } from "../../components/workspace/MasterDetail";
+import { CaseLayout } from "../../components/workspace/CaseLayout";
 import { ProactiveCases } from "../../components/proactive/ProactiveCases";
 import { api } from "../../lib/apiClient";
 import { analysisKey, buildAnalysisIndex } from "../../lib/inboxView";
@@ -198,6 +201,7 @@ export function CustomerInbox() {
   }, [itemRef, record]);
 
   const analysisIndex = useMemo(() => buildAnalysisIndex(analyses), [analyses]);
+  const wide = useWideLayout();
 
   /** The rows a selection may resolve against: the record page, the queue, and the linked row. */
   const selected = useMemo(() => {
@@ -248,6 +252,13 @@ export function CustomerInbox() {
     [queue, productId],
   );
   const queueGroups = useMemo(() => queueOrder(queueRows), [queueRows]);
+  // What the pane shows: the chosen inquiry, or — on a wide screen with nothing chosen — the first row of the work
+  // the seller owes, which is the row this screen itself says to look at first.
+  const defaultRow = wide && !itemRef ? [...queueGroups.recent, ...queueGroups.old][0] ?? null : null;
+  const shownRef = itemRef ?? defaultRow?.inquiryId;
+  const shownItem = selected ?? (defaultRow ? asFeedItem(queueAsRow(defaultRow)) : null);
+  const shownWorkItemId = itemRef ? workItemId : defaultRow?.workItemId ?? null;
+
   /**
    * A word every row carries is a fact about the LIST, not a mark on the rows (`lib/sharedWord.ts`).
    * Measured 2026-09-04: all 21 rows printed 「답변 필요」 in warn colour, which made the loudest
@@ -266,242 +277,266 @@ export function CustomerInbox() {
     return [...seen.entries()];
   }, [record]);
 
-  return (
+  const head = (
+    <PageHead
+      title="문의"
+      compact={!!itemRef}
+      action={
+        <AgentLaunch
+          context={{
+            surface: "inquiries",
+            ...(focused ? { workItemId } : {}),
+            ...(channel ? { channelCode: channel } : {}),
+          }}
+          label={focused ? "이 문의에 대해 물어보기" : "문의에 대해 물어보기"}
+        />
+      }
+      /* No meta: the section below is titled 「지금 처리할 일」 and carries the same count, and the two
+         sat 80px apart saying the same words twice. The section owns it, because it owns the rows. */
+    />
+  );
+
+  const lists = (
     <>
-      <PageHead
-        title="문의"
-        compact={!!itemRef}
-        action={
-          <AgentLaunch
-            context={{
-              surface: "inquiries",
-              ...(focused ? { workItemId } : {}),
-              ...(channel ? { channelCode: channel } : {}),
-            }}
-            label={focused ? "이 문의에 대해 물어보기" : "문의에 대해 물어보기"}
-          />
-        }
-        /* No meta: the section below is titled 「지금 처리할 일」 and carries the same count, and the two
-           sat 80px apart saying the same words twice. The section owns it, because it owns the rows. */
-      />
-
-      {/* 「AI가 먼저 확인한 일」 answers 「무엇부터 볼까」, so it stays above the work — and disappears
-          once a row is open, because a seller who followed its own link is already inside the answer. */}
-      {!itemRef ? <div className="mb-5"><ProactiveCases limit={4} /></div> : null}
-
-      <div className={itemRef ? "grid gap-5 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]" : ""}>
-        {/* On narrow screens the chosen row replaces the list, so only one pane competes. */}
-        <div className={itemRef ? "hidden space-y-5 lg:block lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto" : "space-y-6"}>
-          {/* ── 지금 처리할 일 ─────────────────────────────────────────────
-              Rendered whenever there is work, and never rendered as 0: a heading over an empty queue
-              is a number the seller cannot act on. A read that FAILED says so instead of showing none. */}
-          {queue === null ? (
-            <p className="text-sm text-warn" role="status">
-              지금 처리할 일을 불러오지 못했습니다. 아래 전체 문의는 그대로 보실 수 있습니다.
-            </p>
-          ) : queueRows.length > 0 ? (
-            <Section
-              title={productId ? "이 상품의 지금 처리할 일" : "지금 처리할 일"}
-              count={queueRows.length}
-              // Two clauses, one line, joined the way this product joins facts. The first is the
-              // shared-word caption (every row says the same thing, so the list says it once); the
-              // second is the bound — when the server holds more than it returned, the heading says so
-              // rather than letting the drawn rows be read as the whole of what is owed. The bound is
-              // not rendered under a product scope: that count is this screen's own filter over the
-              // page, and the server total answers a wider question than the heading above it.
-              hint={
-                [
-                  sharedState ? `모두 ${sharedState}` : null,
-                  !productId && queueTotal != null && queueTotal > queueRows.length
-                    ? `${queueTotal.toLocaleString("ko-KR")}건 중 ${queueRows.length.toLocaleString("ko-KR")}건`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || undefined
-              }
-            >
-              <ul className="divide-y divide-line/70">
-                {queueGroups.recent.map((row) => queueRow(row, itemRef, false, sharedState))}
-                {/* The decade-old backlog is real work and stays in the queue — under its own quiet
-                    divider, because sorted purely by waiting time a 2014 question outranks and buries
-                    one from an hour ago. Not a heading: the detail pane keeps the only h2. */}
-                {queueGroups.old.length > 0 ? (
-                  <li aria-hidden="true" className="bg-canvas px-4 py-1.5 text-xs font-semibold text-muted">
-                    1년 넘게 지난 문의 {queueGroups.old.length}건
-                  </li>
-                ) : null}
-                {queueGroups.old.map((row) => queueRow(row, itemRef, true, sharedState))}
-              </ul>
-            </Section>
-          ) : null}
-
-          {/* ── 전체 문의 ────────────────────────────────────────────────── */}
-          <Section
-            title="전체 문의"
-            count={recordTotal ?? undefined}
-            hint={itemRef ? undefined : "답변한 문의까지 모두 여기 있습니다. 찾을 때 쓰세요."}
-          >
-            {productId ? (
-              <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="record-product-scope">
-                <Status tone="info">
-                  {scopedProductName ?? "이 상품"}의 문의만 보고 있습니다
-                </Status>
-                <button
-                  type="button"
-                  onClick={() => setParam("productId", null)}
-                  className="rounded-md text-sm font-medium text-muted underline underline-offset-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-                >
-                  전체 문의 보기
-                </button>
-              </div>
+      {/* ── 지금 처리할 일 ─────────────────────────────────────────────
+          Rendered whenever there is work, and never rendered as 0: a heading over an empty queue
+          is a number the seller cannot act on. A read that FAILED says so instead of showing none. */}
+      {queue === null ? (
+        <p className="text-sm text-warn" role="status">
+          지금 처리할 일을 불러오지 못했습니다. 아래 전체 문의는 그대로 보실 수 있습니다.
+        </p>
+      ) : queueRows.length > 0 ? (
+        <Section
+          title={productId ? "이 상품의 지금 처리할 일" : "지금 처리할 일"}
+          count={queueRows.length}
+          // The shared-word caption, then the bound — when the server holds more than it returned, the heading
+          // says so rather than letting the drawn rows be read as the whole of what is owed.
+          hint={
+            [
+              sharedState ? `모두 ${sharedState}` : null,
+              !productId && queueTotal != null && queueTotal > queueRows.length
+                ? `${queueTotal.toLocaleString("ko-KR")}건 중 ${queueRows.length.toLocaleString("ko-KR")}건`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
+        >
+          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
+            {queueGroups.recent.map((row) => queueRow(row, shownRef, false, sharedState))}
+            {/* The decade-old backlog is real work and stays in the queue — under its own quiet divider. */}
+            {queueGroups.old.length > 0 ? (
+              <li aria-hidden="true" className="bg-canvas px-4 py-1.5 text-sm font-semibold text-muted">
+                1년 넘게 지난 문의 {queueGroups.old.length}건
+              </li>
             ) : null}
+            {queueGroups.old.map((row) => queueRow(row, shownRef, true, sharedState))}
+          </ul>
+        </Section>
+      ) : null}
 
-            <form
-              className="mb-3 flex flex-wrap items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                setParam("q", draftQuery.trim());
-              }}
+      {/* ── 전체 문의 ────────────────────────────────────────────────── */}
+      <Section title="전체 문의" count={recordTotal ?? undefined} hint="답변한 문의까지 모두 여기 있습니다. 찾을 때 쓰세요.">
+        {productId ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="record-product-scope">
+            <Status tone="info">{scopedProductName ?? "이 상품"}의 문의만 보고 있습니다</Status>
+            <button
+              type="button"
+              onClick={() => setParam("productId", null)}
+              className="rounded-md text-sm font-medium text-muted underline underline-offset-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
             >
-              <label className="min-w-0 flex-1">
-                <span className="sr-only">문의 내용 검색</span>
-                <input
-                  type="search"
-                  value={draftQuery}
-                  onChange={(e) => setDraftQuery(e.target.value)}
-                  placeholder="고객이 쓴 말로 찾기 (예: 세금계산서)"
-                  className="w-full min-w-[12rem] rounded-lg border border-line bg-surface px-3 py-1.5 text-base focus:border-brand-700 focus:outline-none"
-                />
-              </label>
-              <select
-                aria-label="채널"
-                value={channel ?? ""}
-                onChange={(e) => setParam("channel", e.target.value || null)}
-                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm focus:border-brand-700 focus:outline-none"
-              >
-                <option value="">모든 채널</option>
-                {channels.map(([code, name]) => (
-                  <option key={code} value={code}>{name}</option>
-                ))}
-              </select>
-              <select
-                aria-label="답변 상태"
-                value={status}
-                onChange={(e) => setParam("status", e.target.value)}
-                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm focus:border-brand-700 focus:outline-none"
-              >
-                {RECORD_STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </form>
-
-            {loading ? (
-              <p className="px-1 py-6 text-sm text-muted">불러오는 중…</p>
-            ) : failed ? (
-              <Empty
-                title="문의를 불러오지 못했습니다"
-                body="연결 상태를 확인한 뒤 다시 시도해 주세요."
-                action={<BtnLink to="/connect">채널 연결 확인</BtnLink>}
-              />
-            ) : (record ?? []).length === 0 ? (
-              <Empty
-                title={hasNarrowing(q, channel, status, productId) ? "찾는 문의가 없습니다" : "아직 들어온 문의가 없습니다"}
-                body={
-                  hasNarrowing(q, channel, status, productId)
-                    ? "다른 말로 찾거나 조건을 넓혀 보세요."
-                    : "채널을 연결하거나 정기 자료 가져오기로 자료를 넘겨주시면, 채널이 달라도 같은 형태로 모아 보여드립니다."
-                }
-                action={hasNarrowing(q, channel, status, productId) ? undefined : <BtnLink to="/connect">채널 연결하기</BtnLink>}
-              />
-            ) : (
-              <>
-                <ul className="divide-y divide-line/70">
-                  {(record ?? []).map((row) => {
-                    const state = recordRowState(row);
-                    return (
-                      <li key={row.inquiryId}>
-                        <WorkItem
-                          to={`/inquiries/${row.inquiryId}`}
-                          selected={row.inquiryId === itemRef}
-                          ariaCurrent={row.inquiryId === itemRef ? "true" : undefined}
-                          // The record is a place to look things up: a settled row is quieter than
-                          // the work above, and never louder.
-                          dim={row.status === "ANSWERED"}
-                          state={state.text}
-                          tone={state.tone}
-                          title={previewText(row.snippet) || row.title || "문의"}
-                          meta={
-                            <>
-                              {row.channelNameKo}
-                              {!itemRef && row.productName ? ` · ${row.productName}` : ""}
-                            </>
-                          }
-                          time={relativeTime(row.receivedAt)}
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
-                {/*
-                  Said only when there IS more — a page that holds everything says nothing.
-
-                  It used to end here, at a sentence: 「나머지는 위에서 찾아 주세요」. The read was capped
-                  at 50 rows and always asked for page 0, so the seller was told the true total and given
-                  no way to reach row 51 — 94 rows in this org's record, 44 of them unreachable. Search
-                  was the only door out, which works when you know what you are looking for and not at
-                  all when you are looking through. The server takes a page now, so it can be walked.
-                */}
-                {recordTotal != null && recordTotal > (record ?? []).length ? (
-                  <div className="flex flex-wrap items-center gap-3 px-4 pt-3">
-                    <Btn
-                      variant="outline"
-                      size="sm"
-                      disabled={loading}
-                      onClick={() => setRecordPages((n) => n + 1)}
-                    >
-                      {loading ? "불러오는 중…" : "더 보기"}
-                    </Btn>
-                    <span className="text-sm tabular-nums text-muted">
-                      {(record ?? []).length} / {recordTotal}건
-                    </span>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </Section>
-        </div>
-
-        {itemRef ? (
-          /*
-            Its own scroller, so the pane's primary control is pinned to the bottom of the PANE rather
-            than of a document whose height depends on how much the customer wrote.
-          */
-          <div className="rounded-2xl border border-line bg-surface p-5 lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto">
-            {selected ? (
-              <InboxDetail
-                item={selected}
-                analysis={analysisIndex.get(analysisKey("INQUIRY", selected.id))}
-                workItemId={workItemId}
-              />
-            ) : loading ? (
-              <p className="text-sm text-muted">불러오는 중…</p>
-            ) : (
-              <div>
-                <p className="break-keep font-semibold text-ink">문의를 찾을 수 없습니다</p>
-                <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
-                  목록에서 다시 선택해 주세요. 자료가 다시 정리되면서 항목이 바뀌었을 수 있습니다.
-                </p>
-              </div>
-            )}
+              전체 문의 보기
+            </button>
           </div>
         ) : null}
-      </div>
+
+        <form
+          className="mb-3 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setParam("q", draftQuery.trim());
+          }}
+        >
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">문의 내용 검색</span>
+            <input
+              type="search"
+              value={draftQuery}
+              onChange={(e) => setDraftQuery(e.target.value)}
+              placeholder="고객이 쓴 말로 찾기 (예: 세금계산서)"
+              className="w-full min-w-[12rem] rounded-lg border border-line bg-surface px-3 py-1.5 text-base focus:border-brand-700 focus:outline-none"
+            />
+          </label>
+          <select
+            aria-label="채널"
+            value={channel ?? ""}
+            onChange={(e) => setParam("channel", e.target.value || null)}
+            className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm focus:border-brand-700 focus:outline-none"
+          >
+            <option value="">모든 채널</option>
+            {channels.map(([code, name]) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
+          </select>
+          <select
+            aria-label="답변 상태"
+            value={status}
+            onChange={(e) => setParam("status", e.target.value)}
+            className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm focus:border-brand-700 focus:outline-none"
+          >
+            {RECORD_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </form>
+
+        {loading ? (
+          <p className="px-1 py-6 text-sm text-muted">불러오는 중…</p>
+        ) : failed ? (
+          <Empty
+            title="문의를 불러오지 못했습니다"
+            body="연결 상태를 확인한 뒤 다시 시도해 주세요."
+            action={<BtnLink to="/connect">채널 연결 확인</BtnLink>}
+          />
+        ) : (record ?? []).length === 0 ? (
+          <Empty
+            title={hasNarrowing(q, channel, status, productId) ? "찾는 문의가 없습니다" : "아직 들어온 문의가 없습니다"}
+            body={
+              hasNarrowing(q, channel, status, productId)
+                ? "다른 말로 찾거나 조건을 넓혀 보세요."
+                : "채널을 연결하거나 정기 자료 가져오기로 자료를 넘겨주시면, 채널이 달라도 같은 형태로 모아 보여드립니다."
+            }
+            action={hasNarrowing(q, channel, status, productId) ? undefined : <BtnLink to="/connect">채널 연결하기</BtnLink>}
+          />
+        ) : (
+          <>
+            <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line bg-surface">
+              {(record ?? []).map((row) => {
+                const state = recordRowState(row);
+                return (
+                  <li key={row.inquiryId}>
+                    <WorkItem
+                      to={`/inquiries/${row.inquiryId}`}
+                      selected={row.inquiryId === shownRef}
+                      ariaCurrent={row.inquiryId === shownRef ? "true" : undefined}
+                      // The record is a place to look things up: a settled row is quieter than the work above.
+                      dim={row.status === "ANSWERED"}
+                      state={state.text}
+                      tone={state.tone}
+                      title={previewText(row.snippet) || row.title || "문의"}
+                      meta={
+                        <>
+                          {row.channelNameKo}
+                          {row.productName ? ` · ${row.productName}` : ""}
+                        </>
+                      }
+                      time={relativeTime(row.receivedAt)}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+            {/* Said only when there IS more — a page that holds everything says nothing. */}
+            {recordTotal != null && recordTotal > (record ?? []).length ? (
+              <div className="flex flex-wrap items-center gap-3 px-4 pt-3">
+                <Btn variant="outline" size="sm" disabled={loading} onClick={() => setRecordPages((n) => n + 1)}>
+                  {loading ? "불러오는 중…" : "더 보기"}
+                </Btn>
+                <span className="text-sm tabular-nums text-muted">
+                  {(record ?? []).length} / {recordTotal}건
+                </span>
+              </div>
+            ) : null}
+          </>
+        )}
+      </Section>
     </>
+  );
+
+  const detail = shownItem ? (
+    <InquiryCasePane
+      item={shownItem}
+      analysis={analysisIndex.get(analysisKey("INQUIRY", shownItem.id))}
+      workItemId={shownWorkItemId}
+    />
+  ) : itemRef && !loading ? (
+    <div>
+      <p className="break-keep font-semibold text-ink">문의를 찾을 수 없습니다</p>
+      <p className="mt-2 break-keep text-sm leading-relaxed text-muted">
+        목록에서 다시 선택해 주세요. 자료가 다시 정리되면서 항목이 바뀌었을 수 있습니다.
+      </p>
+    </div>
+  ) : itemRef ? (
+    <p className="text-sm text-muted">불러오는 중…</p>
+  ) : null;
+
+  /*
+    Master-detail (UI/UX v2 Phase 2). The list and the chosen inquiry each own their scroll, so reading a long
+    answer never drags the list — the page used to be one 7,071px scroll whose height was the list's. On a wide
+    screen the first 지금 처리할 일 row is open when nothing is chosen; on a narrow one the chosen inquiry replaces
+    the list, with the way back above it, exactly as before.
+  */
+  const list =
+    !wide && itemRef ? (
+      <>
+        {head}
+        <Link to="/inquiries" className="text-sm font-semibold text-muted hover:text-ink hover:underline">
+          ← 문의 목록
+        </Link>
+        {detail}
+      </>
+    ) : (
+      <>
+        {head}
+        {/* 「AI가 먼저 확인한 일」 answers 「무엇부터 볼까」, so it stays above the work — and disappears once a row
+            is open, because a seller who followed its own link is already inside the answer. */}
+        {!itemRef ? <ProactiveCases limit={4} /> : null}
+        {lists}
+      </>
+    );
+
+  return <MasterDetail wide={wide} list={list} detailLabel="문의 상세" detail={detail} />;
+}
+
+/**
+ * One inquiry in the pane, in {@link CaseLayout}'s reading order: where and when, then the customer's words and the
+ * answer (the response panel owns both, so the layout draws no second copy of the question), then the automatic
+ * classification, folded.
+ */
+function InquiryCasePane({
+  item,
+  analysis,
+  workItemId,
+}: {
+  item: ReturnType<typeof asFeedItem>;
+  analysis: ItemAnalysis | undefined;
+  workItemId: string | null;
+}) {
+  return (
+    <CaseLayout
+      key={item.id}
+      variant="pane"
+      label="선택한 문의"
+      decisionLabel="답변"
+      // When the response panel mounts it prints the question, the channel, the product and the time as its own
+      // first block — so the layout draws none of them a second time.
+      meta={
+        workItemId === null ? (
+          <Facts>
+            <span>{item.channelNameKo}</span>
+            {item.productName ? <span className="break-keep">{item.productName}</span> : null}
+            <span>{relativeTime(item.receivedAt)}</span>
+          </Facts>
+        ) : undefined
+      }
+      title={previewText(item.snippet) || "문의"}
+      titleHidden={workItemId !== null}
+      // No 「전체 화면으로」: this route IS the inquiry's own screen, so the link would point at the page it is on.
+      decision={<InboxDetail item={item} analysis={analysis} workItemId={workItemId} />}
+    />
   );
 }
 
-/** One row of work. The same shape in both groups; only the ink changes. */
 function queueRow(row: InquiryQueueItem, itemRef: string | undefined, dim = false, sharedState: string | null = null) {
   const state = queueRowState(row);
   // Dropped only when EVERY row carries it and the caption has already said so.
@@ -534,4 +569,26 @@ const PAGE_SIZE = 50;
 /** Whether the seller asked for something, so an empty result is 「찾는 게 없다」 and not 「아무것도 없다」. */
 function hasNarrowing(q: string, channel: string | null, status: string, productId: string | null): boolean {
   return q.trim() !== "" || channel != null || status !== "ALL" || productId != null;
+}
+
+/** A queue row read as a record row — the same inquiry, so the pane can draw it before the seller picks one. */
+function queueAsRow(row: InquiryQueueItem): InquiryRowItem {
+  return {
+    inquiryId: row.inquiryId,
+    workItemId: row.workItemId,
+    sellerAccountId: row.sellerAccountId,
+    channelId: row.channelId,
+    channelCode: row.channelCode,
+    channelNameKo: row.channelNameKo,
+    productId: row.productId,
+    productName: row.productName,
+    phase: row.phase,
+    status: row.status,
+    title: row.title,
+    snippet: row.snippet,
+    receivedAt: row.receivedAt,
+    answeredAt: null,
+    sourceSubtype: null,
+    executableIdentity: null,
+  };
 }

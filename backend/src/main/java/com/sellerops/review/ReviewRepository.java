@@ -371,6 +371,114 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     long countByChannelAndCategory(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
                                    @Param("category") String category);
 
+    // ── The organisation's review record: every seller-visible channel at once (UI/UX v2 Phase 2) ──────────
+    //
+    // The SAME tier expression, the SAME ordering and the SAME tier filter as the per-channel record above; the
+    // only difference is `r.channelId in :channelIds` where those say `r.channelId = :channelId`. With one channel
+    // in the set they are the same query. They are separate methods rather than a rewrite of the per-channel ones
+    // so the channel record — and every caller that reads it for a single total — stays byte-for-byte what it was.
+
+    /** As {@link #findByOrgIdAndChannelIdTriaged}, over a set of channels. */
+    @Query("""
+            select r from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId and r.channelId in :channelIds
+              and (:tierRank is null or
+            """ + FINAL_TIER_RANK + """
+              = :tierRank)
+            order by
+            """ + FINAL_TIER_RANK + """
+              asc, r.receivedAt desc, r.id asc
+            """)
+    Page<Review> findByOrgIdAndChannelIdInTriaged(@Param("orgId") UUID orgId,
+                                                  @Param("channelIds") java.util.Collection<UUID> channelIds,
+                                                  @Param("tierRank") Integer tierRank,
+                                                  @Param("aiEnabled") boolean aiEnabled,
+                                                  Pageable pageable);
+
+    /** As {@link #findByOrgIdAndChannelIdTriagedSorted}, over a set of channels. */
+    @Query("""
+            select r from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId and r.channelId in :channelIds
+              and (:tierRank is null or
+            """ + FINAL_TIER_RANK + """
+              = :tierRank)
+            """)
+    Page<Review> findByOrgIdAndChannelIdInTriagedSorted(@Param("orgId") UUID orgId,
+                                                        @Param("channelIds") java.util.Collection<UUID> channelIds,
+                                                        @Param("tierRank") Integer tierRank,
+                                                        @Param("aiEnabled") boolean aiEnabled,
+                                                        Pageable pageable);
+
+    /** As {@link #findByOrgIdAndChannelIdTriagedLowestFirst}, over a set of channels — same NULLS-LAST rule. */
+    @Query("""
+            select r from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId and r.channelId in :channelIds
+              and (:tierRank is null or
+            """ + FINAL_TIER_RANK + """
+              = :tierRank)
+            order by case when r.rating is null then 1 else 0 end asc,
+                     r.rating asc, r.receivedAt desc, r.id asc
+            """)
+    Page<Review> findByOrgIdAndChannelIdInTriagedLowestFirst(@Param("orgId") UUID orgId,
+                                                             @Param("channelIds") java.util.Collection<UUID> channelIds,
+                                                             @Param("tierRank") Integer tierRank,
+                                                             @Param("aiEnabled") boolean aiEnabled,
+                                                             Pageable pageable);
+
+    /** As {@link #countByChannelGroupedByTierRank}, over a set of channels. */
+    @Query("""
+            select
+            """ + TRIAGE_TIER_RANK + """
+              , count(r) from Review r
+            where r.orgId = :orgId and r.channelId in :channelIds
+            group by
+            """ + TRIAGE_TIER_RANK + """
+            """)
+    List<Object[]> countByChannelsGroupedByTierRank(@Param("orgId") UUID orgId,
+                                                    @Param("channelIds") java.util.Collection<UUID> channelIds);
+
+    /** As {@link #countByChannelGroupedByFinalTierRank}, over a set of channels — no bound parameter in the CASE. */
+    @Query("""
+            select
+            """ + AI_FINAL_TIER_RANK + """
+              , count(r) from Review r
+            """ + AI_JOIN + """
+            where r.orgId = :orgId and r.channelId in :channelIds
+            group by
+            """ + AI_FINAL_TIER_RANK + """
+            """)
+    List<Object[]> countByChannelsGroupedByFinalTierRank(@Param("orgId") UUID orgId,
+                                                         @Param("channelIds") java.util.Collection<UUID> channelIds);
+
+    /** As {@link #countAiAttentionByChannel}, over a set of channels. */
+    @Query("""
+            select count(r) from Review r
+            join AiTriageCurrent a on a.reviewId = r.id and a.orgId = r.orgId
+            where r.orgId = :orgId and r.channelId in :channelIds and a.aiAttention = true
+              and
+            """ + TRIAGE_TIER_RANK + """
+              <> 0
+            """)
+    long countAiAttentionByChannels(@Param("orgId") UUID orgId,
+                                    @Param("channelIds") java.util.Collection<UUID> channelIds);
+
+    /**
+     * {@code [channelId, category, count]} — {@link #countByChannelGroupedByCategory} for several channels in one
+     * scan, kept apart by channel. A row's 「같은 분류 N건」 is counted within its own channel on the channel record,
+     * so the organisation's record must count it the same way rather than across channels.
+     */
+    @Query("""
+            select r.channelId, a.category, count(r) from Review r, ItemAnalysis a
+            where a.orgId = r.orgId and a.sourceType = 'REVIEW' and a.sourceId = r.id
+              and r.orgId = :orgId and r.channelId in :channelIds
+            group by r.channelId, a.category
+            """)
+    List<Object[]> countByChannelsGroupedByChannelAndCategory(@Param("orgId") UUID orgId,
+                                                              @Param("channelIds") java.util.Collection<UUID> channelIds);
+
     long countByOrgIdAndNegativeTrue(UUID orgId);
 
     /**
