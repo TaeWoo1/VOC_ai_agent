@@ -3,6 +3,7 @@ package com.sellerops.responsibility.dto;
 import com.sellerops.responsibility.Responsibility;
 import com.sellerops.responsibility.ResponsibilityRun;
 import com.sellerops.responsibility.ResponsibilityRunSource;
+import com.sellerops.responsibility.ResponsibilitySources.ResolvedSource;
 import com.sellerops.responsibility.ResponsibilityTemplate;
 import com.sellerops.responsibility.ResponsibilityWindows;
 import java.time.Instant;
@@ -71,16 +72,16 @@ public record ResponsibilityView(
     }
 
     public static ResponsibilityView notActivated(ResponsibilityTemplate template, boolean available,
-                                                  boolean eligible) {
+                                                  boolean eligible, List<ResolvedSource> resolved) {
         return new ResponsibilityView(template.name(), template.displayName(), available, eligible, null,
-                windowMinutes(), ResponsibilityWindows.ZONE.getId(), scope(template), null, null, null, null,
-                List.of());
+                windowMinutes(), ResponsibilityWindows.ZONE.getId(), scope(template, resolved), null, null, null,
+                null, List.of());
     }
 
     public static ResponsibilityView of(ResponsibilityTemplate template, Responsibility r,
                                         List<ResponsibilityRun> runs,
                                         Map<UUID, List<ResponsibilityRunSource>> sourcesByRun,
-                                        boolean available, boolean eligible) {
+                                        boolean available, boolean eligible, List<ResolvedSource> resolved) {
         List<RunView> views = runs.stream().map(run -> new RunView(
                 run.getId(), run.getWindowStart(), run.getWindowEnd(), run.getRunTrigger().name(),
                 run.getStatus().name(), run.getAttempt(), run.getStartedAt(), run.getFinishedAt(),
@@ -88,12 +89,32 @@ public record ResponsibilityView(
                 sourcesByRun.getOrDefault(run.getId(), List.of()).stream().map(ResponsibilityView::source).toList()))
                 .toList();
         return new ResponsibilityView(template.name(), template.displayName(), available, eligible,
-                r.getStatus().name(), windowMinutes(), ResponsibilityWindows.ZONE.getId(), scope(template),
+                r.getStatus().name(), windowMinutes(), ResponsibilityWindows.ZONE.getId(),
+                scope(template, resolved),
                 r.getNextRunAt(), r.getActivatedAt(), r.getPausedAt(), r.getStoppedAt(), views);
     }
 
-    private static List<String> scope(ResponsibilityTemplate template) {
-        return template.sources().stream().map(s -> s.channelCode() + ":" + s.dataType().name()).toList();
+    /**
+     * <b>What this job watches for THIS seller — their own sources, not the template's catalogue.</b>
+     *
+     * <p>It used to render {@code template.sources()}, which was the same list for everyone and was true while
+     * that list was one channel's. It is not any more (2026-09-22): rendering it now would tell a seller who
+     * sells only on NAVER that the job also watches two Cafe24 boards and a Coupang inbox, which is a promise
+     * about shops they do not have.
+     *
+     * <p>An organisation with nothing connected yet resolves to nothing, and an empty list would say «이 일은
+     * 아무것도 보지 않습니다» on the one screen whose job is to explain what taking it on would get them. So that
+     * one case — and only that one — falls back to the candidates, which is what the job WOULD watch. The screen
+     * that renders it is the same screen that is telling them to connect a channel first.
+     */
+    private static List<String> scope(ResponsibilityTemplate template, List<ResolvedSource> resolved) {
+        List<String> mine = resolved == null ? List.of() : resolved.stream()
+                .map(s -> s.channelCode() + ":" + s.dataType().name())
+                .distinct()
+                .toList();
+        return mine.isEmpty()
+                ? template.sources().stream().map(s -> s.channelCode() + ":" + s.dataType().name()).toList()
+                : mine;
     }
 
     private static SourceView source(ResponsibilityRunSource s) {

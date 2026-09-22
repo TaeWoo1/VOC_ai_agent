@@ -74,8 +74,9 @@ public class OperationsCaseProcessor {
 
     static final int CANDIDATE_SCAN = 200;
     /**
-     * How far back a row can still change. The Cafe24 routine read reaches 14 days; a row older than that is not
-     * re-read, so it cannot change under this responsibility, and re-checking it every run is a scan for nothing.
+     * How far back a row can still change. The routine read of every source this responsibility observes reaches
+     * 14 days — Cafe24's board window and NAVER's {@code ROUTINE_MAX_LAG} are both that — so a row older than that
+     * is not re-read, cannot change under this responsibility, and re-checking it every run is a scan for nothing.
      */
     static final Duration ACQUISITION_REACH = Duration.ofDays(15);
     static final Set<SourceFailureReason> SELLER_ACTIONABLE =

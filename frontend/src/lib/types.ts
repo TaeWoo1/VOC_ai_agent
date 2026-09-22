@@ -1306,7 +1306,14 @@ export interface LearnedKnowledgeSource {
   examples: LearnedKnowledgeExample[];
 }
 
-export type HistoryAvailability = "LEARNED" | "NOT_PROMOTED" | "NOT_WIRED" | "SCREEN_UNPROVEN" | "NOT_AVAILABLE";
+export type HistoryAvailability =
+  | "LEARNED"
+  | "NOT_PROMOTED"
+  | "NOT_WIRED"
+  | "SCREEN_UNPROVEN"
+  /** No official path carries it; a bounded read of the seller-center screen, through the helper, does. */
+  | "SCREEN_READ"
+  | "NOT_AVAILABLE";
 
 export interface LearnedKnowledgeChannelLine {
   channelNameKo: string;

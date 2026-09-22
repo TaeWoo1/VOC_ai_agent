@@ -144,7 +144,10 @@ export function CustomerOperations({ now }: { now?: Date }) {
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <p className="break-keep text-ink">{NO_ELIGIBLE_SOURCE_SENTENCE}</p>
-                    <BtnLink to="/connect/cafe24">카페24 연결하기</BtnLink>
+                    {/* The channel list, not one channel: this responsibility can start from any of the
+                        channels it can collect without a person, and the connect screen is where the seller
+                        chooses. Pointing at Cafe24 sent every other seller to the wrong shop. */}
+                    <BtnLink to="/connect">판매 채널 연결하기</BtnLink>
                   </div>
                 )
               ) : null}

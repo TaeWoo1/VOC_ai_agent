@@ -260,9 +260,31 @@ public class CustomerOperationsHomeService {
             return new CustomerOperationsHomeView.GapRow(c.getId(), channel == null ? null : channel.getCode(),
                     channel == null ? null : channel.getNameKo(), c.getReason().name(),
                     dataTypesOf(c.getSourceState()), c.getCreatedAt(), c.getUpdatedAt(),
-                    channel != null && "CAFE24".equals(channel.getCode()) ? "/connect/cafe24" : "/connect");
+                    reconnectPath(channel));
         }).toList();
         return new CustomerOperationsHomeView.Gaps(open.size(), rows);
+    }
+
+    /**
+     * Where a seller goes to fix this gap: <b>that channel's own connect screen</b>, or the hub when we cannot
+     * name one.
+     *
+     * <p>This used to special-case Cafe24 and send everything else to the hub, which was right while Cafe24 was
+     * the only channel the responsibility observed. It is not any more (2026-09-22), so a NAVER account whose
+     * authorization expired would have been handed a list to search rather than the screen that reconnects it.
+     * The three codes are the seller-visible channel set and each has a connect route; anything else, including a
+     * channel we could not read, keeps the hub — a link is only worth making when we know where it goes.
+     */
+    private static String reconnectPath(Channel channel) {
+        if (channel == null) {
+            return "/connect";
+        }
+        return switch (channel.getCode()) {
+            case "CAFE24" -> "/connect/cafe24";
+            case "NAVER" -> "/connect/naver";
+            case "COUPANG" -> "/connect/coupang";
+            default -> "/connect";
+        };
     }
 
     /** The canonical record still says the seller's move is pending. Read-only; the reconciler writes. */

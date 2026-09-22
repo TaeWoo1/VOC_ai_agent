@@ -27,7 +27,15 @@ export const RESPONSIBILITY_DESCRIPTION =
 export const DUTIES_REVIEWNARY = ["중요하지 않은 일 정리", "반복 문제 관찰", "필요한 정보 조사", "답변/행동 준비"];
 export const DUTIES_SELLER = ["고객에게 실제 메시지 전송", "금전/보상/취소", "불확실한 판단"];
 
-export const NO_ELIGIBLE_SOURCE_SENTENCE = "고객 운영 관리를 시작하려면 Cafe24를 먼저 연결해 주세요.";
+/**
+ * Why this responsibility cannot be started yet — <b>and it names no channel</b>.
+ *
+ * It used to say Cafe24, because the responsibility's sources were Cafe24's. They are not any more
+ * (2026-09-22): it observes whichever of the seller's channels it can collect without a person, so a seller who
+ * sells on NAVER was being told to connect a shop they do not have. The server's `NO_ELIGIBLE_SOURCE` sentence is
+ * the same one, for the same reason.
+ */
+export const NO_ELIGIBLE_SOURCE_SENTENCE = "고객 운영 관리를 시작하려면 판매 채널을 먼저 연결해 주세요.";
 
 export function statusWord(status: ResponsibilityStatus | null): { label: string; tone: StatusTone } {
   switch (status) {

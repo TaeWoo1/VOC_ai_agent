@@ -20,9 +20,13 @@ import java.util.Locale;
  *       {@code IMPORTED_SELLER_ANSWER} after every inquiry ingest. The routine lane reaches 14 days back
  *       ({@code NaverInquiryCursor}); the older history is the bounded READ {@link KnowledgeBootstrapService} runs.
  *       Demo Org: 20 of 20 answered official rows carry the text.</li>
- *   <li><b>NAVER review replies — SCREEN_UNPROVEN.</b> NAVER has no review API. The Seller Center export's 25 columns
- *       ({@code contracts/review-export/naver/v1}) carry 답글여부 and 답글등록일시 and <i>no reply text</i>. Whether the
- *       Seller Center review screen exposes the reply text to a read has not been observed.</li>
+ *   <li><b>NAVER review replies — SCREEN_READ.</b> NAVER has no review API. The Seller Center export's 25 columns
+ *       ({@code contracts/review-export/naver/v1}) carry 답글여부 and 답글등록일시 and <i>no reply text</i>, and neither
+ *       does the review list's row model (census M2, 2026-09-18). The text is on the review's detail, and
+ *       {@code NaverReviewReplyEnrichmentService} is the bounded read that takes it from there onto the canonical
+ *       review; {@code LearnedKnowledgeService} quotes it as 「리뷰 답글 · 채널에 등록된 답글」. This row read
+ *       {@code SCREEN_UNPROVEN} until 2026-09-22 while its own sentence already said the read happens — the seller's
+ *       knowledge screen drew 「가져오지 못함」 next to 「읽어 옵니다」 on one line.</li>
  *   <li><b>NAVER product detail — LEARNED, per product.</b> {@code NaverChannelProductClient} reads
  *       {@code detailContent} and the options; {@code ProductDetailEnrichment} indexes the text when the page carries
  *       its answers as text. The 상품정보제공고시 sub-structure is not in the vendored contract and is not projected.</li>
@@ -51,6 +55,16 @@ public final class ChannelHistoryCapability {
         NOT_WIRED,
         /** Only a seller-center screen might show it, and no read of that screen has been observed. */
         SCREEN_UNPROVEN,
+        /**
+         * No official path carries it, and a bounded read of the seller-center screen does — one this product
+         * runs, through the seller's own helper, onto the canonical row.
+         *
+         * <p>Distinct from {@link #LEARNED} on purpose: that one promises an official path that needs nothing of
+         * the seller, and this one needs their helper. Distinct from {@link #SCREEN_UNPROVEN} because the read
+         * exists and has been observed — a row that says «아직 확인되지 않았다» about something the product reads,
+         * stores and quotes is telling the seller the opposite of what it does.
+         */
+        SCREEN_READ,
         /** The channel has no such thing, or no path to it exists. */
         NOT_AVAILABLE
     }
@@ -62,8 +76,12 @@ public final class ChannelHistoryCapability {
     private static final List<Row> ROWS = List.of(
             new Row("NAVER", HistorySource.PAST_INQUIRY_ANSWER, Availability.LEARNED,
                     "네이버에 등록하신 문의 답변을 가져와 비슷한 문의에 참고합니다."),
-            new Row("NAVER", HistorySource.PAST_REVIEW_REPLY, Availability.SCREEN_UNPROVEN,
-                    "네이버는 리뷰 답글 내용을 API나 내려받기 파일로 주지 않아, 판매자센터의 리뷰 상세에서 읽어 옵니다."),
+            // Was SCREEN_UNPROVEN while its own sentence said the opposite, so the knowledge screen drew
+            // 「가져오지 못함」 beside 「읽어 옵니다」 on one line. The read landed on 2026-09-18 (M5): the reply
+            // is stored on the canonical review (`seller_reply_body`, source NAVER_REVIEW_DETAIL_V1) and
+            // LearnedKnowledgeService quotes it back. The value now says which of the two is true.
+            new Row("NAVER", HistorySource.PAST_REVIEW_REPLY, Availability.SCREEN_READ,
+                    "네이버는 리뷰 답글 내용을 API나 내려받기 파일로 주지 않아, 도우미로 판매자센터의 리뷰 상세를 열어 읽어 옵니다."),
             new Row("NAVER", HistorySource.PRODUCT_DETAIL, Availability.LEARNED,
                     "상품 상세페이지의 글과 옵션을 상품별로 읽어 둡니다. 글 대신 이미지로 된 상세페이지는 읽지 못합니다."),
             new Row("CAFE24", HistorySource.PAST_INQUIRY_ANSWER, Availability.NOT_PROMOTED,

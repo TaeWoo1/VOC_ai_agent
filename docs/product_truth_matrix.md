@@ -9,8 +9,8 @@ reviewnary가 제품으로서 무엇을 제공하는가. **현재 배포에서 �
 
 ## 검토 상태
 
-- 층: capability 48행 · 제품 기능 11 · 불변식 11 · 내러티브 6 · 방향 4 · 로드맵 9
-- 전체 항목 **89**개 · 사람이 확인한 항목 **89**개 · **0**개가 `TODO_REVIEW`
+- 층: capability 48행 · 제품 기능 12 · 불변식 11 · 내러티브 6 · 방향 4 · 로드맵 9
+- 전체 항목 **90**개 · 사람이 확인한 항목 **90**개 · **0**개가 `TODO_REVIEW`
 
 ## 채널 × 객체 capability
 
@@ -436,6 +436,7 @@ reviewnary가 제품으로서 무엇을 제공하는가. **현재 배포에서 �
 | `FEATURE.ACCOUNT_AND_ORGANIZATION` | 계정과 회사 — 가입하면 회사가 하나 만들어진다 | SUPPORTED | LIVE_PROVEN |
 | `FEATURE.CHANNEL_CREDENTIAL_STORAGE` | 판매 채널 연결 자격의 보관 방식 | SUPPORTED | IMPLEMENTED |
 | `FEATURE.HELPER_DEVICE_ACCESS` | 내 컴퓨터의 도우미가 연결되는 방식 | SUPPORTED | LIVE_PROVEN |
+| `FEATURE.CUSTOMER_OPERATIONS` | 고객 운영 관리 — 맡기면 스스로 확인하고 판단할 일만 가져오기 | SUPPORTED | IMPLEMENTED |
 
 ### `FEATURE.MANUAL_FILE_ACQUISITION` — 파일로 직접 올리기 (리뷰 · 문의 · 주문 요약)
 근거: docs/multi-channel-connector-roadmap.md §4.1 「공통(전 채널) · MANUAL(파일 업로드)」 행 — 구현·라이브 검증(E2E 스모크) 둘 다 ✅ · com.sellerops.upload.UploadController (POST /api/uploads, UploadType REVIEW·INQUIRY·ORDER_SUMMARY) · 실제 판매자 데이터가 이 경로로 저장돼 있다(canonical Demo Org 의 GMARKET 리뷰 11건 — 채널 식별자도 수집 작업 id 도 없다)
@@ -531,6 +532,14 @@ reviewnary가 제품으로서 무엇을 제공하는가. **현재 배포에서 �
 - 판매자에게: 그 연결로는 도우미가 실제로 필요한 요청만 할 수 있습니다.
 - 판매자에게: 설정 화면에서 연결된 컴퓨터를 확인하고 연결을 끊으실 수 있습니다.
 - 주장 금지: 이 연결은 판매자님이 도우미를 설치하고 브라우저에서 허용하셔야 만들어집니다.
+
+### `FEATURE.CUSTOMER_OPERATIONS` — 고객 운영 관리 — 맡기면 스스로 확인하고 판단할 일만 가져오기
+근거: docs/responsibility_runtime_v1.md (§21 런타임 · §22 확인할 일과 조사 · §24·§25 실제 스케줄러가 만든 창에서 새 리뷰·문의가 확인할 일이 되기까지 라이브) · com.sellerops.responsibility.ResponsibilityTemplate 가 사람 없이 가져올 수 있는 source 만 의무로 둔다 · com.sellerops.operationscase.OperationsCaseProcessor 가 규칙으로 판단하고 조사·초안은 그 뒤에 온다. 실제 판매자 조직에서 계속 돌아간 기록은 아직 없어 evidence 를 올리지 않는다
+
+- 판매자에게: 판매자님이 맡기시면 정해진 시간마다 고객 문의와 리뷰를 스스로 살펴보고, 직접 판단하셔야 할 일만 모아 알려드립니다.
+- 판매자에게: 하나하나에 대해 무엇이 문제인지 살피고 회사에 등록된 기준을 찾아 답변 초안까지 준비해 둡니다.
+- 주장 금지: 채널마다 할 수 있는 데까지만 합니다. 답변을 보낼 수 있는지와 보낸 뒤 확인할 수 있는지는 채널별 기준을 그대로 따릅니다.
+- 주장 금지: 고객에게 보내는 마지막 결정은 판매자님이 하십니다. 준비까지가 이 기능의 몫입니다.
 
 ## 제품 전체 불변식
 
@@ -660,4 +669,4 @@ Agent 는 물어보면 조회해 주는 창구에서, 관찰하고 조사하고 
 
 ## 사람이 확인해야 하는 항목
 
-없습니다 — 89개 항목 모두 사람이 확인했습니다.
+없습니다 — 90개 항목 모두 사람이 확인했습니다.

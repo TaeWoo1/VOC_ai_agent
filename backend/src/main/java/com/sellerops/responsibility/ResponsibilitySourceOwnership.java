@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
  * <b>Who owns routine collection of a source — one owner, never two.</b>
  *
  * <p>While an organisation's responsibility is ACTIVE, the scheduled collection of each of its required sources
- * (for CUSTOMER_OPERATIONS_V1: Cafe24 INQUIRY and REVIEW on its API accounts) belongs to the responsibility runtime.
+ * (for CUSTOMER_OPERATIONS_V1: the 문의 and 리뷰 sources its template names, on this organisation's API accounts —
+ * more than one channel's since 2026-09-22) belongs to the responsibility runtime.
  * The collection scheduler ({@code SyncScheduleRunner}) asks here before running a schedule and defers an owned one:
  * no job, no second read of the same source in the same window.
  *

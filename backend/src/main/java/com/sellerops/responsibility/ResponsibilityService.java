@@ -83,7 +83,14 @@ public class ResponsibilityService {
         return rollout == null || rollout.allows(orgId);
     }
 
-    /** At least one required source is on a CONNECTED account — the activation precondition (Package B §1-1). */
+    /**
+     * At least one required source is on a CONNECTED account — the activation precondition (Package B §1-1).
+     *
+     * <p>Already channel-agnostic, and deliberately left that way when the template stopped being Cafe24-only
+     * (2026-09-22): it asks whether anything this responsibility can observe is connected, not which channel it
+     * is. {@link ResponsibilitySources#resolve} answers with the sources this organisation actually has and this
+     * deployment can actually collect, so a seller on any one of them can start.
+     */
     public boolean eligible(UUID orgId) {
         return sources.resolve(orgId, TEMPLATE).stream()
                 .anyMatch(s -> s.account().getConnectionStatus() == ChannelStatus.CONNECTED);
@@ -92,9 +99,12 @@ public class ResponsibilityService {
     public ResponsibilityView view(UUID orgId) {
         Optional<Responsibility> found = responsibilities.findByOrgIdAndTemplateCode(orgId, TEMPLATE);
         boolean available = availableFor(orgId);
-        boolean eligible = eligible(orgId);
+        // One resolve for both answers: whether anything is connected, and which sources the screen names.
+        List<ResponsibilitySources.ResolvedSource> resolved = sources.resolve(orgId, TEMPLATE);
+        boolean eligible = resolved.stream()
+                .anyMatch(s -> s.account().getConnectionStatus() == ChannelStatus.CONNECTED);
         if (found.isEmpty()) {
-            return ResponsibilityView.notActivated(TEMPLATE, available, eligible);
+            return ResponsibilityView.notActivated(TEMPLATE, available, eligible, resolved);
         }
         Responsibility r = found.get();
         List<ResponsibilityRun> recent = runs.findTop20ByResponsibilityIdOrderByWindowStartDesc(r.getId());
@@ -102,7 +112,7 @@ public class ResponsibilityService {
                 : sourceRows.findByRunIdInOrderByAttemptAscCreatedAtAsc(
                                 recent.stream().map(ResponsibilityRun::getId).toList())
                         .stream().collect(Collectors.groupingBy(ResponsibilityRunSource::getRunId));
-        return ResponsibilityView.of(TEMPLATE, r, recent, byRun, available, eligible);
+        return ResponsibilityView.of(TEMPLATE, r, recent, byRun, available, eligible, resolved);
     }
 
     public ResponsibilityView activate(UUID orgId, UUID userId) {
@@ -116,8 +126,11 @@ public class ResponsibilityService {
                             "이 계정에서는 아직 고객 운영 관리를 시작할 수 없습니다.");
                 }
                 if (!eligible(orgId)) {
+                    // Names no channel. The responsibility observes whichever of the seller's channels it can
+                    // collect without a person, so a sentence that names one of them is wrong for the sellers who
+                    // use the others — which is exactly the defect this replaces.
                     throw ApiException.conflict("NO_ELIGIBLE_SOURCE",
-                            "고객 운영 관리를 시작하려면 Cafe24를 먼저 연결해 주세요.");
+                            "고객 운영 관리를 시작하려면 판매 채널을 먼저 연결해 주세요.");
                 }
                 Responsibility r = responsibilities.findForUpdate(orgId, TEMPLATE).orElse(null);
                 RunTrigger trigger = RunTrigger.ACTIVATION;

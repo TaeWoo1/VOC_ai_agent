@@ -91,12 +91,29 @@ describe("고객 운영 관리 page", () => {
     api.getCustomerOperationsHome.mockResolvedValue(home({ status: null, decisions: { total: 0, rows: [] }, gaps: { total: 0, rows: [] }, sources: [] }));
   });
 
-  it("without a connected Cafe24 it cannot start, and says the one thing to do", async () => {
+  // Rewritten 2026-09-22: the job's sources stopped being one channel's, so the sentence and the link
+  // must stop naming one. The old version asserted 「Cafe24를 먼저 연결해 주세요」 + /connect/cafe24, which
+  // sent a seller who sells on NAVER to a shop they do not have.
+  it("without any connected channel it cannot start, and names no channel while saying so", async () => {
     api.getCustomerOperations.mockResolvedValue(view({ eligible: false }));
     renderPage();
-    expect(await screen.findByText("고객 운영 관리를 시작하려면 Cafe24를 먼저 연결해 주세요.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "카페24 연결하기" })).toHaveAttribute("href", "/connect/cafe24");
+    const sentence = await screen.findByText("고객 운영 관리를 시작하려면 판매 채널을 먼저 연결해 주세요.");
+    expect(sentence).toBeInTheDocument();
+    for (const channel of ["Cafe24", "카페24", "네이버", "쿠팡"]) {
+      expect(sentence.textContent).not.toContain(channel);
+    }
+    expect(screen.getByRole("link", { name: "판매 채널 연결하기" })).toHaveAttribute("href", "/connect");
     expect(screen.queryByRole("button", { name: /시작하기/ })).toBeNull();
+  });
+
+  // The scope the screen prints is this seller's own resolved sources — the server sends them per
+  // organisation — so a NAVER-only seller is never told the job also watches two Cafe24 boards.
+  it("names the seller's own sources, whichever channel they are", async () => {
+    api.getCustomerOperations.mockResolvedValue(view({ sourcesInScope: ["NAVER:INQUIRY"] }));
+    renderPage();
+    const job = await screen.findByRole("region", { name: "맡긴 일" });
+    expect(within(job).getByText("네이버 문의")).toBeInTheDocument();
+    expect(within(job).queryByText(/Cafe24/)).toBeNull();
   });
 
   it("states the job's contract before it is started, and starts it", async () => {

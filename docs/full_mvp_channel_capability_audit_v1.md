@@ -15,6 +15,11 @@ path로 이어져 있는가**만 적는다. 재구현 0 · 새 제품 로직 0 �
 > 새로 확인했다. 원장과 어긋나는 것을 발견하면 §5에 **보고**했고 원장을 고치지 않았다 —
 > 원장 수정은 product-owner 결정이다.
 
+> **이 문서는 `e7530e05` 시점의 스냅샷이다.** 같은 날 **G1**(고객 운영 관리의 Cafe24 종속)과
+> **G6**(NAVER 리뷰 답글 문구)이 결정·구현돼 닫혔다 — `docs/customer_operations_channel_reach_v1.md`.
+> 아래 §0의 마지막 문장과 §1의 4행(OperationsCase)은 그 결정 **이전**의 상태를 적은 것이고,
+> 기록으로 남기려고 고치지 않았다. 현재 상태는 각 gap 절의 닫힘 표시를 따른다.
+
 ---
 
 ## 0. 한 문장
@@ -64,7 +69,13 @@ Cafe24)뿐이며, 리뷰 lane은 세 채널 어디에서도 「보냈다」를 �
 
 ## 2. Full MVP를 막는 gap (우선순위 순)
 
-### G1 — 고객 운영 관리가 Cafe24 전용이다 · **PRODUCT_OWNER_DECISION**
+### G1 — 고객 운영 관리가 Cafe24 전용이다 · **2026-09-22 닫힘**
+
+> **결정되고 구현됐다** — `docs/customer_operations_channel_reach_v1.md`. 의무의 기준이 채널 목록에서
+> **acquisition mode**로 돌아갔다: AUTOMATIC이면 의무(Cafe24 문의·리뷰 · NAVER 문의 · 쿠팡 문의),
+> SELLER_GUIDED면 아니다(NAVER·쿠팡 리뷰는 그대로 device recipe). 관측만 넓어졌고 초안·승인·전송·
+> 완료 확인의 천장은 기존 capability truth 그대로다. 아래 문단은 결정 이전의 상태 기록이다.
+
 
 `ResponsibilityTemplate.CUSTOMER_OPERATIONS_V1`의 정기 source는
 `("CAFE24", INQUIRY)` + `("CAFE24", REVIEW)` **둘뿐**이고(PD-1, 2026-09-15), 활성화는
@@ -114,7 +125,13 @@ NAVER 상품문의 slice(09-17/18) · 리뷰 사진 vision(09-18) · M5 판매�
 
 ⇒ 원장을 확장할지, 이 감사 문서를 별도 층으로 둘지는 제품 결정이다. **이번 커밋은 원장을 고치지 않았다.**
 
-### G6 — 코드 안에서 한 행이 자기 문장과 어긋난다 · **보고만**
+### G6 — 코드 안에서 한 행이 자기 문장과 어긋난다 · **2026-09-22 닫힘**
+
+> **고쳤다** — 새 값 `SCREEN_READ`(공식 경로는 없고, 이 제품이 도우미로 판매자센터 상세를 열어 읽는다).
+> 지식 화면이 같은 줄에 「가져오지 못함」과 「읽어 옵니다」를 함께 그리던 것이 사라졌다.
+> `LEARNED`와 합치지 않은 이유는 그 값이 「판매자가 아무것도 하지 않아도 되는 공식 경로」를 약속하기
+> 때문이다. 아래 문단은 결정 이전의 상태 기록이다.
+
 
 `ChannelHistoryCapability`의 NAVER `PAST_REVIEW_REPLY`는 값이 **`SCREEN_UNPROVEN`**인데,
 같은 행의 설명 문장은 「판매자센터의 리뷰 상세에서 **읽어 옵니다**」라고 적는다. 그리고 실제로
@@ -182,14 +199,15 @@ Goal Interpreter **0**, Agent architecture **0**. 선례는 `pilot_readiness_clo
 
 ## 5. 결정이 필요한 것 (임의로 정하지 않았다)
 
-1. **G1** — 고객 운영 관리의 정기 범위를 Cafe24 밖으로 넓힐 것인가. 넓힌다면 PD-1이 경고한
-   「실패 아닌 이유의 「확인하지 못함」」을 어떻게 표현할 것인가.
+1. ~~**G1**~~ — **결정됨(2026-09-22)**: 넓힌다. PD-1의 경고는 acquisition mode 기준을 유지하고,
+   배포가 못 읽는 source를 아예 의무에서 빼는 것으로 답했다 — `customer_operations_channel_reach_v1.md`.
 2. **G2** — Full MVP의 완료 정의에 **리뷰 답글 라이브 증명**을 넣을 것인가. 넣는다면 대상은
    Cafe24 리뷰 댓글 1건이고 단일 사용 승인이 필요하다.
-3. **G5** — 제품 원장에 다섯 축(주문 결합 · Case · Knowledge · 승인 · 완료 확인)과
-   고객 운영 관리 feature 행을 추가할 것인가.
-4. **G6** — NAVER `PAST_REVIEW_REPLY`를 `SCREEN_UNPROVEN`으로 둘 것인가(= bootstrap 기준),
-   아니면 M5 증명을 반영할 것인가. 이 값은 **판매자 화면 문장**이다.
+3. **G5** — **일부 결정됨(2026-09-22)**: 고객 운영 관리는 `FEATURE.CUSTOMER_OPERATIONS` 한 행으로
+   들어갔고, 다섯 축은 **격자에 올리지 않기로** 했다(60행·닫힌 어휘 둘·렌더러가 함께 열린다).
+   남은 결정은 원장의 여유 1줄을 무엇에 쓸 것인가다 — `customer_operations_channel_reach_v1.md` §5.
+4. ~~**G6**~~ — **결정됨(2026-09-22)**: M5 증명을 반영하되 `LEARNED`로 올리지 않고 `SCREEN_READ`를
+   더했다 — 공식 경로가 아니고 도우미가 필요하다는 것이 판매자가 알아야 할 차이다.
 5. **G7** — 쿠팡 문의 답변 1회 라이브를 Full MVP에 넣을 것인가.
 
 ---

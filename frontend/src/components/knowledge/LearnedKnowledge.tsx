@@ -135,7 +135,11 @@ function ChannelLines({ lines }: { lines: LearnedKnowledgeChannelLine[] }) {
               .filter((line) => line.channelNameKo === channel)
               .map((line) => (
                 <li key={line.source} className="flex flex-wrap items-start gap-2 text-sm">
-                  {line.availability === "LEARNED" ? (
+                  {/* Two ways of having it, one badge: an official path that needs nothing of the seller
+                      (LEARNED) and a bounded read of their own seller-center screen (SCREEN_READ). The
+                      sentence beside it says which. Drawing 「가져오지 못함」 for the second one contradicted
+                      its own sentence on the same line. */}
+                  {line.availability === "LEARNED" || line.availability === "SCREEN_READ" ? (
                     <Status tone="info">가져옴</Status>
                   ) : (
                     <Status tone="neutral">가져오지 못함</Status>

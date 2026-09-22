@@ -233,10 +233,15 @@ class ProductTruthConverseFloorTest {
      * <b>How close the widest ACCEPTED plan is, stated as a number rather than left to be discovered.</b>
      *
      * Adding six reviewed items moved {@code PRODUCT_OVERVIEW} from 60 facts to 66, and with the
-     * overlay beside it that is two lines under the bound. The next few additions to the ledger will
-     * push a plan that works today over it, and the failure is silent to a seller — the grounded answer
-     * is simply replaced by the older composed one. So the margin is asserted: this fails while there is
-     * still room to decide, rather than after a QA sitting notices the answer changed.
+     * overlay beside it that was two lines under the bound. {@code FEATURE.CUSTOMER_OPERATIONS}
+     * (2026-09-22) spent one of them: 67 + 12 = 79, so <b>one line is left</b>. The next few additions to
+     * the ledger will push a plan that works today over it, and the failure is silent to a seller — the
+     * grounded answer is simply replaced by the older composed one. So the margin is asserted: this fails
+     * while there is still room to decide, rather than after a QA sitting notices the answer changed.
+     *
+     * <p><b>What the next author has to decide rather than edit.</b> When this number will not go down,
+     * the choice is between narrowing what {@code PRODUCT_OVERVIEW} sends ({@code onlyIds}) and raising
+     * {@code MAX_FACTS}; both are product-owner decisions, and bumping the literal below is neither.
      */
     @Test
     void theWidestAcceptedPlanStillHasRoomForTheOverlay() throws Exception {
@@ -245,7 +250,7 @@ class ProductTruthConverseFloorTest {
         assertThat(worst + RUNTIME_OVERLAY_LINES)
                 .as("floor 상한 %d 에 가장 가까운 계획", ConverseRequestFloor.MAX_FACTS)
                 .isLessThanOrEqualTo(ConverseRequestFloor.MAX_FACTS);
-        assertThat(worst).as("가장 큰 통과 계획의 사실 수").isEqualTo(66);
+        assertThat(worst).as("가장 큰 통과 계획의 사실 수").isEqualTo(67);
     }
 
     @Test
@@ -260,7 +265,7 @@ class ProductTruthConverseFloorTest {
         assertThat(over)
                 .as("floor 의 사실 개수 상한(%d)에 overlay %d줄까지 더해 넘는 계획",
                         ConverseRequestFloor.MAX_FACTS, RUNTIME_OVERLAY_LINES)
-                .containsExactly("UNPLACED=79", "UNPLACED+INQUIRY=91");
+                .containsExactly("UNPLACED=80", "UNPLACED+INQUIRY=92");
     }
 
     private record Plan(String label, List<String> facts, List<String> ids) {
