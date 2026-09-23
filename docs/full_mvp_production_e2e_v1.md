@@ -474,3 +474,60 @@ WRITE 증명 행) · `knowledge_candidate` · `knowledge_embedding` · 리뷰 la
 
 **증명하지 않는다**: 초안 **문장**의 결정론(고정된 것은 어떤 근거가 실렸는가이다) · 다른 채널의 전송 ·
 리뷰 답변 전송 · `MODEL` 초안을 그대로 보내는 것이 옳은 제품 결정인가(§4-1의 미결).
+
+### 4-9. 실행 시도 1 — `HALTED_AT_PRECONDITION` (2026-09-23 19:35~19:41 KST)
+
+승인 **`apr-c24-a3678-stage3-01c3d8b4bf78ab87`**(mode WRITE, max 1) 아래에서 §4-4를 시작했고 **1단계에서
+멈췄다**. **marketplace WRITE 0 · POST 0 · 승인 미소진.**
+
+**자세.** 1단계는 `inquiry.publish.execution-enabled=**false**`인 프로세스에서 했다 — 그 설정에서는
+`PublishExecutionWiring`이 조건을 만족하지 못해 **어떤 ChannelReplyAdapter bean도 존재하지 않으므로**, 실수로도
+POST에 도달할 수 없다. 「읽기만 하겠다」가 의도가 아니라 **구조**인 상태에서 읽었다. 커넥터는 CAFE24만 ON,
+모델 capability 16개 OFF + API key 15개 공백(둘 다 끈 이유는 boot validator가 「켰는데 키가 없음」을 거부하기
+때문이고, 그 거부가 §4-2가 말한 fence가 실제로 도는 모습이다), 스케줄러 전부 OFF, 18080 격리 기동 3회.
+
+**관측 — exact article READ 3회가 전부 빈손.** 계측기는 `Cafe24ShopScopeProbe`(단일 bounded LIST, 명시된
+article 번호만, 쓰기 없음).
+
+| # | 요청 | 대상 | 결과 |
+|---|---|---|---|
+| ① | 1회 | `3678` | `OK` · 조회대상 1 · **응답 0** |
+| ② | 1회 | `3672, 3673, 3676, 3678` | `OK` · 조회대상 4 · **응답 0** |
+| ③ | 1회 | `3672` | `OK` · 조회대상 1 · **응답 0** |
+
+**③이 판정의 근거다.** `article_no=3672` 단건 필터는 2026-08-25에 이 계측기가 `shop_no=1 · board_no=6`을
+확정하며 **행을 돌려준 바로 그 호출**이다(§inquiry_answer_execution_v1 Part D). 지금은 HTTP 200에 `articles`
+배열이 비어서 온다. **필터가 무시된 것이 아니다** — 무시됐다면 무관한 행이라도 돌아왔을 것이고, 0이 온다는
+것은 몰이 이 스코프에 그런 글이 없다고 답한 것이다. 따라서 부재는 목표 하나의 성질이 아니라 **exact-id 경로
+전체**의 성질이다.
+
+**「삭제」로 판정하지 않는다.** 관측된 것은 부재뿐이고, 「absence는 삭제로 자동 판정되지 않는다」
+(`docs/inquiry_operational_truth_v1.md`)가 그것을 금지한다. 다만 §1-7에 operator가 `a3676`을 마켓플레이스에서
+직접 삭제한 전례가 있고, 부재한 넷 중 하나가 바로 그 `3676`이다.
+
+**같은 날 04:00 수집은 `a3678`을 실제로 관측했다** — §3-3의 CAFE24 문의 `COMPLETE` **관측 1 / 새 1**이 그것이고,
+같은 자격·같은 board 6이다. 그 경로는 **날짜창 목록**이고 이번에 빈손인 것은 **article_no 지정 조회**다. 두
+경로의 관측이 갈린다는 것이 이 기록의 핵심 관측이며, 원인은 미확정이다.
+
+**진행하지 않은 두 번째 이유 — 검증이 같은 읽기 위에 서 있다.** `Cafe24ChannelReplyAdapter.verifyCreated`는
+`fetchByArticleNumbers`로 자식 글을 찾는다. exact-id 경로가 빈손인 상태에서는 POST가 성공해도 자식을 찾지
+못해 판정이 **`DELIVERY_UNKNOWN`**으로 떨어진다. 그러면 단일 사용 WRITE를 쓰고도 `VERIFIED`에 도달할 수 없고,
+재전송은 금지(덮어쓰기가 아니라 두 번째 자식 글이 된다)이므로 복구 경로도 없다. **검증 불가가 예정된 전송은
+승인이 허가한 것이 아니다.**
+
+**DB (실행 전후 동일).** approval **3** · action intent **3** · execution **3** · verification **2** ·
+work item `4c53cbee` **`PROPOSED`** · case `e1df3bb5` **`PREPARED`** · inquiry `11b6a729` **`UNANSWERED`** ·
+draft **v1**(fp `5b8f5037…d18c3`) · `agent_llm_usage` **2575**(모델 호출 **0**) · `answer_memory` **25**.
+§4-7의 실행 전 스냅샷과 **한 칸도 다르지 않다**. 유일한 쓰기는 **인가가 필수로 수반하는 Cafe24 refresh token
+단일 사용 회전**(`connector_credentials.last_rotated_at` 19:40:16)이고, 이는 승인된 READ의 성질이지 이 run의
+결정이 아니다. 부팅마다 도는 answer-memory 백필도 재실행됐고 새 행은 0이다(Stage 1과 같은 부수 효과).
+
+marketplace 요청: LIST **3** + 토큰 갱신 ≤3. WRITE **0**. ERROR/WARN **0**. 18080 프로세스는 전부 종료했고
+기존 8080 backend는 건드리지 않았다.
+
+**승인 상태**: `apr-c24-a3678-stage3-01c3d8b4bf78ab87`은 **소진되지 않았다**. 코드가 `720c3cee` 그대로이고
+계정·채널·대상 범위가 유지되는 동안 같은 세션에서 유효하다.
+
+**다음에 필요한 것**(셋 중 하나, 전부 product-owner 입력): 마켓플레이스 관리자에서 board 6에 `a3678`이
+실제로 있는지 육안 확인 · 없으면 새 테스트 문의를 올려 수집 run 1회로 새 대상을 만들고 manifest를 갱신 ·
+있으면 스코프 축(shop_no / mall / board)을 좁히는 bounded READ.
