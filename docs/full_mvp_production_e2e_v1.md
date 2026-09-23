@@ -542,3 +542,128 @@ marketplace 요청: LIST **3** + 토큰 갱신 ≤3. WRITE **0**. ERROR/WARN **0
 ② Case / Goal / Knowledge / Grounded Draft 생성 → ③ **새 `article_no`의 exact READ 성공 확인** →
 ④ 새 draft 전문과 fingerprint 확정 → ⑤ 새 Stage 3 승인 manifest. ①②는 마켓플레이스 READ와 모델 호출을
 쓰므로 그 자체로 별도의 단일 사용 승인이 필요하고, ⑤의 WRITE 승인과는 다른 승인이다.
+
+## 5. Stage 3 재시도 준비 — 새 대상의 수집·판단·초안 · **manifest (미실행)**
+
+§4의 대상이 사라졌으므로(§4-9) 새 Cafe24 테스트 문의로 다시 시작한다. **이 manifest는 READ와 모델까지만
+덮는다 — marketplace WRITE는 범위 밖이고, 전송은 §6이 될 별도 WRITE manifest와 별도 승인으로 받는다.**
+
+### 5-0. 승인과 범위
+
+- 승인 **`apr-resp-e2e5-5a615e1f2167a6f5`** · runId `resp-full-e2e-5` · mode **READ_ONLY + 모델** ·
+  **marketplace WRITE 0** · 자동 재시도 0 · 단일 사용. **미소진**.
+- 기준 커밋 **`0f7efc7f`**(제품 코드는 `cbab8347`과 동일 — 이후 두 커밋은 문서뿐이다).
+- 선행: operator가 Cafe24 게시판에 새 테스트 문의를 올렸다(주제: **교환/반품 기한 + 미개봉 기준**). §3과
+  같은 계열을 고른 것은 의도된 것이다 — §2-5의 corroboration 수정이 지나는 경로가 같아 `GROUNDED` 초안까지
+  갈 가능성이 높고, §3-3과 나란히 읽을 수 있다.
+- 은퇴한 승인 `apr-c24-a3678-stage3-01c3d8b4bf78ab87`은 **이 run에서 무장하지 않는다**(§4 배너).
+
+### 5-1. 대상 — 아직 번호를 모른다
+
+새 문의의 `article_no`는 **수집이 관측하기 전까지 이 저장소에 없다.** 그것이 이 단계의 산출물이고, §5-4의
+3단계가 그 번호로 exact READ가 **성공하는지**까지 확인한다 — §4-9가 `3672`에 대해 미확정으로 남긴 질문에
+답하는 자리가 여기다. 대상 계정·채널·게시판은 그대로: 계정 `78da0eb3`, CAFE24, board 6.
+
+### 5-2. arming
+
+**켜는 것** — §3과 같은 자세. 격리 backend **18080**, `RESPONSIBILITY_RUNTIME_ORG_IDS` = Demo Org 하나.
+
+| 대상 | 값 | 이유 |
+|---|---|---|
+| responsibility scheduler | ON | 이 run의 유일한 시계 |
+| 커넥터 NAVER · CAFE24 · COUPANG | ON | 템플릿이 네 source를 읽는다. 하나라도 끄면 그 source가 **장애로 관측돼 GAP case가 열린다** — 끄는 것이 더 큰 부작용이다 |
+| 모델 5종 | Inquiry Goal · Agent Draft · Knowledge embedding · intent · eligibility | §3-4가 실제로 쓴 그 다섯 |
+| access scope | `ALLOW_LIST`, Demo Org만 | |
+
+**끄는 것** — collect scheduler · self-pilot · proactive · aside · admin dismissal · 리뷰 publish ·
+나머지 모델 capability 11종(+ 해당 API key 공백).
+
+**전송 경로는 이 run에서 구조적으로 닫는다**(§4-9의 자세를 그대로 재사용):
+
+| 키 | 값 | 결과 |
+|---|---|---|
+| `sellerops.inquiry.publish.execution-enabled` | **false** | `PublishExecutionWiring`이 서지 않아 **ChannelReplyAdapter bean이 하나도 없다** — POST에 도달할 방법이 없다 |
+| `sellerops.inquiry.publish.cafe24.live-approval-id` | **공백으로 강제** | `.env.local`의 옛 값과 은퇴한 승인이 되살아나지 않는다 |
+| `sellerops.review.publish.execution-enabled` | false | |
+
+`.env.local`이 이 셋에 대해 무엇을 들고 있든 `SPRING_APPLICATION_JSON`이 이긴다(OS 환경변수보다 상위) —
+이것이 §4-9에서 실제로 확인된 성질이다.
+
+### 5-3. 예산
+
+| 항목 | 상한 |
+|---|---|
+| marketplace **WRITE** | **0** — 구조적으로 도달 불가 |
+| marketplace READ | ≤ **22** (§2-2 실측 11~12 + 여유). NAVER 토큰+GET 2 · CAFE24 토큰 갱신 2 + 목록 2 + 답변 관측 ≤2 · COUPANG 2 |
+| 3단계 exact READ | **+1 LIST** (+ 토큰 갱신 ≤2) |
+| vendor 호출 | 문의당 ≤ **12**, run 전체 ≤ **36** |
+| 과금 호출(goal + draft) | **≤ 3** — 오늘 사용량 **3**(INTERPRET 2 · DRAFT 1, 04:00 run), 일일 상한을 **6**으로 두어 강제 |
+| 신규 문의 유입 | ≤ **3** |
+| responsibility run **실행** | **정확히 1** |
+| DB 직접 수정 | **0** |
+
+**「정확히 1」은 조작이 아니라 스케줄이 보증한다.** `next_run_at`이 **06:00**이고 지금은 21:18 KST이므로,
+`materializeDue()`가 06·08·10·12·14·16·18 창을 만들면서 **끝난 창은 그 자리에서 `MISSED`로 취소**하고
+(`windowEnd ≤ now` 분기), 열려 있는 **20:00–22:00 하나만** 실행 가능한 run이 된다. 그러므로
+**`responsibility_run` +8 (MISSED 7 + 실행 1)**이 예상되며 이는 런타임의 정상 동작이지 결함이 아니다.
+22:00을 넘겨 기동하면 열린 창이 22:00–24:00으로 바뀔 뿐 개수는 같다. pause/resume 조작은 하지 않는다.
+
+### 5-4. 절차
+
+1. **run 1회** — 18080 기동, 열린 창이 실행되고 `SUCCESS`를 기록하면 즉시 프로세스 종료.
+2. **단계별 대조** — 수집 · Case · Goal · Knowledge · Resolution · Draft를 §5-5와 맞춘다.
+3. **새 `article_no` exact READ** — 쓰기 불가 프로세스에서 `Cafe24ShopScopeProbe` **1회**. 새 번호가
+   `article_no` 단건 필터로 **돌아오는지**, `parent_article_no`가 비어 있는지(ROOT), `reply_status`가
+   무엇인지 본다. **이 단계가 통과해야 §6 WRITE manifest를 쓸 수 있다** — 검증이 같은 읽기 위에 서 있기
+   때문이다(§4-9).
+4. **draft 전문과 fingerprint 확정** — DB에서 실측해 §6에 전문으로 싣는다.
+
+### 5-5. 성공 시 예상 상태
+
+| 단계 | 기대 |
+|---|---|
+| 수집 | CAFE24 문의 `COMPLETE` **관측 1 / 새 1** · NAVER · CAFE24 리뷰 · COUPANG `COMPLETE` 0 |
+| 새 문의 | REAL · ROOT · UNANSWERED · `cafe24:b6:a<새 번호>` |
+| Case | 새 case 1건 `PREPARED` · `CUSTOMER_WORK` · `decided_by=RULE` |
+| Goal | `INTERPRETED`, `customer-goal-interpreter/v3` |
+| Knowledge | **FOUND** — 근거 2건(`ORG_POLICY 교환·반품 기준` + `ORG_POLICY 배송교환정책`), §2-5 수정이 지나는 경로 |
+| Eligibility | 실제 호출, 거절 0 |
+| Resolution | **`REPLY_TO_CUSTOMER`** |
+| Draft | work item **`PROPOSED`** · v1 **`MODEL`** · **`answer_basis=GROUNDED`** |
+| 기존 4건 | 모델 호출 **0** — `bf624a8b`·`a5bc25e0`는 `ANSWERED`라 case가 열리지 않고, `89d24480`·`59c7c80c`·`11b6a729`는 signature 불변이라 단락된다. 예상 로그 **`변화없음=3 새Case=1 조사생략=1 초안=1`** |
+| `11b6a729`(삭제된 a3678) | **변화 없음** — 로컬 행은 계약대로 보존되고, 수집이 돌려주지 않는 것은 삭제로 판정되지 않는다 |
+| 3단계 exact READ | 새 번호 **1건 반환** · `parent_article_no` 비어 있음 · `reply_status` 기록 |
+
+**불변이어야 하는 것**: approval **3** · execution **3** · verification **2** · `57ee2220` · `a492dba2` ·
+`7eafaf5a` · 리뷰 lane 전부 · 다른 org.
+
+### 5-6. 중단 조건
+
+- 새 문의가 수집되지 않는다 → 중단하고 보고(모델 호출 전에 드러난다).
+- 모델 호출이 문의당 12 또는 run 36을 넘으려 한다 / 과금 3을 넘으려 한다 → 중단.
+- 신규 문의가 3건을 넘게 들어온다 → 중단.
+- run이 2개 이상 실행되려 한다 → 중단.
+- 3단계 exact READ가 **또 빈손이다** → **§6을 쓰지 않는다.** 그때는 §4-9가 미확정으로 남긴 질문이
+  목표의 성질이 아니라 경로의 성질이라는 뜻이고, 그 진단이 전송보다 먼저다.
+
+### 5-7. 실행 전 DB 스냅샷 (실측, 2026-09-23 21:18 KST, org `7146c50f`)
+
+| 카운터 | 값 | | 카운터 | 값 |
+|---|---|---|---|---|
+| inquiries REAL | **3345** | | inquiry_proposal | **21** |
+| inquiries UNANSWERED REAL | **3270** | | inquiry_reply_draft | **18** |
+| work item (전체) | **3278** | | draft evidence | **138** |
+| wi `PROPOSED` | **14** | | goal interpretation | **4** |
+| wi `OPEN` | **12** | | agent_llm_usage | **2575** |
+| proactive_case | **5** (전부 `PREPARED`) | | knowledge_embedding | **157** |
+| case event | **10** | | knowledge_candidate | **3** |
+| responsibility_run | **6** | | sync_jobs | **2303** |
+
+approval **3** · action intent **3** · execution **3** · verification **2** · answer_memory **25**.
+오늘 과금 사용량 **3**(INTERPRET 2 · DRAFT 1).
+
+### 5-8. 이 manifest가 하지 않는 것
+
+marketplace WRITE **0**. 승인 `apr-resp-e2e5-5a615e1f2167a6f5`는 **전송을 허가하지 않으며**, 전송 경로는
+설정으로 꺼진 것이 아니라 **bean이 없어 도달 불가**다. 초안은 `PROPOSED`에서 멈추고 승인·intent·execution은
+한 행도 쓰이지 않는다. 전송은 §6의 별도 WRITE manifest와 **별도 단일 사용 승인**으로만 시작한다.
