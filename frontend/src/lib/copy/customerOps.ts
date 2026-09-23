@@ -16,6 +16,35 @@
 
 export const DRAFT_UNSENT = "미발송";
 
+/**
+ * The draft's send state, in one word — 「미발송」 only while that is still true.
+ *
+ * <p>The tag was a constant, and it was right for every draft this screen had ever shown: nothing
+ * here sends, so a prepared draft was always unsent. It stopped being right the moment a send could
+ * land elsewhere and be read back — a seller who answered from the inquiry screen came back to a
+ * case still labelling their delivered answer 「미발송」, which is the same class of defect as the
+ * Home badge that claimed an approval nobody had granted.
+ *
+ * <p>`category` is the backend's `PublishOutcomeCategory`. An unknown token falls back to
+ * {@link DRAFT_UNSENT} rather than printing itself: this is a tag on a seller's screen.
+ */
+export function draftSendWord(delivery: { category: string } | null | undefined): string {
+  switch (delivery?.category) {
+    case "COMPLETED":
+      return "등록됨";
+    case "PUBLISHING":
+    case "CHECKING_REQUIRED":
+      return "등록 확인 중";
+    case "RETRYABLE":
+    case "PENDING":
+      return "등록 대기";
+    case "PERMANENT":
+      return "등록 실패";
+    default:
+      return DRAFT_UNSENT;
+  }
+}
+
 export const COPY = {
   homeTitle: "오늘",
   checkedLabel: "자동 확인 · 24시간",

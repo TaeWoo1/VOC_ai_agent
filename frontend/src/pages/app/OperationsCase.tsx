@@ -8,7 +8,7 @@ import { Facts } from "../../components/ui/ObjectRow";
 import { CaseBlock, CaseLayout, CaseQuote, type CaseVariant, type PaneDepth } from "../../components/workspace/CaseLayout";
 import { api } from "../../lib/apiClient";
 import { actionKo, subjectFallback } from "../../lib/customerOperations";
-import { COPY, DRAFT_UNSENT, decisionOf, photoWord, shortDate, sourceLabel, waitLabel } from "../../lib/copy/customerOps";
+import { COPY, draftSendWord, decisionOf, photoWord, shortDate, sourceLabel, waitLabel } from "../../lib/copy/customerOps";
 import { plainText } from "../../lib/plainText";
 import type { OperationsCaseDetail, OperationsCaseNeed } from "../../lib/customerOperationsTypes";
 
@@ -560,7 +560,7 @@ function DraftPreview({ detail }: { detail: OperationsCaseDetail }) {
     <div className="border-t border-line pt-4">
       <div className="mb-2 flex items-center gap-2">
         <h3 className="text-sm font-bold text-muted">{COPY.draftTitle}</h3>
-        <Tag tone="line">{DRAFT_UNSENT}</Tag>
+        <Tag tone="line">{draftSendWord(draft.delivery)}</Tag>
       </div>
       <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-4 py-3 text-[15px] leading-[1.8] text-ink [overflow-wrap:anywhere]">
         {draft.body}
@@ -726,7 +726,7 @@ function DraftCard({ caseId, detail, primary, onApplied, onFailed }: CardProps &
     <ActionCard primary={primary} ariaLabel={COPY.draftTitle}>
       <div className="flex items-center gap-2">
         <h2 className="text-base font-extrabold text-ink">{COPY.draftTitle}</h2>
-        <Tag tone="line">{DRAFT_UNSENT}</Tag>
+        <Tag tone="line">{draftSendWord(draft.delivery)}</Tag>
       </div>
       {editing ? (
         <>

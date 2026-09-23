@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { HomePreparedItem } from "../../lib/types";
+import { preparedStateWord } from "../../lib/preparedState";
 
 /**
  * <b>How a piece of already-decided work reads on a Home — in one place, for every Home there is.</b>
@@ -15,6 +16,11 @@ import type { HomePreparedItem } from "../../lib/types";
  *
  * <p>The distinguishing fact leads when there is one. Four rows reading 「승인된 리뷰 답변」 are four links a seller
  * cannot choose between; the kind of work follows as the quieter half.
+ *
+ * <p><b>Each row says what IT is waiting for.</b> The section above used to carry a single badge —
+ * 「승인함 · 등록 전」 — which was a claim about a standing approval and was false of every inquiry row on the
+ * list. The word now comes from the row's own record (`preparedStateWord`), and a row with nothing distinct
+ * to say stays silent rather than repeating the same label down the column.
  */
 export function PreparedWorkList({
   rows,
@@ -29,7 +35,9 @@ export function PreparedWorkList({
   if (rows.length === 0) return null;
   return (
     <ul className="mt-3 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
-      {rows.map((row) => (
+      {rows.map((row) => {
+        const state = preparedStateWord(row);
+        return (
         <li key={`${row.kind}-${row.id}`}>
           <Link
             to={linkFor ? linkFor(row) : row.to}
@@ -46,10 +54,12 @@ export function PreparedWorkList({
             ) : (
               <span className="break-keep">{row.label}</span>
             )}
+            {state ? <span className="ml-2 text-sm text-muted">{state}</span> : null}
             <span className="ml-1 text-brand-700" aria-hidden="true">›</span>
           </Link>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

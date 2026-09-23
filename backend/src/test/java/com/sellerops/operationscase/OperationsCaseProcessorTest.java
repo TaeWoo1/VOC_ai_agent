@@ -471,6 +471,125 @@ class OperationsCaseProcessorTest {
     }
 
     /**
+     * <b>A bound approval is not an action that reached anyone</b> (Stage 3 lifecycle closure, G1).
+     *
+     * <p>The fixture is the shape work item {@code 57ee2220} has held on the live org since
+     * 2026-08-20: approved into a deployment with no reply adapter, so the binding wrote
+     * {@code ACTION_PENDING} and the dispatch found nothing to carry it and returned quietly. Reading
+     * the phase alone, the card closed as 「판매자가 조치함」 — for a customer who had been told nothing,
+     * on a work item where the one approval it will ever get had already been spent.
+     *
+     * <p>That live row is deliberately NOT repaired in place. It is the evidence this rule exists, and
+     * a migration would delete the only production example of the state it prevents.
+     */
+    @Test
+    void anApprovalBoundButNeverDispatched_leavesTheCaseOpen() {
+        Inquiry inquiry = inquiry("반품하고 싶어요.", Instant.now());
+        InquiryWorkItem item = workItem(inquiry);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        item.setPhase(InquiryWorkItemPhase.ACTION_PENDING);
+        workItems.save(item);
+        InquiryExecution execution = new InquiryExecution();
+        execution.setOrgId(org);
+        execution.setWorkItemId(item.getId());
+        execution.setActionIntentId(UUID.randomUUID());
+        execution.setDispatchKey("dispatch-" + item.getId());
+        execution.setStatus(InquiryExecutionStatus.ACTION_PENDING);
+        executions.save(execution);
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        OperationsCase c = caseFor(inquiry.getId());
+        assertThat(c.getStatus())
+                .as("nothing was handed to a transport, so the seller has not finished and the card stays")
+                .isEqualTo(OperationsCaseStatus.PREPARED);
+        assertThat(c.getActedAt()).isNull();
+        assertThat(c.getResolutionReason()).isNull();
+    }
+
+    /**
+     * The same phase, once something actually left: the rule asks the execution row, not the phase, so
+     * a dispatch that was refused still counts as the seller having acted — the attempt is recorded,
+     * and what became of it is quoted rather than judged here.
+     */
+    @Test
+    void anApprovalWhoseDispatchWasRefused_closesTheCaseAndQuotesTheFailure() {
+        Inquiry inquiry = inquiry("색상 교환이 되나요?", Instant.now());
+        InquiryWorkItem item = workItem(inquiry);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        item.setPhase(InquiryWorkItemPhase.FAILED);
+        workItems.save(item);
+        InquiryExecution execution = new InquiryExecution();
+        execution.setOrgId(org);
+        execution.setWorkItemId(item.getId());
+        execution.setActionIntentId(UUID.randomUUID());
+        execution.setDispatchKey("dispatch-" + item.getId());
+        execution.setStatus(InquiryExecutionStatus.FAILED);
+        executions.save(execution);
+
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        OperationsCase c = caseFor(inquiry.getId());
+        assertThat(c.getStatus()).isEqualTo(OperationsCaseStatus.ACTED);
+        String provenance = events.findAll().stream()
+                .filter(e -> c.getId().equals(e.getCaseId()))
+                .map(OperationsCaseEvent::getProvenance)
+                .filter(p -> p != null && p.contains("delivery="))
+                .reduce((a, b) -> b)
+                .orElseThrow();
+        assertThat(provenance).contains("delivery=FAILED");
+    }
+
+    /**
+     * <b>The card stops asking when the answer lands, not two hours later</b> (Stage 3 lifecycle
+     * closure, G4).
+     *
+     * <p>{@code converge} is the run's own derivation applied to one subject, so this asserts two
+     * things at once: that it settles the case without a run, and that it refuses to settle one the
+     * run would have left alone — the same fixture as the test above, which is how we know this is not
+     * a second opinion with a shortcut attached.
+     */
+    @Test
+    void convergeSettlesOneCaseWithoutARun_andStillRefusesAnApprovalThatNeverDispatched() {
+        Inquiry answered = inquiry("교환 절차 알려주세요.", Instant.now());
+        InquiryWorkItem answeredItem = workItem(answered);
+        Inquiry pending = inquiry("환불 가능한가요?", Instant.now());
+        InquiryWorkItem pendingItem = workItem(pending);
+        processor.process(run(Instant.now(), null, null), () -> false);
+
+        answeredItem.setPhase(InquiryWorkItemPhase.COMPLETED);
+        workItems.save(answeredItem);
+        InquiryExecution done = new InquiryExecution();
+        done.setOrgId(org);
+        done.setWorkItemId(answeredItem.getId());
+        done.setActionIntentId(UUID.randomUUID());
+        done.setDispatchKey("dispatch-" + answeredItem.getId());
+        done.setStatus(InquiryExecutionStatus.COMPLETED);
+        executions.save(done);
+
+        pendingItem.setPhase(InquiryWorkItemPhase.ACTION_PENDING);
+        workItems.save(pendingItem);
+        InquiryExecution stuck = new InquiryExecution();
+        stuck.setOrgId(org);
+        stuck.setWorkItemId(pendingItem.getId());
+        stuck.setActionIntentId(UUID.randomUUID());
+        stuck.setDispatchKey("dispatch-" + pendingItem.getId());
+        stuck.setStatus(InquiryExecutionStatus.ACTION_PENDING);
+        executions.save(stuck);
+
+        assertThat(reconciler.converge(org, OperationsSubjectKind.INQUIRY, answered.getId())).isTrue();
+        assertThat(reconciler.converge(org, OperationsSubjectKind.INQUIRY, pending.getId())).isFalse();
+
+        assertThat(caseFor(answered.getId()).getStatus()).isEqualTo(OperationsCaseStatus.ACTED);
+        assertThat(caseFor(pending.getId()).getStatus()).isEqualTo(OperationsCaseStatus.PREPARED);
+        assertThat(reconciler.converge(UUID.randomUUID(), OperationsSubjectKind.INQUIRY, answered.getId()))
+                .as("another organisation's id reaches nothing")
+                .isFalse();
+    }
+
+    /**
      * <b>The whole single-item chain</b> (Customer Ops Demo Closure v1 §4), with nothing hand-inserted between the
      * steps: a scheduled run opens the case, the investigator concludes NEEDS_DECISION and a draft is prepared; the
      * seller approves that exact draft through the production publish service (the channel adapter is the only fake —

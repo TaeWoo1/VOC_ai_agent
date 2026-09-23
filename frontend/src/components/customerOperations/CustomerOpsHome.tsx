@@ -511,11 +511,12 @@ function AwaitingExecution({
 
   return (
     <section aria-label="실행 대기" id="실행-대기">
+      {/* The badge that used to sit here said 「승인함 · 등록 전」 over every row. It is what a standing
+          review approval is, and what an inquiry row is not — those arrive with the work item still
+          PROPOSED and no approval anywhere. One badge cannot be true of both, so the state moved onto
+          the rows, where each one can say its own (see lib/preparedState.ts). */}
       <div className="mb-3 mt-8 flex items-center gap-2">
         <h2 className="text-[17px] font-bold tracking-tight text-ink">실행 대기</h2>
-        <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">
-          승인함 · 등록 전
-        </span>
       </div>
       <PreparedWorkList
         rows={rows}

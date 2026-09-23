@@ -74,6 +74,12 @@ public class InquiryProposalService {
     private final InquiryOrderFactReader orderFacts;
     private final com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets;
     private final com.sellerops.identity.ExecutableIdentityResolver identity;
+    /**
+     * What the answer lifecycle observed for this work item. Null in the test wiring that predates
+     * it, where every detail simply reports no delivery — the same answer a work item that never
+     * reached an execution gets.
+     */
+    private final com.sellerops.inquiry.publish.AnswerDeliveryTruthReader deliveries;
 
     @org.springframework.beans.factory.annotation.Autowired
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
@@ -85,7 +91,9 @@ public class InquiryProposalService {
                                   InquiryReplyCapabilityRegistry capabilities,
                                   InquiryOrderFactReader orderFacts,
                                   com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets,
-                                  com.sellerops.identity.ExecutableIdentityResolver identity) {
+                                  com.sellerops.identity.ExecutableIdentityResolver identity,
+                                  com.sellerops.inquiry.publish.AnswerDeliveryTruthReader deliveries) {
+        this.deliveries = deliveries;
         this.identity = identity;
         this.workItems = workItems;
         this.proposals = proposals;
@@ -114,7 +122,7 @@ public class InquiryProposalService {
                                   com.sellerops.inquiry.draft.DraftEvidenceSnippets snippets) {
         this(workItems, proposals, inquiries, provider, writer, drafts, channels, products, draftEvidence,
                 targetState, capabilities, orderFacts, snippets,
-                com.sellerops.identity.ExecutableIdentityResolver.unresolved());
+                com.sellerops.identity.ExecutableIdentityResolver.unresolved(), null);
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -160,7 +168,10 @@ public class InquiryProposalService {
                 // The deterministic fast path. "이 주문 상태가 뭐야?" on the detail screen is a join,
                 // not a plan — an LLM planner has nothing to contribute to reading one row and would
                 // add latency, cost, and a chance of paraphrasing it.
-                OrderContextView.of(orderFacts.read(orgId, inquiry, OrderFactLookup.EXACT_ALLOWED)));
+                OrderContextView.of(orderFacts.read(orgId, inquiry, OrderFactLookup.EXACT_ALLOWED)),
+                // What became of the send, read back from the rows the publish package wrote. Present
+                // on the DETAIL so the outcome survives the reload that used to lose it.
+                deliveries == null ? null : deliveries.view(orgId, workItemId).orElse(null));
     }
 
     /**

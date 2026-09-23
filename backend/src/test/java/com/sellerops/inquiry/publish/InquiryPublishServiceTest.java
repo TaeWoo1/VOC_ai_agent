@@ -124,6 +124,25 @@ class InquiryPublishServiceTest {
                 targetState(), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
+    /**
+     * Approval + intent + pending execution + the PROPOSED &rarr; ACTION_PENDING flip, written exactly
+     * as confirm writes them.
+     *
+     * <p>Used wherever a test needs the bound-but-undispatched state as a STARTING POINT. Confirm used
+     * to be the shortcut to it (approve with no adapter) and that shortcut is the defect G1 closes, so
+     * the fixture now calls the production binding writer directly. The state itself remains reachable
+     * in production — a retryable dispatch returns to it, and the legacy rows on the live org sit in
+     * it — which is why the tests that resume from it are still about something real.
+     */
+    private void bindApproval(InquiryWorkItem wi) {
+        Inquiry target = inquiries.findById(wi.getInquiryId()).orElseThrow();
+        InquiryReplyDraft head = drafts.findTopByWorkItemIdOrderByVersionDesc(wi.getId()).orElseThrow();
+        writer.bind(workItems.findById(wi.getId()).orElseThrow(), head,
+                new InquiryPublishBindingWriter.ApprovalTarget(wi.getSellerAccountId(), wi.getChannelId(),
+                        target.getExternalId(), target.getSourceSubtype()),
+                "cmd1", "SELLER:" + user);
+    }
+
     /** Service with NO adapter registered (fail-closed: nothing dispatches). */
     private InquiryPublishService withoutAdapter() {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
@@ -213,27 +232,40 @@ class InquiryPublishServiceTest {
         }
     }
 
+    /**
+     * <b>An approval is not spent on a send nothing could carry</b> (Stage 3 lifecycle closure, G1).
+     *
+     * <p>This test used to assert the opposite, and the opposite is what the live org is still holding:
+     * confirming with no adapter registered bound the approval, froze the draft and left the work item
+     * at ACTION_PENDING for a dispatch that could never run. Work item {@code 57ee2220} has been in
+     * that state since 2026-08-20 — the queue stopped showing it, the draft could no longer be edited,
+     * and the one approval it will ever get was already used.
+     *
+     * <p>Fail-closed was right for the dispatch and wrong for the approval. The transport is now asked
+     * BEFORE the binding, and the refusal names what the seller can do instead.
+     */
     @Test
-    void confirmBindsTheExactDraftAndFreezesItWhenNoAdapterIsRegistered() {
+    void confirmIsRefusedWhenNoAdapterCouldCarryIt_andNothingIsWritten() {
         InquiryWorkItem wi = seedServed();
-        PublishStatusView v = withoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
 
-        assertThat(v.category()).isEqualTo(PublishOutcomeCategory.PENDING);
-        assertThat(v.phase()).isEqualTo("ACTION_PENDING");
+        assertThatThrownBy(() -> withoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint()))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getMessage()).contains("초안을 복사해");
+                });
+
+        assertThat(approvals.findByWorkItemId(wi.getId())).as("no approval is spent").isEmpty();
+        assertThat(intents.findByWorkItemId(wi.getId())).isEmpty();
+        assertThat(executions.findByWorkItemId(wi.getId())).isEmpty();
         assertThat(workItems.findById(wi.getId()).orElseThrow().getPhase())
-                .isEqualTo(InquiryWorkItemPhase.ACTION_PENDING);
-        InquiryApproval a = approvals.findByWorkItemId(wi.getId()).orElseThrow();
-        assertThat(a.getApprovedDraftVersion()).isEqualTo(1);
-        assertThat(a.getApprovedFingerprint()).isEqualTo(approvedFingerprint());
-        assertThat(intents.findByWorkItemId(wi.getId())).isPresent();
-        assertThat(executions.findByWorkItemId(wi.getId()).orElseThrow().getStatus())
-                .isEqualTo(InquiryExecutionStatus.ACTION_PENDING);
-        assertThat(adapter.published).isEmpty(); // no adapter → nothing dispatched
+                .as("the item stays where the seller can still act on it")
+                .isEqualTo(InquiryWorkItemPhase.PROPOSED);
+        assertThat(adapter.published).isEmpty();
 
-        // Draft is frozen: no longer PROPOSED, so the draft service rejects edits.
+        // And the draft is NOT frozen — the seller can still change it, which is the whole point of
+        // not having bound anything.
         InquiryReplyDraftService draftService = new InquiryReplyDraftService(workItems, drafts);
-        assertThatThrownBy(() -> draftService.save(org, wi.getId(), user, "새 제목", "새 내용", 1))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(draftService.save(org, wi.getId(), user, "새 제목", "새 내용", 1).version()).isEqualTo(2);
     }
 
     @Test
@@ -256,18 +288,51 @@ class InquiryPublishServiceTest {
     void unauditedChannelIsRefusedWithAReasonRatherThanLeftPending() {
         // A work item on a channel SellerOps has never audited a write path for — even though an
         // adapter exists for CH_CODE. This used to sit at ACTION_PENDING indefinitely, which reads on
-        // every screen as "still working on it" for something that will never send. The capability
-        // answer is permanent until an audit changes it, so it fails with that reason recorded.
+        // every screen as "still working on it" for something that will never send; then it was made a
+        // recorded FAILED. It is now refused one step earlier still, at the confirm, because the
+        // capability answer is permanent and knowable before anything irreversible is written — so the
+        // approval is not spent and the seller keeps a draft they can edit (Stage 3 closure, G1).
         UUID unsupported = seedChannel("UNSUPPORTED_CHANNEL");
         InquiryWorkItem wi = seedProposedWithDraft(org, unsupported);
 
-        PublishStatusView v = withAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
+        assertThatThrownBy(() -> withAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint()))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getMessage())
+                            .as("the seller is told what to do instead, not which enum said no")
+                            .contains("판매자센터에서 직접")
+                            .doesNotContain(PreSendCheck.WRITE_NOT_SUPPORTED);
+                });
 
-        assertThat(v.category()).isEqualTo(PublishOutcomeCategory.PERMANENT_FAILURE);
         assertThat(adapter.published).isEmpty(); // fail closed: nothing dispatched
+        assertThat(approvals.findByWorkItemId(wi.getId())).isEmpty();
+        assertThat(executions.findByWorkItemId(wi.getId())).isEmpty();
+        assertThat(workItems.findById(wi.getId()).orElseThrow().getPhase())
+                .isEqualTo(InquiryWorkItemPhase.PROPOSED);
+    }
+
+    /**
+     * The capability check does NOT move out of the pre-send gate by being added to the confirm: a
+     * channel can stop being answerable between the approval and the dispatch, and {@code revalidate}
+     * is where that is caught. Here the approval is bound while the channel is audited, and the
+     * dispatch then meets a work item whose channel is not.
+     */
+    @Test
+    void aChannelThatStopsBeingAnswerableAfterApprovalIsStillRefusedAtTheLastGate() {
+        InquiryWorkItem wi = seedServed();
+        bindApproval(wi);
+
+        InquiryWorkItem moved = workItems.findById(wi.getId()).orElseThrow();
+        moved.setChannelId(seedChannel("UNSUPPORTED_CHANNEL"));
+        workItems.save(moved);
+
+        PublishStatusView v = withAdapter().resume(org, wi.getId());
+
+        assertThat(adapter.published).isEmpty();
+        assertThat(v.category()).isEqualTo(PublishOutcomeCategory.PERMANENT_FAILURE);
         InquiryExecution ex = executions.findByWorkItemId(wi.getId()).orElseThrow();
         assertThat(ex.getStatus()).isEqualTo(InquiryExecutionStatus.FAILED);
-        assertThat(ex.getFailureReason()).isEqualTo(PreSendCheck.WRITE_NOT_SUPPORTED);
+        assertThat(ex.getFailureReason()).isEqualTo(PreSendCheck.CHANNEL_CHANGED);
     }
 
     @Test
@@ -402,8 +467,10 @@ class InquiryPublishServiceTest {
     void pendingConfirmationCanResumeOnceAnAdapterIsAvailable() {
         InquiryWorkItem wi = seedServed();
         adapter.verifyResult = ReplyVerificationResult.completed("DONE");
-        // Confirmed with NO adapter → bound, ACTION_PENDING, nothing dispatched.
-        withoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
+        // Bound, ACTION_PENDING, nothing dispatched — the shape a retryable dispatch leaves behind, and
+        // the shape the legacy rows on the live org are stuck in. Confirm no longer produces it from an
+        // adapter-less deployment (G1), so the fixture is built through the production binding writer.
+        bindApproval(wi);
         assertThat(adapter.published).isEmpty();
         assertThat(executions.findByWorkItemId(wi.getId()).orElseThrow().getStatus())
                 .isEqualTo(InquiryExecutionStatus.ACTION_PENDING);
@@ -417,7 +484,7 @@ class InquiryPublishServiceTest {
     @Test
     void resumeWithoutAdapterDoesNotDispatch() {
         InquiryWorkItem wi = seedServed();
-        withoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
+        bindApproval(wi);
         PublishStatusView v = withoutAdapter().resume(org, wi.getId());
         assertThat(adapter.published).isEmpty();
         assertThat(v.category()).isEqualTo(PublishOutcomeCategory.PENDING);
@@ -428,7 +495,7 @@ class InquiryPublishServiceTest {
     @Test
     void processRestartFromDispatchingVerifiesBeforeAnyResend() {
         InquiryWorkItem wi = seedServed();
-        withoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
+        bindApproval(wi);
         // Simulate a crash mid-publish: the row is left DISPATCHING.
         InquiryExecution ex = executions.findByWorkItemId(wi.getId()).orElseThrow();
         ex.setStatus(InquiryExecutionStatus.DISPATCHING);
@@ -444,7 +511,7 @@ class InquiryPublishServiceTest {
     @Test
     void recoverAbandonedDispatchingReclassifiesWithoutResend() {
         InquiryWorkItem wi = seedServed();
-        withoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd1", approvedFingerprint());
+        bindApproval(wi);
         InquiryExecution ex = executions.findByWorkItemId(wi.getId()).orElseThrow();
         ex.setStatus(InquiryExecutionStatus.DISPATCHING);
         executions.save(ex);

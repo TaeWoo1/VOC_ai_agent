@@ -74,6 +74,7 @@ function taught(): OperationsCaseDetail {
       authorKind: "MODEL",
       answerBasis: "GROUNDED",
       evidence: [{ kind: "PRODUCT_KNOWLEDGE", scopeLabel: "상품 정보", title: "방수 안내", snippet: "생활 방수" }],
+      delivery: null,
     },
   });
 }
@@ -475,6 +476,7 @@ describe("OperationsCase", () => {
           version: 1, title: "교환 신청 가능 기간 안내", body: "상품 수령 후 7일 이내입니다.",
           authorKind: "MODEL", answerBasis: "GROUNDED",
           evidence: [{ kind: "ORG_POLICY", scopeLabel: "운영 정책", title: "교환·반품 기준", snippet: null }],
+          delivery: null,
         },
       }),
     );

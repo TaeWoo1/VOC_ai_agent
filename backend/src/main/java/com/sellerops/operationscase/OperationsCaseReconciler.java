@@ -126,6 +126,35 @@ public class OperationsCaseReconciler {
         return closed;
     }
 
+    /**
+     * <b>Re-derive ONE open case, now, outside a run.</b>
+     *
+     * <p>The scheduled {@link #reconcile} is what keeps every case honest; this is the same derivation
+     * applied to a single subject the moment its canonical record moved, so a seller who just sent an
+     * answer is not looking at a card that says «확인 필요» until the next two-hour window. It adds no
+     * rule and no vocabulary — {@link #derive} and {@link #apply} are the ones the run uses — and it
+     * changes no scheduler semantics: the run still visits this case, finds it settled, and moves on.
+     *
+     * <p>{@code runId} is null because this did not happen in a run, and recording a run that did not
+     * observe it would make the event trail lie about where the conclusion came from.
+     *
+     * @return true when the case moved
+     */
+    public boolean converge(UUID orgId, OperationsSubjectKind kind, UUID subjectId) {
+        OperationsCase open = cases
+                .findByOrgIdAndSubjectKindAndSubjectIdAndStatus(orgId, kind, subjectId, OperationsCaseStatus.PREPARED)
+                .orElse(null);
+        if (open == null) {
+            return false;
+        }
+        Derived derived = derive(open);
+        if (derived.status() == null) {
+            return false;
+        }
+        apply(open, derived, null);
+        return true;
+    }
+
     Derived derive(OperationsCase c) {
         return switch (c.getSubjectKind()) {
             case INQUIRY -> deriveInquiry(c);
@@ -162,6 +191,17 @@ public class OperationsCaseReconciler {
                     return new Derived(OperationsCaseStatus.CLOSED, CaseResolution.NOT_OPERATIONAL,
                             CaseEventActor.SELLER, "WORK_ITEM_" + phase.name());
                 }
+                // <b>A bound approval is not an action that reached anyone.</b> ACTION_PENDING is written by
+                // the binding itself, before any transport is asked for, and it is also where a dispatch that
+                // sent nothing comes back to. Reading the phase alone, this card closed as 「판매자가 조치함」
+                // for a work item whose execution had never left ACTION_PENDING — the shape work item
+                // 57ee2220 has held since 2026-08-20, approved into a deployment with no adapter. The phase
+                // says the seller decided; only the execution row says whether anything was carried, so that
+                // is what is asked. Every other phase already implies a dispatch was attempted and recorded.
+                if (phase == InquiryWorkItemPhase.ACTION_PENDING
+                        && !dispatchAttempted(c.getOrgId(), workItem.get().getId())) {
+                    return Derived.UNCHANGED;
+                }
                 return new Derived(OperationsCaseStatus.ACTED, CaseResolution.SELLER_ACTED, CaseEventActor.SELLER,
                         "WORK_ITEM_" + phase.name() + delivery(c.getOrgId(), workItem.get().getId()));
             }
@@ -186,6 +226,19 @@ public class OperationsCaseReconciler {
      * word for sent, executed or verified. An inquiry the seller moved on without an execution adds nothing:
      * absence of a row is not a delivery state.
      */
+    /**
+     * Whether the answer lifecycle ever got past «bound, nothing sent».
+     *
+     * <p>Reads the same row {@link #delivery} quotes, and asks it the one question this vocabulary is
+     * allowed to ask: has the execution moved off {@code ACTION_PENDING}? No row at all is also a no —
+     * a work item in ACTION_PENDING without an execution cannot have dispatched anything.
+     */
+    private boolean dispatchAttempted(UUID orgId, UUID workItemId) {
+        return deliveries.observe(orgId, workItemId)
+                .map(AnswerDeliveryTruthReader.AnswerDeliveryTruth::dispatchAttempted)
+                .orElse(false);
+    }
+
     private String delivery(UUID orgId, UUID workItemId) {
         return deliveries.observe(orgId, workItemId)
                 .map(truth -> ";delivery=" + truth.status()

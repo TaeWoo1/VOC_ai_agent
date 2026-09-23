@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 class PreparedWorkCoverageTest {
 
     private static PreparedItem item(String kind, String detail) {
-        return new PreparedItem(kind, UUID.randomUUID(), kind + " label", detail, null, "/x");
+        return new PreparedItem(kind, UUID.randomUUID(), kind + " label", detail, null, "/x", null);
     }
 
     private static List<PreparedItem> live() {

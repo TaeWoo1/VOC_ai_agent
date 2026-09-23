@@ -1720,6 +1720,30 @@ export interface InquiryDetail {
    * which is the ordinary case, and the screen then renders nothing at all rather than an empty card.
    */
   orderContext: OrderContextView | null;
+  /**
+   * What happened to the answer, when one was sent — the execution row and its latest verification,
+   * quoted by the backend's `AnswerDeliveryTruthReader`. `null` when this work item never reached an
+   * execution, which is the ordinary case and is not a delivery state.
+   *
+   * It is on the DETAIL because the outcome of the one marketplace WRITE this product performs used
+   * to live only in the body of the confirm response: a reload lost it, while the local `status`
+   * stays `UNANSWERED` until a verified read-back or the next collection — precisely the window in
+   * which a seller wants to ask whether their answer went out.
+   */
+  delivery: AnswerDeliveryView | null;
+}
+
+/**
+ * The four tokens the publish lane hands out about a send. All are backend vocabulary:
+ * `status` is `InquiryExecutionStatus`, `category` is `PublishOutcomeCategory`, and
+ * `observedSignal` is the adapter's own word for what its read-back saw (Cafe24's `ANSWERED`,
+ * `ANSWER_POSTED_STATUS_UNRESOLVED`). `verified` is null until a re-query has run.
+ */
+export interface AnswerDeliveryView {
+  status: string;
+  category: PublishOutcomeCategory;
+  verified: boolean | null;
+  observedSignal: string | null;
 }
 
 /**
@@ -2229,6 +2253,14 @@ export interface HomePreparedItem {
   detail: string | null;
   channelCode: string | null;
   to: string;
+  /**
+   * The work item's own `InquiryWorkItemPhase`, for the kinds that have one; null otherwise.
+   *
+   * Carried so the row can say what it is waiting for instead of the section asserting one state
+   * over all of them — see `lib/preparedState.ts`. It is the existing backend enum, not a word
+   * minted for this screen.
+   */
+  phase: string | null;
 }
 
 /** Each count is named after the record behind it — an approval that stands, a draft that exists. */

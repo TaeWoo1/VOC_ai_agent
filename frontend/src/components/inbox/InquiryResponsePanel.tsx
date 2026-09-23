@@ -15,6 +15,7 @@ import {
   canResumePublish,
   canVerifyPublish,
   classifyPublishError,
+  deliveryVerificationLabel,
   publishCategoryLabel,
   publishUnavailableReason,
 } from "../../lib/inquiryPublish";
@@ -208,6 +209,14 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
   const unavailableReason = detail ? publishUnavailableReason(detail, capability) : null;
   const draftDirty = !!draft && (draft.title !== replyTitle || draft.comments !== replyComments);
   const draftEditable = canEditDraft(publishStatus);
+  /**
+   * What a PREVIOUS session's send left behind, when this one has not sent anything.
+   *
+   * `publishStatus` is this session's memory of the press and is richer, so it wins when present;
+   * this is the same facts read back from the execution and verification rows, which is the only way
+   * the outcome survives a reload.
+   */
+  const priorDelivery = publishStatus ? null : detail?.delivery ?? null;
   /**
    * Whether a draft can be written at all. OPEN items are proposed on the way (see
    * {@link onGenerateDraft}); anything past PROPOSED is already bound into the reply lifecycle and a
@@ -693,7 +702,11 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
               the three conditions failed, because "이 채널은 판매자센터에서 직접" and "이 환경에서는
               대신 등록하지 않습니다" are different things for the seller to do about it.
             */}
-            {publishStatus ? null : (
+            {/* A send that already happened hides the send block — whether this session performed it
+                (publishStatus) or a previous one did and only the record remains (priorDelivery).
+                Without the second half, a reload after a DELIVERY_UNKNOWN or a refused send offered
+                「답변 보내기」 again with no trace of the first attempt on screen. */}
+            {publishStatus || priorDelivery ? null : (
               <div className="mt-5 border-t border-line pt-4">
                 {/*
                   Said BEFORE the press, not recorded after it. On a channel whose collection is stale
@@ -812,6 +825,31 @@ export function InquiryResponsePanel({ workItemId }: { workItemId: string }) {
                 ) : null}
               </div>
             )}
+
+            {/* The outcome of the one marketplace WRITE this product performs, read back from the rows
+                rather than remembered from the press. The local inquiry stays UNANSWERED until a
+                verified read-back or the next collection, so this window is exactly when a seller
+                comes back to ask whether their answer went out. */}
+            {!publishStatus && priorDelivery ? (
+              <div className="mt-5 rounded-xl border border-line bg-surface p-4">
+                <p className="break-keep text-sm text-ink">{publishCategoryLabel(priorDelivery.category)}</p>
+                {deliveryVerificationLabel(priorDelivery) ? (
+                  <p className="mt-1 break-keep text-sm text-muted">{deliveryVerificationLabel(priorDelivery)}</p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {canVerifyPublish(priorDelivery) ? (
+                    <Btn size="sm" variant="ghost" onClick={onVerifyPublish} disabled={busy}>
+                      상태 다시 확인
+                    </Btn>
+                  ) : null}
+                  {canResumePublish(priorDelivery) ? (
+                    <Btn size="sm" variant="ghost" onClick={onResumePublish} disabled={busy}>
+                      이어서 등록
+                    </Btn>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             {publishStatus ? (
               <div className="mt-5 rounded-xl border border-line bg-surface p-4">

@@ -97,6 +97,8 @@ public class CaseKnowledgeService {
     private final InquiryReplyDraftService drafts;
     private final InquiryDraftComposer composer;
     private final AnswerMemoryRepository memories;
+    /** What the answer lifecycle observed for this case's work item — quoted, never re-derived. */
+    private final com.sellerops.inquiry.publish.AnswerDeliveryTruthReader deliveries;
     private CaseResolutionReader resolutions;
 
     public CaseKnowledgeService(OperationsCaseRepository cases, OperationsCaseEventRepository events,
@@ -106,7 +108,9 @@ public class CaseKnowledgeService {
                                 InquiryEvidenceRetriever retriever, KnowledgeCandidateService candidates,
                                 SellerGuidanceService guidance, KnowledgeSpineService spine,
                                 InquiryReplyDraftService drafts, InquiryDraftComposer composer,
-                                AnswerMemoryRepository memories) {
+                                AnswerMemoryRepository memories,
+                                com.sellerops.inquiry.publish.AnswerDeliveryTruthReader deliveries) {
+        this.deliveries = deliveries;
         this.cases = cases;
         this.events = events;
         this.processor = processor;
@@ -646,7 +650,8 @@ public class CaseKnowledgeService {
             return null;
         }
         return new CaseDetailView.Draft(latest.version(), latest.title(), latest.comments(), latest.authorKind(),
-                latest.answerBasis(), composer.evidenceFor(orgId, c.getWorkItemId(), latest.version()));
+                latest.answerBasis(), composer.evidenceFor(orgId, c.getWorkItemId(), latest.version()),
+                deliveries == null ? null : deliveries.view(orgId, c.getWorkItemId()).orElse(null));
     }
 
     static OrgKnowledgeType orgTypeFor(String topic) {

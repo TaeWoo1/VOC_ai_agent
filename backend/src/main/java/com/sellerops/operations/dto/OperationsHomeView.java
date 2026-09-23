@@ -168,8 +168,18 @@ public record OperationsHomeView(
      * <p>{@code detail} is a fact the product already shows elsewhere: the seller's own catalogue name
      * for a review, the inquiry's own subject for an inquiry. Null when neither exists, and then the
      * row stands on its label alone rather than on an invented description.
+     *
+     * <p><b>{@code phase} is the row's own truth, not the section's claim.</b> The 실행 대기 section
+     * used to badge every row 「승인함 · 등록 전」, which is what a standing {@code ReviewReplyApproval}
+     * is and what an inquiry row is NOT: an inquiry reaches this list on the predicate «a draft row
+     * exists», with the work item still {@code OPEN} or {@code PROPOSED} and no approval anywhere. The
+     * badge therefore told a seller they had approved something they had not, on the one screen that
+     * exists to tell them what is outstanding. Rather than mint a status word for the wire, the row
+     * carries the phase the work item already has and the screen says what that phase means. Null for
+     * kinds that have no work item — a review reply is here BECAUSE an approval stands, and an
+     * improvement draft has no lifecycle of this shape.
      */
     public record PreparedItem(String kind, UUID id, String label, String detail,
-                               String channelCode, String to) {
+                               String channelCode, String to, String phase) {
     }
 }

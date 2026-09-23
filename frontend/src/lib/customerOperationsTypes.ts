@@ -230,6 +230,14 @@ export interface OperationsCaseDetail {
     authorKind: string | null;
     answerBasis: string | null;
     evidence: { kind: string; scopeLabel: string; title: string | null; snippet: string | null }[];
+    /**
+     * What became of this answer, when it was sent — quoted from the execution and verification rows.
+     * `null` means nothing was ever dispatched, which is the ordinary state of a prepared draft.
+     *
+     * It hangs off the draft rather than the case because a case never claims delivery: its own
+     * vocabulary stops at 「판매자가 조치함」, deliberately. This is the answer's record.
+     */
+    delivery: { status: string; category: string; verified: boolean | null; observedSignal: string | null } | null;
   } | null;
   to: string;
 }

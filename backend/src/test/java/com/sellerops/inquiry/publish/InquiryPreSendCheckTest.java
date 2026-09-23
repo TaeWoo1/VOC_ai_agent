@@ -164,7 +164,7 @@ class InquiryPreSendCheckTest {
         // sent. What stops it is here: an approval that cannot prove which handle it agreed to is
         // refused, rather than inheriting whatever handle its work item happens to point at now.
         InquiryWorkItem wi = seed();
-        serviceWithoutAdapter().confirmAndPublish(org, wi.getId(), user, "cmd-1", fingerprint());
+        bindApproval(wi);
 
         InquiryApproval approval = approvals.findByWorkItemId(wi.getId()).orElseThrow();
         approval.setTargetExternalId(null);   // as the pre-V66 row carries it
@@ -436,9 +436,12 @@ class InquiryPreSendCheckTest {
         InquiryWorkItem wi = seed();
         InquiryPublishService service = service(PreSendCheck.proven());
 
-        // Bind with no adapter registered, so the approval exists and nothing has dispatched yet.
-        InquiryPublishService binder = serviceWithoutAdapter();
-        binder.confirmAndPublish(org, wi.getId(), user, "cmd-1", fingerprint());
+        // The state this gate exists for: an approval already granted, nothing dispatched yet. It is
+        // built through the production binding writer rather than through confirm, because confirm now
+        // refuses to bind at all when no transport could carry the send (Stage 3 lifecycle closure, G1)
+        // — and «approve into a deployment that cannot send» is the defect that fence was added for,
+        // not a fixture this test may keep using to reach a state it is not about.
+        bindApproval(wi);
         assertThat(approvals.findByWorkItemId(wi.getId())).isPresent();
 
         if (moveWorkItem != null) {
@@ -458,6 +461,16 @@ class InquiryPreSendCheckTest {
                 .isEqualTo(reason);
         assertThat(workItems.findById(wi.getId()).orElseThrow().getPhase())
                 .isEqualTo(InquiryWorkItemPhase.FAILED);
+    }
+
+    /** Approval + intent + pending execution + the PROPOSED &rarr; ACTION_PENDING flip, exactly as confirm writes them. */
+    private void bindApproval(InquiryWorkItem wi) {
+        Inquiry target = inquiries.findById(wi.getInquiryId()).orElseThrow();
+        InquiryReplyDraft head = drafts.findTopByWorkItemIdOrderByVersionDesc(wi.getId()).orElseThrow();
+        writer.bind(workItems.findById(wi.getId()).orElseThrow(), head,
+                new InquiryPublishBindingWriter.ApprovalTarget(wi.getSellerAccountId(), wi.getChannelId(),
+                        target.getExternalId(), target.getSourceSubtype()),
+                "cmd-1", "SELLER:" + user);
     }
 
     private void mutateInquiry(InquiryWorkItem wi, Consumer<Inquiry> mutation) {
@@ -494,12 +507,6 @@ class InquiryPreSendCheckTest {
         return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
                 verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of(only)),
                 fixed(answer), new InquiryReplyCapabilityRegistry(), channels, resolver());
-    }
-
-    private InquiryPublishService serviceWithoutAdapter() {
-        return new InquiryPublishService(workItems, drafts, inquiries, approvals, executions,
-                verifications, audits, writer, new ChannelReplyAdapterRegistry(channels, List.of()),
-                fixed(PreSendCheck.proven()), new InquiryReplyCapabilityRegistry(), channels, resolver());
     }
 
     private static InquiryTargetStateReader fixed(PreSendCheck answer) {

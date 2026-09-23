@@ -60,6 +60,12 @@ public class InquiryPublishService {
     private final InquiryAnswerMemoryHook answerMemory;
     /** The server-side identity backstop: provenance, not the label the caller saw. */
     private final ExecutableIdentityResolver identity;
+    /**
+     * How surfaces that DERIVE from the answer lifecycle learn it moved. Null in the publish-only test
+     * wiring: announcing is an effect of publishing, never a participant, so its absence changes no
+     * outcome here.
+     */
+    private final org.springframework.context.ApplicationEventPublisher events;
 
     @org.springframework.beans.factory.annotation.Autowired
     public InquiryPublishService(InquiryWorkItemRepository workItems, InquiryReplyDraftRepository drafts,
@@ -68,7 +74,9 @@ public class InquiryPublishService {
                                  InquiryWorkItemAuditRepository audits, InquiryPublishBindingWriter binding,
                                  ChannelReplyAdapterRegistry adapters, InquiryTargetStateReader targetState,
                                  InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels,
-                                 InquiryAnswerMemoryHook answerMemory, ExecutableIdentityResolver identity) {
+                                 InquiryAnswerMemoryHook answerMemory, ExecutableIdentityResolver identity,
+                                 org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
         this.identity = identity;
         this.workItems = workItems;
         this.drafts = drafts;
@@ -97,7 +105,7 @@ public class InquiryPublishService {
                                  InquiryReplyCapabilityRegistry capabilities, ChannelRepository channels,
                                  ExecutableIdentityResolver identity) {
         this(workItems, drafts, inquiries, approvals, executions, verifications, audits, binding,
-                adapters, targetState, capabilities, channels, null, identity);
+                adapters, targetState, capabilities, channels, null, identity, null);
     }
 
     /** Confirm the exact draft version, bind immutably, create the intent, and (if a channel adapter exists) dispatch. */
@@ -135,6 +143,7 @@ public class InquiryPublishService {
                 // confirmation the dispatch could only fail on.
                 throw ApiException.badRequest("이 문의에는 채널이 알아볼 수 있는 식별자가 없어 답변을 등록할 수 없습니다.");
             }
+            assertCarriable(workItem, target);
             binding.bind(workItem, head,
                     new InquiryPublishBindingWriter.ApprovalTarget(
                             workItem.getSellerAccountId(), workItem.getChannelId(),
@@ -149,6 +158,7 @@ public class InquiryPublishService {
         }
 
         PublishOutcomeCategory transientCategory = maybeDispatch(orgId, workItem);
+        announceSettled(orgId, workItem);
         return statusView(loadWorkItem(orgId, workItemId), transientCategory);
     }
 
@@ -161,6 +171,7 @@ public class InquiryPublishService {
             Inquiry inquiry = loadInquiry(orgId, workItem.getInquiryId());
             runVerify(workItem, inquiry, execution);
         }
+        announceSettled(orgId, workItem);
         return statusView(loadWorkItem(orgId, workItemId), null);
     }
 
@@ -274,6 +285,7 @@ public class InquiryPublishService {
                     runVerify(workItem, loadInquiry(orgId, workItem.getInquiryId()), execution);
             case COMPLETED, FAILED -> { /* terminal — no-op replay */ }
         }
+        announceSettled(orgId, workItem);
         return statusView(loadWorkItem(orgId, workItemId), transientCategory);
     }
 
@@ -405,6 +417,54 @@ public class InquiryPublishService {
      * <p>An approval with no snapshot at all (written before V66) cannot be checked, and an
      * un-checkable approval is refused rather than trusted.
      */
+    /**
+     * Tell the surfaces that DERIVE from this lifecycle that it moved.
+     *
+     * <p>Raised after the writes, never before: a listener re-reads the rows, so announcing early
+     * would hand it the state it is replacing. Nothing here waits on a listener and nothing a
+     * listener does can change what was decided — the answer is recorded either way.
+     */
+    private void announceSettled(UUID orgId, InquiryWorkItem workItem) {
+        if (events == null) {
+            return;
+        }
+        events.publishEvent(new InquiryAnswerSettledEvent(orgId, workItem.getInquiryId(), workItem.getId()));
+    }
+
+    /**
+     * <b>Refuse to spend an irreversible approval on a send nothing could carry.</b>
+     *
+     * <p>An inquiry approval is single-use by construction — {@code uq_inquiry_approval_work_item} —
+     * and binding it freezes the draft and moves the work item out of the seller's queue. Until now
+     * the two reasons a send could be impossible were checked only AFTER that binding: the capability
+     * answer in {@code revalidate}, and the transport's presence in {@code maybeDispatch}, where a
+     * missing adapter deliberately returns «nothing to do» and leaves the item {@code ACTION_PENDING}.
+     * Fail-closed was right for the dispatch and wrong for the approval: the item then waits for a
+     * dispatch that cannot happen, the draft can no longer be edited, and the one approval the work
+     * item will ever get has been spent. That is not hypothetical — work item {@code 57ee2220} has
+     * been in exactly that state since 2026-08-20.
+     *
+     * <p>So the same two facts are asked BEFORE the binding, where the honest answer is a refusal the
+     * seller can act on rather than a queue entry that goes quiet. Nothing is written when this
+     * throws. It is deliberately NOT the whole of {@code revalidate}: the checks that compare the
+     * approval to the row cannot run before the approval exists, and the ones that can — identity,
+     * answerability — stay at the last gate, because the send is where they must be true.
+     *
+     * <p>The two reasons stay apart in the sentence. «This channel has no audited way to post an
+     * answer» is permanent and tells the seller to answer in the seller center; «this deployment
+     * cannot send yet» is a deployment fact that will change without them doing anything.
+     */
+    private void assertCarriable(InquiryWorkItem workItem, Inquiry inquiry) {
+        if (!capabilities.isImplemented(channelCode(workItem.getChannelId()), inquiry.getSourceSubtype())) {
+            throw ApiException.conflict(
+                    "이 채널의 문의는 reviewnary가 답변을 대신 등록할 수 없습니다. 판매자센터에서 직접 등록해 주세요.");
+        }
+        if (adapters.resolve(workItem.getChannelId(), inquiry.getSourceSubtype()).isEmpty()) {
+            throw ApiException.conflict(
+                    "지금은 답변 등록 기능이 켜져 있지 않습니다. 초안을 복사해 판매자센터에 등록해 주세요.");
+        }
+    }
+
     private PreSendCheck revalidate(UUID orgId, InquiryWorkItem workItem, InquiryApproval approval,
                                     Inquiry inquiry) {
         if (approval.getTargetExternalId() == null || approval.getChannelId() == null) {

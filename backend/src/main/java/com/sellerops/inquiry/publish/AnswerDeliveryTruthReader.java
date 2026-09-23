@@ -2,6 +2,7 @@ package com.sellerops.inquiry.publish;
 
 import java.util.Optional;
 import java.util.UUID;
+import com.sellerops.inquiry.publish.dto.AnswerDeliveryView;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,6 +31,22 @@ public class AnswerDeliveryTruthReader {
      * @param observedSignal the adapter's own word for what it saw; {@code null} when nothing was verified
      */
     public record AnswerDeliveryTruth(String status, String category, Boolean verified, String observedSignal) {
+
+        /**
+         * Whether anything was ever handed to a transport for this approval.
+         *
+         * <p>Asked here rather than by the caller because the answer is a statement about THIS
+         * package's vocabulary: {@link InquiryExecutionStatus#ACTION_PENDING} is what the binding
+         * writes before a transport is even looked for, and it is also where a dispatch that sent
+         * nothing comes back to. A reader that compared the string itself would be keeping a second
+         * copy of a word it was handed precisely so it would not have to.
+         *
+         * <p>False is therefore «approved, and still nothing has left» — not a failure, and not a
+         * claim about the customer at all.
+         */
+        public boolean dispatchAttempted() {
+            return status != null && !InquiryExecutionStatus.ACTION_PENDING.name().equals(status);
+        }
     }
 
     private final InquiryExecutionRepository executions;
@@ -39,6 +56,18 @@ public class AnswerDeliveryTruthReader {
                                      InquiryVerificationRepository verifications) {
         this.executions = executions;
         this.verifications = verifications;
+    }
+
+    /**
+     * The same two rows, shaped for a seller-facing read.
+     *
+     * <p>A convenience over {@link #observe}, and deliberately the only mapping into the wire shape:
+     * a screen that built {@code AnswerDeliveryView} itself would be a second place that decides what
+     * «sent» looks like. Still four tokens this package already chose — nothing is derived here.
+     */
+    public Optional<AnswerDeliveryView> view(UUID orgId, UUID workItemId) {
+        return observe(orgId, workItemId)
+                .map(t -> new AnswerDeliveryView(t.status(), t.category(), t.verified(), t.observedSignal()));
     }
 
     /**

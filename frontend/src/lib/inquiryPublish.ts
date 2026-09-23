@@ -111,14 +111,34 @@ export function publishCategoryLabel(category: PublishOutcomeCategory): string {
   }
 }
 
-/** Whether "다시 시도" should be offered. Never for a permanent failure, and never for a completed one. */
-export function canResumePublish(status: PublishStatusView | null): boolean {
+/**
+ * Whether "다시 시도" should be offered. Never for a permanent failure, and never for a completed one.
+ *
+ * Takes anything that carries a category, because the same question is asked of two records: the
+ * status returned by the press, and — after a reload lost that — the delivery the detail read carries.
+ * Both are the same backend token, so the rule must not fork with the shape holding it.
+ */
+export function canResumePublish(status: { category: PublishOutcomeCategory } | null): boolean {
   return status !== null && (status.category === "RETRYABLE" || status.category === "PUBLISHING");
 }
 
 /** Whether "상태 다시 확인" should be offered — the verify-only path, which never resends. */
-export function canVerifyPublish(status: PublishStatusView | null): boolean {
+export function canVerifyPublish(status: { category: PublishOutcomeCategory } | null): boolean {
   return status !== null && (status.category === "CHECKING_REQUIRED" || status.category === "PUBLISHING");
+}
+
+/**
+ * What a re-query proved, in the seller's words — or null when none has run.
+ *
+ * <p>`verified === null` is a third thing and stays silent: nothing has been checked yet, which the
+ * category sentence above is already saying. `observedSignal` is the adapter's own token and is NOT
+ * printed — 「ANSWER_POSTED_STATUS_UNRESOLVED」 is a sentence for an audit trail, not for a person.
+ */
+export function deliveryVerificationLabel(delivery: { verified: boolean | null } | null): string | null {
+  if (!delivery || delivery.verified === null) return null;
+  return delivery.verified
+    ? "채널에서 답변이 등록된 것을 확인했습니다."
+    : "채널에서 등록 여부를 아직 확인하지 못했습니다.";
 }
 
 /**

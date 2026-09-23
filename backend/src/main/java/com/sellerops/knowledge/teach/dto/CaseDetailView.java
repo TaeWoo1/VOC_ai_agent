@@ -1,6 +1,7 @@
 package com.sellerops.knowledge.teach.dto;
 
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
+import com.sellerops.inquiry.publish.dto.AnswerDeliveryView;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -98,7 +99,16 @@ public record CaseDetailView(UUID caseId, boolean open, String subjectKind, Stri
     public record Prefill(String text, String strengthKo, LocalDate answeredOn) {
     }
 
+    /**
+     * The case's prepared answer, and — when one was sent — what became of it.
+     *
+     * <p>{@code delivery} sits here rather than on the case because a case never claims delivery: its
+     * own vocabulary stops at «the seller acted», deliberately. This is the answer's record, quoted
+     * from the rows the publish package writes, and an execution cannot exist without the approved
+     * draft it was bound to — so there is no state where a delivery would have nowhere to hang.
+     * {@code null} means nothing was ever dispatched for this work item.
+     */
     public record Draft(int version, String title, String body, String authorKind, String answerBasis,
-                        List<DraftEvidenceView> evidence) {
+                        List<DraftEvidenceView> evidence, AnswerDeliveryView delivery) {
     }
 }

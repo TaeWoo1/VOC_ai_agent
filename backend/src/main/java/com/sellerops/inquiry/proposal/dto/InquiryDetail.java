@@ -2,6 +2,7 @@ package com.sellerops.inquiry.proposal.dto;
 
 import com.sellerops.inquiry.draft.dto.DraftEvidenceView;
 import com.sellerops.inquiry.reply.dto.ReplyDraftView;
+import com.sellerops.inquiry.publish.dto.AnswerDeliveryView;
 import com.sellerops.inquiry.publish.dto.InquiryReplyCapabilityView;
 import com.sellerops.order.fact.dto.OrderContextView;
 import java.time.Instant;
@@ -79,5 +80,16 @@ public record InquiryDetail(
         String answerStateNote,
         List<DraftEvidenceView> draftEvidence,
         InquiryReplyCapabilityView replyCapability,
-        OrderContextView orderContext) {
+        OrderContextView orderContext,
+        /**
+         * What happened to the answer, when one was sent — quoted from the execution and verification
+         * rows via {@code AnswerDeliveryTruthReader}. {@code null} when this work item never reached an
+         * execution, which is the ordinary case and is not a delivery state.
+         *
+         * <p>It is on the DETAIL because the outcome of the one marketplace WRITE this product performs
+         * used to live only in the body of the confirm response: a reload lost it, and the local
+         * {@code status} stays {@code UNANSWERED} until a verified read-back or the next collection —
+         * precisely the window in which a seller wants to ask whether their answer went out.
+         */
+        AnswerDeliveryView delivery) {
 }

@@ -314,7 +314,7 @@ public class OperationsHomeService {
             rows.add(new OperationsHomeView.PreparedItem(
                     "REVIEW_REPLY", review.getId(), "승인된 리뷰 답변", detail,
                     channelCodes.get(review.getChannelId()),
-                    "/reviews/reply/" + review.getId()));
+                    "/reviews/reply/" + review.getId(), null));
         }
         for (InquiryWorkItem item : inquiries) {
             // The inquiry's own subject, exactly as the work queue prints it. A NAVER product inquiry
@@ -323,7 +323,7 @@ public class OperationsHomeService {
                     .map(Inquiry::getTitle).filter(t -> !t.isBlank()).orElse(null);
             rows.add(new OperationsHomeView.PreparedItem(
                     "INQUIRY_REPLY", item.getId(), "초안이 준비된 문의", subject, null,
-                    "/inquiries/" + item.getInquiryId()));
+                    "/inquiries/" + item.getInquiryId(), item.getPhase().name()));
         }
         // An improvement draft the seller asked for. Re-derived by the opportunity service before it
         // gets here, so a draft whose problem stopped repeating is not counted — and an org that has
@@ -335,7 +335,7 @@ public class OperationsHomeService {
             rows.add(new OperationsHomeView.PreparedItem(
                     "IMPROVEMENT_DRAFT", prepared.decisionId(),
                     prepared.opportunity().kindLabelKo() + " 초안", prepared.opportunity().issueTitle(),
-                    null, "/memory/" + prepared.opportunity().issueId()));
+                    null, "/memory/" + prepared.opportunity().issueId(), null));
         }
 
         return new OperationsHomeView.PreparedWork(

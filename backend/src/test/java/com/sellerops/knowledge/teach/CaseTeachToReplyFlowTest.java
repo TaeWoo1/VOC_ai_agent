@@ -311,7 +311,8 @@ class CaseTeachToReplyFlowTest {
 
         service = new CaseKnowledgeService(cases, events, processor, investigator, preparer, inquiries, reviews,
                 channels, products, retriever, candidates, new SellerGuidanceService(guidanceRows), spine,
-                draftService, composer, memories);
+                draftService, composer, memories,
+                new com.sellerops.inquiry.publish.AnswerDeliveryTruthReader(executions, verifications));
         service.setResolutions(resolutions);
 
         mvc = MockMvcBuilders.standaloneSetup(new CaseKnowledgeController(service, users))
