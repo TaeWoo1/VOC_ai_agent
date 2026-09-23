@@ -43,6 +43,7 @@ export function MasterDetail({
   footer,
   onClose,
   preview = false,
+  fillWhenClosed = false,
   paneFooter,
 }: {
   /** The page head, the actionable summary and the list — everything in the middle column. */
@@ -81,6 +82,14 @@ export function MasterDetail({
    */
   preview?: boolean;
   /**
+   * The list takes the column when nothing is selected — {@link preview}'s first consequence, on its own.
+   *
+   * <p>For a screen whose closed state is a list to look through but whose OPEN state is still the
+   * workspace (확인할 일: 45 rows and five filters, and the judgment happens in the pane). Implied by
+   * {@link preview}; passing it alone leaves the pane exactly as it shipped.
+   */
+  fillWhenClosed?: boolean;
+  /**
    * Docked at the bottom of the pane, outside its scroll — the preview's single primary action.
    *
    * <p>A preview that can be read but not acted on is a dead end, and an action that scrolls away with
@@ -109,7 +118,7 @@ export function MasterDetail({
         <div className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-28 pt-5 md:px-8 md:pb-10 md:pt-6" data-testid="master-list">
           {/* Closed, a work table may use the width it was given; open, it goes back to the reading measure
               so the row a seller is comparing against the pane does not run the whole screen. */}
-          <div className={`mx-auto w-full space-y-5 ${preview && !open ? "max-w-[1160px]" : "max-w-[760px]"}`}>{list}</div>
+          <div className={`mx-auto w-full space-y-5 ${(preview || fillWhenClosed) && !open ? "max-w-[1160px]" : "max-w-[760px]"}`}>{list}</div>
         </div>
         {footer}
       </div>

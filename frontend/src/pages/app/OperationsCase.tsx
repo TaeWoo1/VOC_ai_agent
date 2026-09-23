@@ -95,6 +95,13 @@ export function OperationsCaseView({
   const showTeach = Boolean(detail.gap) && !receipt;
   const pane = variant === "pane";
   const preview = pane && depth === "preview";
+  // What 확인 항목 would actually draw — asked here so the block can decline to exist rather than drawing
+  // a card around 「조사 기록 없음」. Same predicate `Checks` uses; no second definition of «empty».
+  const hasChecks = detail.investigated.length > 0 || Boolean(showTeach && detail.gap?.missingSubject);
+  const noteUnderChecks = !detail.summary && Boolean(detail.reasonNote) && !settled(detail);
+  // Same question for 근거, and for the same reason: `Evidence` renders nothing when the draft's own
+  // citation is already on screen, and a node that renders nothing still holds a grid track open.
+  const hasEvidence = detail.knowledgeUsed.length > 0 || (detail.draft?.evidence.length ?? 0) === 0;
   // The title is the customer's first line. When that line IS the whole message, the subject block would print the
   // same sentence a second time one block below — measured on the demo org, 「교환 신청은 언제까지 가능한가요?」 was
   // both the h1 and the only line of 문의 내용. The block stays whenever it adds anything: more text, or photos.
@@ -198,14 +205,19 @@ export function OperationsCaseView({
         )
       }
       context={
-        <CaseBlock title={COPY.checks}>
-          <Checks detail={detail} gapOpen={showTeach} />
-          {!detail.summary && detail.reasonNote && !settled(detail) ? (
-            <p className="mt-3 break-keep text-sm text-muted">{detail.reasonNote}</p>
-          ) : null}
-        </CaseBlock>
+        // <b>A card only when there is something in it</b> (Review Decision UX v3.2). On a case with no
+        // investigation record and no note this block was a 130px card whose whole content was
+        // 「조사 기록 없음」 — a box drawn to say that nothing is in it. The sentence is not a finding and
+        // not a failure; it is the ordinary state of a case the rules could answer from stored knowledge,
+        // and the 자동 확인 line above already says what was done.
+        hasChecks || noteUnderChecks ? (
+          <CaseBlock title={COPY.checks} flat>
+            <Checks detail={detail} gapOpen={showTeach} />
+            {noteUnderChecks ? <p className="mt-3 break-keep text-sm text-muted">{detail.reasonNote}</p> : null}
+          </CaseBlock>
+        ) : null
       }
-      more={<Evidence detail={detail} />}
+      more={hasEvidence ? <Evidence detail={detail} /> : null}
     />
   );
 }
@@ -243,14 +255,22 @@ function flowCells(detail: OperationsCaseDetail, taught: boolean) {
       phrase: true,
       line: detail.summary ? <span>{detail.summary}</span> : undefined,
     },
-    mine: {
-      label: COPY.mineLabel,
-      value: detail.open
-        ? decisionOf(detail.recommendedActionType) ?? actionKo(detail.recommendedActionType) ?? "판단 필요"
-        : COPY.closed,
-      phrase: true,
-      line: detail.open && why ? <span>{why}</span> : undefined,
-    },
+    // <b>Only when nothing below says it better</b> (Review Decision UX v3.2). With a draft written, the
+    // draft card IS 「내가 확인할 일」 — it names the recommendation and carries the controls that act on
+    // it — so repeating it here was a second statement of the same thing, and the sentence under it
+    // (「고객에게 무엇을 말하거나 약속할지는 판매자가 정합니다」) is a fact about the product, not about
+    // this customer. With no draft there is no such block, and the cell is the only place the seller is
+    // told what they are being asked to decide, so it stands.
+    mine: detail.draft
+      ? undefined
+      : {
+          label: COPY.mineLabel,
+          value: detail.open
+            ? decisionOf(detail.recommendedActionType) ?? actionKo(detail.recommendedActionType) ?? "판단 필요"
+            : COPY.closed,
+          phrase: true,
+          line: detail.open && why ? <span>{why}</span> : undefined,
+        },
   };
 }
 

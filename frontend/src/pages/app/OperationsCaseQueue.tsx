@@ -3,10 +3,10 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHead } from "../../components/ui/PageHead";
 import { Facts } from "../../components/ui/ObjectRow";
 import { MasterDetail, useWideLayout } from "../../components/workspace/MasterDetail";
-import { WorkRows, selectedRow } from "../../components/workspace/WorkRows";
+import { WorkRows } from "../../components/workspace/WorkRows";
 import { WorkItemPane } from "../../components/workspace/WorkItemPane";
 import { api } from "../../lib/apiClient";
-import { mergeHomeWork, reasonCounts, WORK_FILTERS, workFilterOf, type HomeWork } from "../../lib/homeWork";
+import { mergeHomeWork, WORK_FILTERS, workFilterOf, type HomeWork } from "../../lib/homeWork";
 import { SegmentBtn } from "../../components/reviews/recordParts";
 import { HOME_QUEUE_SIZE } from "../../components/customerOperations/CustomerOpsHome";
 import { COPY } from "../../lib/copy/customerOps";
@@ -44,8 +44,16 @@ const DESCRIPTION = "판매자님의 결정을 기다리는 문의와 리뷰입�
  * and the inquiry/review screens it links to still own every write.
  *
  * <p><b>Master-detail (UI/UX v2 Phase 1).</b> On a wide screen the selected row opens beside the list — drawn by the
- * very screen that owns it ({@link WorkItemPane}) — so the morning is worked without leaving the list. The first row
- * is selected when nothing is, because an empty right half is a page waiting for a click.
+ * very screen that owns it ({@link WorkItemPane}) — so the morning is worked without leaving the list.
+ *
+ * <p><b>Nothing is selected until the seller selects something</b> (Review Decision UX v3.2 — product-owner
+ * decision). This screen used to open the first row because 「an empty right half is a page waiting for a click」,
+ * and that reasoning was right about a screen whose job is the one item in front of you. Measured, this is not
+ * that screen: it opens on 45 rows, five filters and a 5,407px list, and its name is 확인할 일 — it is a screen
+ * for looking through. The cost of the old default was the one 오늘 already paid: a 556px column of judgment
+ * forms for a row nobody chose, no way to close it, and a URL that could not express 「none」. Same contract as
+ * the Home now: no {@code item} is closed, {@code item=<key>} is that row, a key that matches nothing is closed,
+ * and 닫기/Esc put it back. Closed, the list takes the width the pane was holding.
  */
 export function OperationsCaseQueue({ now }: { now?: Date }) {
   const [work, setWork] = useState<HomeWork | null | undefined>(undefined);
@@ -91,7 +99,19 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
   // A view of the one list (UI/UX v2 Phase 4): the same rows in the same order, narrowed by a fact each row carries.
   const filter = workFilterOf(params.get("filter"));
   const rows = allRows.filter(WORK_FILTERS.find((f) => f.key === filter)!.test);
-  const selected = wide ? selectedRow(rows, params.get("item")) : null;
+  const key = params.get("item");
+  // Only what the address names — see the docblock. The first-row fallback this screen used is gone, and with
+  // it the last caller of the helper that held it.
+  const selected = wide && key ? (rows.find((r) => r.key === key) ?? null) : null;
+  const close = () =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("item");
+        return next;
+      },
+      { replace: true },
+    );
   const setFilter = (key: string) =>
     setParams(
       (prev) => {
@@ -111,14 +131,16 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
         description={DESCRIPTION}
         meta={
           work && allRows.length > 0 ? (
+            // The breakdown used to stand here too — 「정보 부족 1 · 답변 필요 25 · 리뷰 11 · 승인 대기 4 ·
+            // 초안 필요 4」 — above filter chips that break the same 45 rows down again under different names
+            // (정보 부족 1 + 답변 필요 25 = 문의 답변 26). Twelve numbers for five populations in 166px, and the
+            // seller had to do that arithmetic to know the two lines were about the same list. The chips are the
+            // breakdown now, because they are the half you can press.
             <Facts className="text-sm text-muted">
               <span className="font-semibold text-ink">
                 {allRows.length.toLocaleString("ko-KR")}
                 {work.truncated ? "+" : ""}건
               </span>
-              {reasonCounts(allRows).map((part) => (
-                <span key={part}>{part}</span>
-              ))}
               <span>{COPY.listOrder}</span>
             </Facts>
           ) : undefined
@@ -175,6 +197,7 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
             search={location.search}
             now={now}
             ariaLabel={TITLE}
+            dense
           />
           {/* A read that reported more than it returned. The shortfall means this list is deeper than one read
               reaches — not that the rest is somewhere else — so it says so instead of passing its length off as
@@ -200,6 +223,8 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
       list={list}
       detailLabel="선택한 확인할 일"
       detail={selected ? <WorkItemPane row={selected} now={now} /> : null}
+      onClose={selected ? close : undefined}
+      fillWhenClosed
     />
   );
 }

@@ -24,7 +24,14 @@ import type { ReviewDecisionContext } from "../../../lib/types";
  * reviewnary has already asked N questions about this product that nobody has answered — that is
  * usually the reason, and it is one click from being fixed.
  */
-export function GroundingOnHand({ context }: { context: ReviewDecisionContext }) {
+export function GroundingOnHand({
+  context,
+  titled = true,
+}: {
+  context: ReviewDecisionContext;
+  /** False when the caller's own fold already prints this name. */
+  titled?: boolean;
+}) {
   const { knowledge, productSignal } = context;
   const preview = usePaneDepth() === "preview";
   /**
@@ -35,7 +42,7 @@ export function GroundingOnHand({ context }: { context: ReviewDecisionContext })
    */
   const unlinked = context.productId == null && context.productName != null;
   return (
-    <Section title="이 상품에 대해 우리가 아는 것">
+    <Section title={titled ? "이 상품에 대해 우리가 아는 것" : undefined} ariaLabel="이 상품에 대해 우리가 아는 것">
       <div className={preview ? "space-y-2" : "space-y-2 rounded-2xl border border-line bg-surface p-4"}>
         <Facts className="text-sm text-muted">
           {context.productId && context.productName ? (

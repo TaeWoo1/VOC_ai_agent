@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { GroundedReviewDraft } from "./GroundedReviewDraft";
+import { Disclosure } from "./ui/Disclosure";
 import { api } from "../lib/apiClient";
 import { copyText } from "../lib/clipboard";
 import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
@@ -92,6 +93,8 @@ export function VocItemReplyPrep({
   onLocalWork,
   replyRuntime,
   headingLevel = 4,
+  subjectShownAbove = false,
+  unboxed = false,
 }: {
   accountId: string;
   actionRef: string;
@@ -104,6 +107,30 @@ export function VocItemReplyPrep({
    * style preference. The level is the caller's to state because only the caller knows the outline.
    */
   headingLevel?: 2 | 3 | 4;
+  /**
+   * The caller already prints the customer's words — fold them here instead of printing them twice
+   * (Review Decision UX v3.2).
+   *
+   * <p>On the Review Case the review IS the page's headline, and this block repeated it 680px below,
+   * costing the one primary action ~64px of the fold it then sat outside. Folded, not dropped: the
+   * whole redacted body is one press away and the redaction notice travels with it, because 「the
+   * operator cannot answer a complaint they can only glimpse」 is still true — it is only that they
+   * are already looking at it.
+   *
+   * <p><b>And when nothing was redacted, not even the fold.</b> Then this panel's copy is the caller's
+   * copy, character for character, and a disclosure whose contents are the sentence six inches above it
+   * is a control that cannot pay for the line it takes. The fold appears exactly when the two texts
+   * differ — which is the only time there is something behind it to see.
+   */
+  subjectShownAbove?: boolean;
+  /**
+   * Drop this panel's own card — the caller already put it in one (Review Decision UX v3.2).
+   *
+   * <p>On the Review Case it sits inside the brand-outlined `DecisionCard` that marks the next thing to
+   * press, so its own rounded tint was a card inside a card inside the page: three borders saying one
+   * thing, and 24px the primary action paid for. Everything inside is unchanged.
+   */
+  unboxed?: boolean;
   /**
    * The reply-submission runtime the guided flow drives, when this build HAS one.
    *
@@ -535,7 +562,7 @@ export function VocItemReplyPrep({
   const Heading = `h${headingLevel}` as "h2" | "h3" | "h4";
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3 rounded-xl bg-canvas p-3">
+    <section aria-labelledby={headingId} className={`flex flex-col gap-3 ${unboxed ? "" : "rounded-xl bg-canvas p-3"}`}>
       <Heading id={headingId} className="text-sm font-semibold text-ink">
         답변 준비
       </Heading>
@@ -543,6 +570,20 @@ export function VocItemReplyPrep({
       {/* The review, in full. Not the list's 60-char preview — an operator cannot answer a
           complaint they can only glimpse. Sensitive spans arrive already tokenized by the
           server; this renders, it never redacts. */}
+      {subjectShownAbove ? (
+        prep.bodyRedacted ? (
+        <Disclosure label="고객 리뷰 다시 보기" summaryClassName="-ml-2">
+          <div className="flex flex-col gap-1 pt-2">
+            <p className="whitespace-pre-wrap text-sm text-ink">
+              {prep.redactedBody ? plainText(prep.redactedBody) : <span className="italic text-muted">내용 없음</span>}
+            </p>
+            {prep.bodyRedacted ? (
+              <p className="text-sm text-muted">개인정보로 보이는 부분은 가려서 표시했습니다.</p>
+            ) : null}
+          </div>
+        </Disclosure>
+        ) : null
+      ) : (
       <div className="flex flex-col gap-1">
         <p className="text-sm font-semibold text-muted">고객 리뷰</p>
         <p className="whitespace-pre-wrap text-sm text-ink">
@@ -559,6 +600,7 @@ export function VocItemReplyPrep({
           <p className="text-sm text-muted">개인정보로 보이는 부분은 가려서 표시했습니다.</p>
         ) : null}
       </div>
+      )}
 
       {/* Grounded Review Drafting v1: the seller asks for a draft written from what this company
           actually knows. It writes into the editor below and does nothing else — the save, the

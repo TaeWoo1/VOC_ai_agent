@@ -37,6 +37,7 @@ export function DecisionRow({
   action,
   children,
   selected = false,
+  dense = false,
 }: {
   tone: ReasonTone;
   icon: ReasonIcon;
@@ -58,6 +59,16 @@ export function DecisionRow({
    * control, and the one primary action lives in the detail (UI/UX v2 Phase 1).
    */
   selected?: boolean;
+  /**
+   * <b>Two lines instead of three</b>, for a list long enough that scrolling it is the work (Review
+   * Decision UX v3.2). The tag moves onto the title's line and 「어디서」 joins 「무엇을 덧붙였나」 under it.
+   *
+   * <p><b>Nothing is dropped.</b> The same five facts are drawn in the same order, and a row that has no
+   * `line` still says where it came from. Measured on 확인할 일 (45 rows): 108px → 80px a row, 5,407 →
+   * 4,146px of list. Rows that open an editor in place (the 지식 받은함) keep the three-line reading,
+   * where the extra air is the point.
+   */
+  dense?: boolean;
 }) {
   const body = (
     <>
@@ -65,14 +76,32 @@ export function DecisionRow({
         <Icon name={icon} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-          <span className={`rounded-md px-1.5 py-px text-xs font-semibold ${TAG[tone]}`}>{tag}</span>
-          {source ? <span>{source}</span> : null}
-        </span>
-        <span className="mt-1 block break-keep text-base font-bold leading-snug tracking-tight text-ink [overflow-wrap:anywhere]">
-          {title}
-        </span>
-        {line ? <span className="mt-0.5 block truncate text-sm text-muted">{line}</span> : null}
+        {dense ? (
+          <>
+            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className={`shrink-0 rounded-md px-1.5 py-px text-xs font-semibold ${TAG[tone]}`}>{tag}</span>
+              <span className="min-w-0 break-keep text-base font-bold leading-snug tracking-tight text-ink [overflow-wrap:anywhere]">
+                {title}
+              </span>
+            </span>
+            {source || line ? (
+              <span className="mt-1 block truncate text-sm text-muted">
+                {source && line ? `${source} · ${line}` : (source ?? line)}
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+              <span className={`rounded-md px-1.5 py-px text-xs font-semibold ${TAG[tone]}`}>{tag}</span>
+              {source ? <span>{source}</span> : null}
+            </span>
+            <span className="mt-1 block break-keep text-base font-bold leading-snug tracking-tight text-ink [overflow-wrap:anywhere]">
+              {title}
+            </span>
+            {line ? <span className="mt-0.5 block truncate text-sm text-muted">{line}</span> : null}
+          </>
+        )}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-2 self-center">
         {wait ? <span className="whitespace-nowrap text-sm tabular-nums text-muted">{wait}</span> : null}
@@ -97,7 +126,7 @@ export function DecisionRow({
           to={to}
           state={state}
           aria-current={selected ? "true" : undefined}
-          className={`group flex items-start gap-3.5 px-5 py-4 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700 ${
+          className={`group flex items-start gap-3.5 px-5 ${dense ? "py-3" : "py-4"} transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700 ${
             selected ? "bg-brand-50 shadow-[inset_3px_0_0_#1B64DA]" : "hover:bg-[#FAFBFC]"
           }`}
         >

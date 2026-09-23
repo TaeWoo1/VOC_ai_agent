@@ -28,25 +28,38 @@ export function WorkFlowCard({
   ariaLabel,
 }: {
   done: FlowCell;
-  mine: FlowCell;
+  /**
+   * Omitted when the page states 「내가 확인할 일」 better below (Review Decision UX v3.2).
+   *
+   * <p>On a case whose draft is already written, this cell said 「답변 확인 후 발송」 over a sentence about
+   * who decides what to promise a customer — a product generality — while the draft card six inches
+   * below carried the same statement WITH the controls that act on it. Left out, the strip is the one
+   * thing only it can say: what was done without the seller. A page that has no better place for the
+   * recommendation still passes it.
+   */
+  mine?: FlowCell;
   warnings?: ReactNode[];
   ariaLabel?: string;
 }) {
   const hasFoot = warnings.length > 0;
   return (
     <section
-      aria-label={ariaLabel ?? `${done.label}, ${mine.label}`}
+      aria-label={ariaLabel ?? (mine ? `${done.label}, ${mine.label}` : done.label)}
       className="overflow-hidden rounded-[16px] bg-surface shadow-[0_0_0_1px_#E4E7EC,0_8px_24px_-18px_rgba(15,25,45,0.35)]"
       data-testid="work-flow-card"
     >
-      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_36px_minmax(0,1fr)]">
+      <div className={mine ? "grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_36px_minmax(0,1fr)]" : ""}>
         <Cell cell={done} icon={<CheckIcon />} />
-        <div aria-hidden="true" className="hidden items-center justify-center sm:flex">
-          <svg viewBox="0 0 24 24" className="h-[22px] w-[22px] fill-none stroke-[#B0B8C1] stroke-2">
-            <path d="M5 12h14 M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <Cell cell={mine} icon={<PersonIcon />} mine />
+        {mine ? (
+          <>
+            <div aria-hidden="true" className="hidden items-center justify-center sm:flex">
+              <svg viewBox="0 0 24 24" className="h-[22px] w-[22px] fill-none stroke-[#B0B8C1] stroke-2">
+                <path d="M5 12h14 M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <Cell cell={mine} icon={<PersonIcon />} mine />
+          </>
+        ) : null}
       </div>
       {hasFoot ? (
         <ul className="border-t border-[#EEF0F3] bg-[#FFF8F1]">

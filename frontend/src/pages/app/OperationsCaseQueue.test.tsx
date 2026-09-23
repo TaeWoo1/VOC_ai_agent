@@ -261,11 +261,45 @@ describe("OperationsCaseQueue", () => {
       const list = await screen.findByRole("list", { name: "확인할 일" });
       // No row carries a verb of its own: the list used to end every row in 「검토」.
       expect(within(list).queryByText("검토")).toBeNull();
-      // Each row selects in place, and the first one is open beside the list.
+      // Each row selects in place.
       const links = within(list).getAllByRole("link");
       expect(links.every((a) => /[?&]item=/.test(a.getAttribute("href") ?? ""))).toBe(true);
-      expect(links[0]).toHaveAttribute("aria-current", "true");
+    } finally {
+      restore();
+    }
+  });
+
+  /**
+   * <b>Review Decision UX v3.2 — product-owner decision.</b> This screen used to open the first row and the
+   * assertion above used to say so. It is a screen for looking through — 45 rows, five filters, a 5,407px
+   * list — so nothing is chosen until the seller chooses it, and the seller can put it back.
+   */
+  it("아무것도 선택하지 않은 채로 열리고, 고른 뒤에는 닫을 수 있다", async () => {
+    const restore = stubWide(true);
+    try {
+      reads();
+      api.getCustomerOperationsDecisions.mockResolvedValue({ total: 2, rows: [row(), REVIEW] });
+      draw();
+      const list = await screen.findByRole("list", { name: "확인할 일" });
+      const links = within(list).getAllByRole("link");
+
+      // Nothing is selected, and no pane stands for a row nobody picked.
+      expect(links.some((a) => a.getAttribute("aria-current") === "true")).toBe(false);
+      expect(screen.queryByLabelText("선택한 확인할 일")).toBeNull();
+      expect(screen.queryByRole("button", { name: /닫기/ })).toBeNull();
+
+      // A press selects that row — and only that row.
+      await userEvent.click(links[0]);
+      const after = within(await screen.findByRole("list", { name: "확인할 일" })).getAllByRole("link");
+      expect(after[0]).toHaveAttribute("aria-current", "true");
+      expect(after[1]).not.toHaveAttribute("aria-current", "true");
       expect(await screen.findByLabelText("선택한 확인할 일")).toBeInTheDocument();
+
+      // …and 닫기 puts the screen back to where it opened.
+      await userEvent.click(screen.getByRole("button", { name: /닫기/ }));
+      expect(screen.queryByLabelText("선택한 확인할 일")).toBeNull();
+      const closed = within(await screen.findByRole("list", { name: "확인할 일" })).getAllByRole("link");
+      expect(closed.some((a) => a.getAttribute("aria-current") === "true")).toBe(false);
     } finally {
       restore();
     }

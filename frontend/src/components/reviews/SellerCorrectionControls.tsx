@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Btn } from "../ui/Btn";
+import { Disclosure } from "../ui/Disclosure";
 import { AiMarkChip, TriageTierChip } from "./TriageTierChip";
 import { api } from "../../lib/apiClient";
 import {
@@ -100,7 +101,11 @@ export function SellerCorrectionControls({
 
   return (
     <div className="space-y-3" aria-label="판매자 판단">
-      <Heading className="break-keep text-sm font-semibold text-ink">
+      {/* The caller's own heading — 「① 이 리뷰의 중요도」 — asks this question already, one line above
+          (Review Decision UX v3.2). Two headings for one control were 38px of the fold and the second
+          one told the seller nothing the first had not. Kept for assistive technology, where the group
+          still needs a name of its own. */}
+      <Heading className="sr-only">
         이 {word}, {TRIAGE_CORRECTION_COPY.prompt}
       </Heading>
       {/* The two judgments, named. Without this the seller sees three buttons and cannot tell which of
@@ -137,7 +142,12 @@ export function SellerCorrectionControls({
           </Btn>
         ) : null}
       </div>
-      <p className="text-sm leading-relaxed text-muted">{TRIAGE_CORRECTION_COPY.disclosure}</p>
+      {/* Folded, not dropped (Review Decision UX v3.2). It is the sentence that keeps the control honest —
+          and it answers a question the seller asks AFTER pressing, not before: three lines of standing
+          explanation above the primary action is three lines the action pays for. */}
+      <Disclosure label="이 판단은 어떻게 쓰이나요" summaryClassName="-ml-2">
+        <p className="pt-2 text-sm leading-relaxed text-muted">{TRIAGE_CORRECTION_COPY.disclosure}</p>
+      </Disclosure>
       {failed ? <p className="text-sm text-bad">기록하지 못했습니다. 잠시 후 다시 시도해 주세요.</p> : null}
     </div>
   );

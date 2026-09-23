@@ -3,7 +3,6 @@ import { Section } from "../../ui/Section";
 import { Disclosure } from "../../ui/Disclosure";
 import { Btn } from "../../ui/Btn";
 import { VocItemTriageControl } from "../../VocItemTriageControl";
-import { useCaseVariant } from "../../workspace/CaseLayout";
 import { api } from "../../../lib/apiClient";
 import { DECISION_ACTION_NOTE, DECISION_DONE_LABEL, type DecisionDoneKind } from "../../../lib/reviewDecision";
 import type { TriageDisposition } from "../../../lib/types";
@@ -59,7 +58,6 @@ export function DecisionActionStep({
   /** The step's heading — the Decision Workspace numbers its two judgments so they cannot be read as one. */
   title?: string;
 }) {
-  const pane = useCaseVariant() === "pane";
   const [done, setDone] = useState<DecisionDoneKind | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -92,23 +90,29 @@ export function DecisionActionStep({
           disposition={decision}
           onRecorded={onDecided}
         />
-        <p className="break-keep text-sm leading-relaxed text-muted">
-          {replySupported
-            ? DECISION_ACTION_NOTE.withReply
-            : replyUnavailableReason === "NO_SELLER_ACCOUNT"
+        {/* <b>Folded when a draft can follow, stated when one cannot</b> (Review Decision UX v3.2).
+            `withReply` describes what the next press does and the next press is right below it — three
+            standing lines that the seller reads once and then scrolls past forever, above the one action
+            this screen exists for. The other two are not instructions but FACTS about this channel and
+            this seller's setup: they explain why there is no draft, and an explanation that is folded
+            leaves an absence looking like an oversight. */}
+        {replySupported ? (
+          <Disclosure label="정하면 어떻게 되나요" summaryClassName="-ml-2">
+            <p className="break-keep pt-2 text-sm leading-relaxed text-muted">{DECISION_ACTION_NOTE.withReply}</p>
+          </Disclosure>
+        ) : (
+          <p className="break-keep text-sm leading-relaxed text-muted">
+            {replyUnavailableReason === "NO_SELLER_ACCOUNT"
               ? DECISION_ACTION_NOTE.withoutAccount
               : DECISION_ACTION_NOTE.withoutReply}
-        </p>
+          </p>
+        )}
 
         {/* Only after a decision stands. Before one, 「조치 완료함」 would be a record of finishing work
             nobody has said needs doing — and on 조치 불필요 the decision itself is the conclusion, so
             there is nothing left to report. */}
         {decision === "RESPONSE_NEEDED" || decision === "MONITOR" ? (
-          // Folded in the pane (Home v3). This records work the seller did OUTSIDE reviewnary, so it is
-          // neither the decision above it nor the action below it — and standing open between the two it
-          // cost ~70px of the pane's one fold, which is what kept 「AI 초안 준비」 off the screen. Open on the
-          // full page, where there is no fold to spend. Nothing is removed and the writes are unchanged.
-          <DoneRecord pane={pane} done={done}>
+          <DoneRecord done={done}>
             <div className="flex flex-wrap gap-2">
               {(Object.keys(DECISION_DONE_LABEL) as DecisionDoneKind[]).map((kind) => (
                 <Btn
@@ -132,29 +136,21 @@ export function DecisionActionStep({
 }
 
 /**
- * 「직접 하신 조치가 있으면 기록해 두세요」 — open on a page, folded in a pane.
+ * 「직접 하신 조치 기록」 — folded, on the page and in the pane alike.
+ *
+ * <p>This records work the seller did OUTSIDE reviewnary, so it is neither the decision above it nor the
+ * draft below it. It stood open on the page because 「a page has no fold to spend」 — measured, it does:
+ * between the two it was ~46px of the one screen the primary action has to fit on, at every width the
+ * product is used at (Review Decision UX v3.2).
  *
  * <p>The label states what is behind it, and when something HAS been recorded the fold says so on its own
  * summary: a folded control that hides the seller's own answer is how progressive disclosure becomes
- * hiding. Same children, same writes, both readings.
+ * hiding. Same children, same writes.
  */
-function DoneRecord({ pane, done, children }: { pane: boolean; done: DecisionDoneKind | null; children: ReactNode }) {
-  const label = "직접 하신 조치 기록";
-  if (!pane) {
-    return (
-      <div className="space-y-2 border-t border-line pt-3">
-        <p className="break-keep text-sm font-semibold text-ink">직접 하신 조치가 있으면 기록해 두세요</p>
-        {children}
-      </div>
-    );
-  }
+function DoneRecord({ done, children }: { done: DecisionDoneKind | null; children: ReactNode }) {
   return (
     <div className="border-t border-line pt-2">
-      <Disclosure
-        label={label}
-        note={done ? `· ${DECISION_DONE_LABEL[done]}` : undefined}
-        summaryClassName="-ml-2"
-      >
+      <Disclosure label="직접 하신 조치 기록" note={done ? `· ${DECISION_DONE_LABEL[done]}` : undefined} summaryClassName="-ml-2">
         <div className="space-y-2 pt-2">{children}</div>
       </Disclosure>
     </div>

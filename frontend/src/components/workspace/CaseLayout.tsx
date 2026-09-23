@@ -10,14 +10,23 @@ import { createContext, useContext, type ReactNode } from "react";
  * <ol>
  *   <li><b>무엇인가</b> — a meta line (where it came from, how long it has waited) and the title;</li>
  *   <li><b>고객이 뭐라고 했나</b> — the subject, the largest body text on the screen;</li>
- *   <li><b>내가 할 일</b> — the decision: the one place a primary action may stand;</li>
  *   <li><b>무엇을 확인했나</b> — what Reviewnary checked and found;</li>
+ *   <li><b>내가 할 일</b> — the decision: the one place a primary action may stand;</li>
  *   <li><b>더 보기</b> — records and background, folded by the caller.</li>
  * </ol>
  *
  * <p><b>Two variants, same parts.</b> On a full page the decision stands in its own column beside the story and
- * follows the scroll. In the master-detail pane there is room for one column, so the decision comes straight after
- * what the customer wrote — never under the evidence, below the fold.
+ * follows the scroll. In the master-detail pane there is room for one column, and the order above is the order
+ * it draws.
+ *
+ * <p><b>The pane used to put the decision straight after the customer's words</b> — 「never under the evidence,
+ * below the fold」 — and that rule is retired (Review Decision UX v3.2, product-owner decision). It was written
+ * to keep the decision on the first screen, and measurement showed it had stopped doing that: on 확인할 일 at
+ * 1440×900 the decision block is <b>995px</b> tall, so 반복 신호 landed at y=1,191 and 이 상품에 대해 아는 것
+ * at y=1,498 — the seller was asked to judge at y=201 and shown what was found a screen and a half below.
+ * The rule bought nothing it promised and cost the thing it was protecting. The order is now
+ * <b>고객 요청 → 확인한 사실 → 판매자 판단 → primary action</b>, and the promise it replaces is kept by
+ * measurement instead: the primary action must stand inside the fold at 1440×900, 1366×768 and 1152×720.
  *
  * <p>The layout owns placement and nothing else: every read, write and word belongs to the screen that composes it.
  */
@@ -100,6 +109,7 @@ export function CaseLayout({
 }) {
   const pane = variant === "pane";
   const Heading = pane ? "h2" : "h1";
+  const storyEmpty = !subject && !context && !more;
 
   const header = (
     <header className="flex flex-wrap items-start gap-x-4 gap-y-2">
@@ -123,7 +133,7 @@ export function CaseLayout({
   );
 
   const decisionBlock = decision ? (
-    <section aria-label={decisionLabel} className={`flex flex-col ${pane ? "gap-3" : "gap-3.5"}`}>
+    <section aria-label={decisionLabel} className="flex flex-col gap-3">
       {decision}
     </section>
   ) : null;
@@ -138,27 +148,37 @@ export function CaseLayout({
           {summary}
           {notice}
           {subject}
-          {/* 고객 원문 → 왜 올라왔나요 → 확인한 사실 → 추천. A preview reads before it recommends, so what
-              was checked comes before what to do with it; the full pane keeps the decision straight after
-              the customer's words, which is what a workspace is for. */}
-          {depth === "preview" ? context : decisionBlock}
-          {depth === "preview" ? decisionBlock : context}
+          {/* 고객 요청 → 확인한 사실 → 판매자 판단 → primary action — at BOTH depths. See the docblock: the
+              rule this replaces put the decision first and the measurement retired it. */}
+          {context}
+          {decisionBlock}
           {more}
         </article>
       ) : (
-        <div className="mx-auto w-full max-w-[1080px] space-y-5" data-case-variant="page">
+        <div className="mx-auto w-full max-w-[1080px] space-y-4" data-case-variant="page">
           {nav}
           {header}
-          {summary}
+          {/* The strip follows the body's width. With one column it was a 1,500px band over a 560px card —
+              the page reading as two different documents stacked. */}
+          {summary ? <div className={storyEmpty ? "max-w-[560px]" : undefined}>{summary}</div> : null}
           {notice}
+          {/* <b>Two columns only when there are two columns' worth</b> (Review Decision UX v3.2). A case
+              whose question is its own title, whose checks are empty and whose evidence the draft already
+              cites has nothing for the left track — and the grid still reserved it, so the page ran 660px
+              of white beside a 360px card. Callers pass null for a block that would render nothing, which
+              is what makes this answerable here at all. */}
           {/* Extra height goes to the last row, so a tall decision column never opens a gap under a short story. */}
-          <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1fr)_380px] xl:grid-rows-[auto_auto_1fr] xl:gap-x-6">
-            {subject ? <div className="min-w-0 space-y-3.5 xl:col-start-1">{subject}</div> : null}
+          <div
+            className={`grid gap-3 ${
+              storyEmpty ? "max-w-[560px]" : "lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[auto_auto_1fr] lg:gap-x-6"
+            }`}
+          >
+            {subject ? <div className="min-w-0 space-y-3 lg:col-start-1">{subject}</div> : null}
             {decisionBlock ? (
-              <div className="self-start xl:sticky xl:top-4 xl:col-start-2 xl:row-span-3 xl:row-start-1">{decisionBlock}</div>
+              <div className="self-start lg:sticky lg:top-4 lg:col-start-2 lg:row-span-3 lg:row-start-1">{decisionBlock}</div>
             ) : null}
-            {context ? <div className="min-w-0 space-y-3.5 self-start xl:col-start-1">{context}</div> : null}
-            {more ? <div className="min-w-0 space-y-3.5 self-start xl:col-start-1">{more}</div> : null}
+            {context ? <div className="min-w-0 space-y-3.5 self-start lg:col-start-1">{context}</div> : null}
+            {more ? <div className="min-w-0 space-y-3.5 self-start lg:col-start-1">{more}</div> : null}
           </div>
         </div>
       )}
@@ -175,16 +195,25 @@ export function CaseBlock({
   title,
   children,
   tone = "plain",
+  flat = false,
 }: {
   title?: string;
   children: ReactNode;
   /** `subject` gives the customer's own words the reading size; everything else is plain. */
   tone?: "plain" | "subject";
+  /**
+   * A hairline section on the page too, not only in the pane (Review Decision UX v3.2).
+   *
+   * <p>For a block whose whole content is a line or three — 「왜 올라왔나요」 measured 220px of card for
+   * three short lines, and it was the first thing under the customer's sentence. A card says 「separate
+   * object」, and a near-empty card says it loudest about the thing with least in it.
+   */
+  flat?: boolean;
 }) {
   const variant = useCaseVariant();
   const H = variant === "pane" ? "h3" : "h2";
   const heading = title ? <H className="mb-2.5 text-sm font-bold text-muted">{title}</H> : null;
-  if (variant === "pane") {
+  if (variant === "pane" || flat) {
     return (
       <section aria-label={title} className={tone === "subject" ? "" : "border-t border-line pt-4"}>
         {heading}
@@ -214,9 +243,12 @@ export function CaseQuote({ children }: { children: ReactNode }) {
  * the only emphasis a case gives, so there is never more than one place that looks like the primary action.
  */
 export function DecisionCard({ children, primary = false }: { children: ReactNode; primary?: boolean }) {
+  // Less padding inside a pane: the card is already inside a 556px panel inside the page, and every
+  // millimetre of its inset is one the primary action pays for on the one screen it has.
+  const pad = useCaseVariant() === "pane" ? "p-3" : "p-4";
   return (
     <div
-      className={`rounded-2xl bg-surface p-5 ${
+      className={`rounded-2xl bg-surface ${pad} ${
         primary ? "shadow-[0_0_0_1.5px_#1B64DA,0_18px_36px_-22px_rgba(27,100,218,0.45)]" : "border border-line"
       }`}
     >

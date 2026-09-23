@@ -24,6 +24,7 @@ export function WorkRows({
   now,
   ariaLabel,
   showBacklogDivider = true,
+  dense = false,
 }: {
   rows: HomeWorkRow[];
   selectedKey: string | null;
@@ -33,6 +34,9 @@ export function WorkRows({
   now?: Date;
   ariaLabel: string;
   showBacklogDivider?: boolean;
+  /** {@link DecisionRow}'s two-line reading — for the queue, where the whole list is the screen. Home v3.1's
+      five-row brief is unchanged: it is frozen, and five rows are not a scroll. */
+  dense?: boolean;
 }) {
   const caseIds = rows.map((r) => r.caseId).filter((id): id is string => id !== null);
   const firstOld = showBacklogDivider ? rows.findIndex((r) => isOldBacklog(r, now ?? new Date())) : -1;
@@ -54,6 +58,7 @@ export function WorkRows({
         to={selectionHref(wide, row.key, fullScreen, search)}
         state={!wide && row.caseId ? ({ caseIds } satisfies CaseQueueState) : undefined}
         selected={wide && row.key === selectedKey}
+        dense={dense}
       />
     );
   };
@@ -71,9 +76,4 @@ export function WorkRows({
       <DecisionList ariaLabel={`${ariaLabel} · 1년 넘게 기다린 것`}>{rows.slice(firstOld).map(draw)}</DecisionList>
     </div>
   );
-}
-
-/** The row the pane shows: the one in the URL when it is still in the list, otherwise the first. */
-export function selectedRow(rows: HomeWorkRow[], key: string | null): HomeWorkRow | null {
-  return (key ? rows.find((r) => r.key === key) : undefined) ?? rows[0] ?? null;
 }

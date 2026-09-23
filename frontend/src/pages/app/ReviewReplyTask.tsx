@@ -8,6 +8,7 @@ import { Btn } from "../../components/ui/Btn";
 import { VocItemReplyPrep } from "../../components/VocItemReplyPrep";
 import { SellerCorrectionControls } from "../../components/reviews/SellerCorrectionControls";
 import { ChannelAnsweredState } from "../../components/reviews/ChannelAnsweredState";
+import { TriageTierChip } from "../../components/reviews/TriageTierChip";
 import { ReviewProblemCard } from "../../components/reviews/decision/ReviewProblemCard";
 import { RepeatedSignal } from "../../components/reviews/decision/RepeatedSignal";
 import { GroundingOnHand } from "../../components/reviews/decision/GroundingOnHand";
@@ -111,6 +112,7 @@ export function ReviewCaseView({
 }) {
   const pane = variant === "pane";
   const preview = pane && depth === "preview";
+  const paneEvidenceFolded = pane && !preview;
 
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [failed, setFailed] = useState(false);
@@ -338,7 +340,7 @@ export function ReviewCaseView({
             </div>
           </Disclosure>
         ) : (
-          <CaseBlock title="왜 올라왔나요" tone="plain">
+          <CaseBlock title="왜 올라왔나요" tone="plain" flat>
             <ReviewProblemCard detail={detail} word={word} showBody={false} />
           </CaseBlock>
         )
@@ -354,36 +356,70 @@ export function ReviewCaseView({
           {/* The channel's own statement, said BEFORE anyone decides anything. */}
           <ChannelAnsweredState state={replyWork?.channelReplyState ?? null} />
 
-          <DecisionCard>
-            {/* ① — the seller's own judgment of the tier, which does not replace the system's. */}
-            <Section title="① 이 리뷰의 중요도" ariaLabel="판매자 판단 영역">
-              <SellerCorrectionControls
-                reviewId={detail.id}
-                word={word}
-                systemTier={detail.triage.tier}
-                aiMarked={detail.aiMark !== null}
-                correction={detail.sellerCorrection}
-                onCorrected={bump}
-                headingLevel={3}
-              />
-            </Section>
-          </DecisionCard>
-
+          {/* <b>Two questions, one card</b> (Review Decision UX v3.2). They were a card each, and the
+              numbering — not the border — is what tells them apart: 「① 이 리뷰의 중요도」 and 「② 처리 방법」
+              are the seller's judgment of this review, asked in order, and they are answered in one
+              sitting. Two cards cost 40px of padding and a 14px gap for a separation the numerals already
+              made, and they pushed 「AI 초안 준비」 — the thing this screen exists for — outside the fold at
+              every width the product is used at. A hairline divides them now. Neither control changed. */}
           <DecisionCard primary={decision === null}>
-            {/* ② — what to do. Stands on every review the workspace can open: a channel with no reply flow,
-                and a review no account acquired. */}
-            <DecisionActionStep
-              reviewId={detail.id}
-              decision={decision}
-              replySupported={replyWork !== null}
-              replyUnavailableReason={detail.replyUnavailableReason}
-              title="② 처리 방법"
-              onDecided={(next) => {
-                setDecision(next);
-                bump();
-              }}
-              onRecorded={bump}
-            />
+            <div className="space-y-3">
+              {/* ① — the seller's own judgment of the tier, which does not replace the system's.
+                  <b>Folded in the pane.</b> It is a different judgment from ② and a secondary one: the
+                  triage contract §5-C says it stands BESIDE the system's and changes no ordering, so
+                  nothing downstream waits on it. In a 556px column it was 160px standing between
+                  확인한 사실 and the action; the page, which has a whole second column for it, keeps it
+                  open. The fold's own summary names the tier that stands, so what it holds is visible
+                  without opening it. */}
+              {paneEvidenceFolded ? (
+                <Disclosure
+                  label="① 이 리뷰의 중요도"
+                  note={<TriageTierChip tier={detail.sellerCorrection?.correctedTier ?? detail.triage.tier} />}
+                  summaryClassName="-ml-2"
+                >
+                  <div className="pt-1">
+                    <SellerCorrectionControls
+                      reviewId={detail.id}
+                      word={word}
+                      systemTier={detail.triage.tier}
+                      aiMarked={detail.aiMark !== null}
+                      correction={detail.sellerCorrection}
+                      onCorrected={bump}
+                      headingLevel={3}
+                    />
+                  </div>
+                </Disclosure>
+              ) : (
+                <Section title="① 이 리뷰의 중요도" ariaLabel="판매자 판단 영역">
+                  <SellerCorrectionControls
+                    reviewId={detail.id}
+                    word={word}
+                    systemTier={detail.triage.tier}
+                    aiMarked={detail.aiMark !== null}
+                    correction={detail.sellerCorrection}
+                    onCorrected={bump}
+                    headingLevel={3}
+                  />
+                </Section>
+              )}
+
+              <div className="border-t border-line pt-3">
+                {/* ② — what to do. Stands on every review the workspace can open: a channel with no reply
+                    flow, and a review no account acquired. */}
+                <DecisionActionStep
+                  reviewId={detail.id}
+                  decision={decision}
+                  replySupported={replyWork !== null}
+                  replyUnavailableReason={detail.replyUnavailableReason}
+                  title="② 처리 방법"
+                  onDecided={(next) => {
+                    setDecision(next);
+                    bump();
+                  }}
+                  onRecorded={bump}
+                />
+              </div>
+            </div>
           </DecisionCard>
 
           {/* The draft that follows from 대응 필요. The same panel as every other reply surface: no second
@@ -400,6 +436,8 @@ export function ReviewCaseView({
                 onOutcomeRecorded={bump}
                 onLocalWork={setLocalWork}
                 headingLevel={2}
+                subjectShownAbove
+                unboxed
               />
               {/* 작업에서 제외 lived only on the 리뷰 screen's 「내 답변 작업」 list; that list is gone and its rows are
                   확인할 일's now, so the one exit from the to-do stands with the work it takes out. */}
@@ -424,10 +462,44 @@ export function ReviewCaseView({
         )
       }
       context={
-        <>
-          <RepeatedSignal problems={context?.repeatedProblems ?? []} failed={contextFailed || context === null} />
-          {context ? <GroundingOnHand context={context} /> : null}
-        </>
+        // <b>Folded in the full pane, open on the page and in the preview.</b> 확인한 사실 comes before
+        // 판매자 판단 now (Review Decision UX v3.2), and in a 556px column these two sections measure
+        // 644px — so keeping them open moved 「AI 초안 준비」 to y=1,351, three folds down. Folded they are
+        // 72px and the decision is back on the first screen, which is the promise the new order was
+        // allowed to make. Same blocks, same reads, one press; 왜 올라왔나요 has been folded here since
+        // Home v3 for the same reason. The PAGE has a second column for them and the Home preview offers
+        // no forms to push down, so neither folds.
+        paneEvidenceFolded ? (
+          <>
+            <Disclosure
+              label="반복 신호"
+              note={
+                (context?.repeatedProblems.length ?? 0) > 0 ? `${context!.repeatedProblems.length}` : undefined
+              }
+              summaryClassName="-ml-2"
+            >
+              <div className="pt-1">
+                <RepeatedSignal
+                  problems={context?.repeatedProblems ?? []}
+                  failed={contextFailed || context === null}
+                  titled={false}
+                />
+              </div>
+            </Disclosure>
+            {context ? (
+              <Disclosure label="이 상품에 대해 우리가 아는 것" summaryClassName="-ml-2">
+                <div className="pt-1">
+                  <GroundingOnHand context={context} titled={false} />
+                </div>
+              </Disclosure>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <RepeatedSignal problems={context?.repeatedProblems ?? []} failed={contextFailed || context === null} />
+            {context ? <GroundingOnHand context={context} /> : null}
+          </>
+        )
       }
       more={<DecisionLog entries={log ?? []} failed={logFailed || log === null} />}
     />

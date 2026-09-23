@@ -17,7 +17,12 @@ export function Section({
   ariaLabel,
   className = "",
 }: {
-  title: string;
+  /**
+   * Undefined when the caller's own control already prints this name — a fold whose summary IS the
+   * title (Review Decision UX v3.2). The section keeps its accessible name from `ariaLabel`, which
+   * becomes required in that reading.
+   */
+  title?: string;
   /** A number beside the title, muted — the size of what is under it. */
   count?: number | string | null;
   /** One short clause after the title. Present only when it changes what the numbers mean. */
@@ -29,10 +34,11 @@ export function Section({
 }) {
   return (
     <section aria-label={ariaLabel ?? title} className={`space-y-3 ${className}`}>
+      {title || action ? (
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <h2 className="break-keep text-base font-semibold text-ink">
-            {title}
+          <h2 className={`break-keep text-base font-semibold text-ink ${title ? "" : "sr-only"}`}>
+            {title ?? ariaLabel}
             {count !== undefined && count !== null ? (
               <span className="ml-1.5 font-semibold tabular-nums text-muted">{count}</span>
             ) : null}
@@ -41,6 +47,7 @@ export function Section({
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
+      ) : null}
       {children}
     </section>
   );

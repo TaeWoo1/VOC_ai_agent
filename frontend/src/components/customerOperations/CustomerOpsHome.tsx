@@ -319,8 +319,8 @@ export function TodayWorkspace({
       detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={onProblemChanged ?? (() => undefined)} />;
       open = { to: `/memory/${problem.issue.id}`, label: "근거 전체 보기", primary: false };
     } else if (key) {
-      // Only what the address names. `selectedRow` still falls back to the first row for the queue screen,
-      // whose job IS the item in front of the seller; the Home's job is the list.
+      // Only what the address names. 확인할 일 kept a first-row fallback when this was written; it does not
+      // any more (Review Decision UX v3.2), so both screens now answer 「선택 없음」 the same way.
       const chosen = work.rows.find((r) => r.key === key) ?? null;
       if (chosen) {
         selectedKey = chosen.key;
