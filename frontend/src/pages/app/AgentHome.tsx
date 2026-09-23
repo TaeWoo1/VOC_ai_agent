@@ -26,13 +26,21 @@ import type { InquiryQueueResponse, MetricKpi, OperationsHome, OverviewResponse,
 /**
  * 홈 — the Agent operating workspace (Agentic Operating Workspace v2 §3-C).
  *
- * <b>Conversation-first (Chat UI v1).</b> The thread is the page: it owns the scroll, the composer is
- * docked at the bottom of the viewport, threads live in the sidebar. An EMPTY thread opens with a
- * greeting that is arithmetic (hour + the count of prepared cases — no model writes it), ONE muted
- * context line with the three numbers (secondary, never a strip of cards), the first agent turn
- * client-composed from 「AI가 먼저 확인한 일」 — a truthful zero when there is nothing — and example
- * prompts under the box. After the first message the thread speaks for itself. The old dashboard is
- * one link away at `/overview`; none of its numbers moved.
+ * <b>Work-first, chat as a command bar (Home v3, 2026-09-23).</b> This docblock used to say 「the thread
+ * is the page」 and had been wrong for some time: for an org with 고객 운영 관리 open, Home is
+ * {@link TodayWorkspace} — the 확인할 일 list with the selected item beside it — and the conversation is a
+ * one-line dock under the list. The design contract said the same stale thing and was corrected with this
+ * (`docs/reviewnary_design.md` §8-A v3.2).
+ *
+ * <p>What the screen answers is unchanged — 「오늘 무엇을 해야 하지?」 — and the answer is the LIST. The top
+ * carries only obligations (확인할 일 · 실행 대기); 반복 문제 keeps its own section below the work because it
+ * is a pattern, not a customer waiting; KPI, trend and per-channel numbers stay at `/overview` and are not
+ * copied here. Nothing is chosen until the seller chooses it, and what they chose can be closed.
+ *
+ * <p>For an org WITHOUT that job, this page is still the thread: an EMPTY thread opens with a greeting that
+ * is arithmetic (hour + the count of prepared cases — no model writes it), ONE muted context line with the
+ * three numbers, the first agent turn client-composed from 「AI가 먼저 확인한 일」 — a truthful zero when
+ * there is nothing — and example prompts under the box.
  *
  * <b>The palette is a shortcut, not a planner.</b> A typed sentence that is exactly one of three
  * labels answers locally with an object the page already has; every other sentence goes to the

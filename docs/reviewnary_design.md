@@ -193,31 +193,40 @@ a row with a one-line meaning and one action. No card wall.
 
 ---
 
-## 8. The Agent — conversation-first, object-backed (v3, Agentic Operating Workspace v2)
+## 8. The Agent — object-backed, and how it reaches Home (v3.2)
 
-reviewnary's primary interaction is a **conversation with an AI operator**. The seller hands over work in
+reviewnary delegates work to an **AI operator**, and the conversation is how work is handed over (§8-A: on Home that conversation is a compact command bar, not the page). The seller hands over work in
 their own words; the operator investigates real data, asks for one human step only when it must, returns
 **structured artifacts**, keeps the thread across follow-ups and across screens, and hands off to a
-workspace or to Human Approval when that is the better tool. Text-only chat is forbidden; a menu of
-predefined AI buttons is forbidden as the primary path.
+workspace or to Human Approval when that is the better tool. Text-only chat is forbidden, and a typed sentence is always planned by the planner or the run fails —
+that contract is unchanged. What §8-A retires is only the claim that the **Home screen** is the thread.
 
 **Conversation vs workspace.** Conversation = where work is delegated, investigated, decided and prepared.
 Workspace (문의 / 리뷰 / 상품 / 주문 / 채널 / 설정) = where many objects are read precisely, handled in bulk,
 or explored deeply. An artifact links into the workspace (「전체 8건 처리하기」); the conversation does not
 end when the seller goes there — the same thread continues in the contextual panel.
 
-### 8-A. Home = the conversation
+### 8-A. Home = 오늘의 고객운영 상황과 할 일 (v3.2, 2026-09-23 — product-owner decision)
+
+**이 절은 「Home = the conversation」을 폐기한다.** 그 계약은 Home을 대화 타임라인으로 규정했고, 이 저장소의
+Home은 한참 전부터 그렇지 않았다 — 실측(1440×900, `bb526245`)한 `/`는 작업 목록 + 우측 detail의 2-pane
+워크스페이스이고 대화는 목록 열 바닥의 한 줄이다. 코드가 이미 뒤집혀 있었고 이 문서만 낡아 있었다.
+
+Home이 답하는 질문은 그대로 **「오늘 무엇을 해야 하지?」**이고, 답은 **일의 목록**이다. Chat은 그 위의
+주인공이 아니라 **compact command surface** — 한 줄 입력이고, 인식되지 않은 문장은 예전과 똑같이 planner로
+간다(팔레트는 planner가 아니다). 전체 대화는 사이드바 「대화」와 `/agent`가 계속 소유한다.
 
 | Rule | Value |
 |---|---|
-| Order | greeting line → compact context strip (3 numbers + one freshness line + 「자세한 숫자 보기」→`/overview`) → conversation timeline → composer (sticky at the bottom on desktop) → suggested prompts |
-| Greeting | arithmetic, never a model: 「좋은 아침입니다. 오늘 제가 먼저 확인한 일이 N개 있습니다.」 / 「…먼저 확인한 일은 없습니다.」 |
-| First turn | the proactive cases the agent already prepared, as artifacts (`INQUIRY_LIST`/`LIST`). Actual zero renders as zero — no fixture. |
-| Composer | one two-line box, Enter sends, Shift+Enter breaks; the send fence sentence appears under the box the moment the sentence asks to send |
+| Order | 제목 줄(날짜 · 상태 · 다음 확인) → **행동 가능한 두 숫자**(확인할 일 · 실행 대기) → 약한 「자동 확인」 상태 줄 → 확인할 일 목록 → 실행 대기 → **반복 문제(secondary)** → compact command bar |
+| Top summary | **의무를 뜻하는 숫자만.** 확인할 일 = 판매자의 결정을 기다리는 것, 실행 대기 = 승인했고 아직 등록하지 않은 것. **반복 문제는 여기 서지 않는다** — 패턴이지 기다리는 고객이 아니고, 목록 아래 자기 섹션이 이미 그렇게 말한다 |
+| 자동 확인 | reviewnary가 한 일에 대한 보고이므로 숫자 카드가 아니라 **약한 한 줄**. 판매자의 할 일로 세지 않는다 |
+| Detail panel | **기본 닫힘.** 행을 눌렀을 때만 열리고, 명시적 「닫기」와 `Esc`로 닫힌다. **URL이 소유한다** — `item` 없음 = 닫힘, `item=<key>` = 그 행, **매치되지 않는 key = 닫힘**(낡은 주소가 다른 레코드를 조용히 열지 않는다) |
+| Dashboard | KPI · 추이 · 채널별 수치는 **`/overview`가 계속 소유한다**. Home은 그 숫자를 복제하지 않는다 — 같은 숫자가 두 정의로 두 곳에 있는 것이 이 저장소가 여러 번 고쳐 온 결함이다 |
+| Composer | 한 줄 dock, Enter sends, Shift+Enter breaks. 예시 칩은 빈 스레드에서만. 발송 fence 문장은 그대로 — 문장이 전송을 요구하는 순간 상자 아래 선다 |
 | Suggested prompts | chips are examples (「오늘 리뷰 뭐 들어왔어?」「이번 주 매출 왜 이래?」…), never the capability boundary; anything typed goes to the planner |
 | Shortcuts | exact-match only (a chip label); a match renders a local turn labelled 「바로 보기」. Containment matching is forbidden — that is how 「오늘 새 리뷰」 became 「리뷰 문제」 |
 | History | 「새 대화」 and 「지난 대화」 (the seller's own first sentences); the current thread survives reload and navigation |
-| Dashboard | the old KPI/chart page lives at `/overview`; numbers the seller asks for arrive as `METRIC` / `ORDER_SUMMARY` / `CHART` artifacts in the thread |
 
 ### 8-B. Turn anatomy
 

@@ -41,6 +41,7 @@ export function MasterDetail({
   detailLabel,
   wide,
   footer,
+  onClose,
 }: {
   /** The page head, the actionable summary and the list — everything in the middle column. */
   list: ReactNode;
@@ -50,7 +51,33 @@ export function MasterDetail({
   wide: boolean;
   /** Docked under the list column and outside its scroll — the 오늘 screen's composer. */
   footer?: ReactNode;
+  /**
+   * Dismiss the selection, for a screen whose default state is «nothing chosen».
+   *
+   * <p><b>Optional, because it is a claim about the screen and not about this layout.</b> A screen that
+   * always has a selection — a queue whose whole job is the item in front of you — has nothing to close
+   * to, and a close control there would empty a panel the seller cannot get back. Passing this says the
+   * screen has a real closed state; leaving it out keeps exactly the panel that shipped.
+   *
+   * <p>When given, the panel grows persistent chrome: a 닫기 control that stays reachable however far the
+   * case is scrolled, and <b>Esc</b>. Both do the one thing — the caller's own navigation — so the open
+   * state has one owner (the URL) and no second copy to disagree with.
+   */
+  onClose?: () => void;
 }) {
+  const open = wide && detail !== null;
+  useEffect(() => {
+    if (!open || !onClose) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Not while the seller is typing: Esc in a composer or a draft belongs to that control.
+      const el = document.activeElement as HTMLElement | null;
+      const typing = el ? el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable : false;
+      if (e.key === "Escape" && !typing) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   return (
     <div className="flex h-full min-h-0 flex-1" data-layout="master-detail">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -61,12 +88,30 @@ export function MasterDetail({
         </div>
         {footer}
       </div>
-      {wide && detail ? (
+      {open ? (
         <aside
           aria-label={detailLabel}
-          className="relative w-[46%] min-w-[440px] max-w-[620px] shrink-0 overflow-y-auto border-l border-line bg-surface px-7 pb-10 pt-6"
+          className={`relative w-[46%] min-w-[440px] max-w-[620px] shrink-0 overflow-y-auto border-l border-line bg-surface px-7 pb-10 ${
+            onClose ? "pt-0" : "pt-6"
+          }`}
           data-testid="master-detail"
         >
+          {onClose ? (
+            // Sticky, because the case below it is taller than the viewport: a close control that scrolls
+            // away is a close control the seller has to scroll back up to find.
+            <div className="sticky top-0 z-10 -mx-7 mb-2 flex justify-end border-b border-line bg-surface px-7 py-1.5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-muted transition hover:bg-canvas hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                닫기
+                <span aria-hidden="true" className="text-base leading-none">
+                  ✕
+                </span>
+              </button>
+            </div>
+          ) : null}
           {detail}
         </aside>
       ) : null}

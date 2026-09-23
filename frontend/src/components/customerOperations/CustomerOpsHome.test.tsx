@@ -208,13 +208,22 @@ describe("CustomerOpsHome", () => {
     expect(card).toHaveTextContent("관찰 4");
     expect(card).toHaveTextContent("초안 9 (미발송)");
     expect(card).not.toHaveTextContent("처리");
-    // UI/UX v2 Phase 1: the top is three actionable counts (확인할 일 · 실행 대기 · 반복 문제); what Reviewnary
-    // checked is the quiet line under them, no longer the left half of the first card.
+    // Home v3: the top is the TWO counts the seller can act on. 반복 문제 is a pattern, not a customer
+    // waiting, and stands in its own section below the work — where it keeps its own count and its own
+    // link. What Reviewnary checked is the quiet line under the two, never a count of the seller's work.
     await waitFor(() => expect(card).toHaveTextContent("확인할 일"));
     await waitFor(() => expect(card).toHaveTextContent("4건"));
     expect(within(card).getByRole("link", { name: /확인할 일/ })).toHaveAttribute("href", "/customer-operations/cases");
-    expect(within(card).getByRole("link", { name: /반복 문제/ })).toHaveAttribute("href", "/memory");
-    expect(card).toHaveTextContent(/교환·환불 1 ?·정보 부족 1 ?·답변 필요 1 ?·리뷰 1/);
+    expect(within(card).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "/#실행-대기");
+    expect(within(card).queryByRole("link", { name: /반복 문제/ })).toBeNull();
+    // …and it is not hidden: the section below still names it and still links to the list.
+    expect(screen.getByRole("link", { name: /반복 문제 전체 보기/ })).toHaveAttribute("href", "/memory");
+    // The breakdown of 확인할 일 stands on the heading of the list it breaks down — said once, where the
+    // rows are, instead of wrapping to a second line inside the card.
+    expect(card).not.toHaveTextContent(/교환·환불 1/);
+    expect(screen.getByRole("heading", { name: "확인할 일" }).parentElement).toHaveTextContent(
+      /교환·환불 1 ?·정보 부족 1 ?·답변 필요 1 ?·리뷰 1/,
+    );
     await expectNoAxeViolations(container);
   });
 

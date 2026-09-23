@@ -123,7 +123,7 @@ export function SellerCorrectionControls({
           <Btn
             key={tier}
             size="sm"
-            variant={answer === tier ? "solid" : "outline"}
+            variant={answer === tier ? "selected" : "outline"}
             aria-pressed={answer === tier}
             disabled={busy}
             onClick={() => void correct(tier)}

@@ -100,7 +100,7 @@ export function CaseLayout({
   );
 
   const decisionBlock = decision ? (
-    <section aria-label={decisionLabel} className="flex flex-col gap-3.5">
+    <section aria-label={decisionLabel} className={`flex flex-col ${pane ? "gap-3" : "gap-3.5"}`}>
       {decision}
     </section>
   ) : null;
@@ -108,7 +108,7 @@ export function CaseLayout({
   return (
     <VariantContext.Provider value={variant}>
       {pane ? (
-        <article aria-label={label} className="space-y-5" data-case-variant="pane">
+        <article aria-label={label} className="space-y-4" data-case-variant="pane">
           {nav}
           {header}
           {summary}

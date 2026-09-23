@@ -18,6 +18,7 @@ import { reviewRecordPath } from "../../lib/reviewRecord";
 import { reviewWord } from "../../lib/channelVocabulary";
 import { plainText } from "../../lib/plainText";
 import { COPY, sourceLabel } from "../../lib/copy/customerOps";
+import { Disclosure } from "../../components/ui/Disclosure";
 import { CaseBlock, CaseLayout, DecisionCard, type CaseVariant } from "../../components/workspace/CaseLayout";
 import type {
   ChannelReviewDetailView,
@@ -313,10 +314,25 @@ export function ReviewCaseView({
         ) : undefined
       }
       subject={
-        <CaseBlock title="왜 올라왔나요" tone={pane ? "subject" : "plain"}>
-          {/* The customer's sentence is the title above; this block is what the rules said about it. */}
-          <ReviewProblemCard detail={detail} word={word} showBody={false} />
-        </CaseBlock>
+        // The customer's sentence is the title above; this block is what the RULES said about it.
+        //
+        // Folded in the pane (Home v3), open on the full page. The order the seller needs is 고객 요청 →
+        // 확인한 사실 → 내가 결정할 것 → 그 결정의 실행, and in a 556px column the middle step was costing
+        // ~150px of the only fold there is: measured at 1440×900, the filled button that actually does
+        // something sat at y=960 while a classification control sat at y=405. Nothing is removed and
+        // nothing is summarised away — the facts are one press from where they always were, and the page
+        // variant, which has a second column for them, is unchanged.
+        pane ? (
+          <Disclosure label="왜 올라왔나요" summaryClassName="-ml-2">
+            <div className="pt-2">
+              <ReviewProblemCard detail={detail} word={word} showBody={false} />
+            </div>
+          </Disclosure>
+        ) : (
+          <CaseBlock title="왜 올라왔나요" tone="plain">
+            <ReviewProblemCard detail={detail} word={word} showBody={false} />
+          </CaseBlock>
+        )
       }
       decision={
         <>

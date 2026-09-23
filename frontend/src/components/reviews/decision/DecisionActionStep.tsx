@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Section } from "../../ui/Section";
+import { Disclosure } from "../../ui/Disclosure";
 import { Btn } from "../../ui/Btn";
 import { VocItemTriageControl } from "../../VocItemTriageControl";
+import { useCaseVariant } from "../../workspace/CaseLayout";
 import { api } from "../../../lib/apiClient";
 import { DECISION_ACTION_NOTE, DECISION_DONE_LABEL, type DecisionDoneKind } from "../../../lib/reviewDecision";
 import type { TriageDisposition } from "../../../lib/types";
@@ -57,6 +59,7 @@ export function DecisionActionStep({
   /** The step's heading — the Decision Workspace numbers its two judgments so they cannot be read as one. */
   title?: string;
 }) {
+  const pane = useCaseVariant() === "pane";
   const [done, setDone] = useState<DecisionDoneKind | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -101,14 +104,17 @@ export function DecisionActionStep({
             nobody has said needs doing — and on 조치 불필요 the decision itself is the conclusion, so
             there is nothing left to report. */}
         {decision === "RESPONSE_NEEDED" || decision === "MONITOR" ? (
-          <div className="space-y-2 border-t border-line pt-3">
-            <p className="break-keep text-sm font-semibold text-ink">직접 하신 조치가 있으면 기록해 두세요</p>
+          // Folded in the pane (Home v3). This records work the seller did OUTSIDE reviewnary, so it is
+          // neither the decision above it nor the action below it — and standing open between the two it
+          // cost ~70px of the pane's one fold, which is what kept 「AI 초안 준비」 off the screen. Open on the
+          // full page, where there is no fold to spend. Nothing is removed and the writes are unchanged.
+          <DoneRecord pane={pane} done={done}>
             <div className="flex flex-wrap gap-2">
               {(Object.keys(DECISION_DONE_LABEL) as DecisionDoneKind[]).map((kind) => (
                 <Btn
                   key={kind}
                   size="sm"
-                  variant={done === kind ? "solid" : "outline"}
+                  variant={done === kind ? "selected" : "outline"}
                   aria-pressed={done === kind}
                   disabled={busy}
                   onClick={() => void record(kind)}
@@ -118,9 +124,39 @@ export function DecisionActionStep({
               ))}
             </div>
             {failed ? <p className="text-sm text-bad">기록하지 못했습니다. 잠시 후 다시 시도해 주세요.</p> : null}
-          </div>
+          </DoneRecord>
         ) : null}
       </div>
     </Section>
+  );
+}
+
+/**
+ * 「직접 하신 조치가 있으면 기록해 두세요」 — open on a page, folded in a pane.
+ *
+ * <p>The label states what is behind it, and when something HAS been recorded the fold says so on its own
+ * summary: a folded control that hides the seller's own answer is how progressive disclosure becomes
+ * hiding. Same children, same writes, both readings.
+ */
+function DoneRecord({ pane, done, children }: { pane: boolean; done: DecisionDoneKind | null; children: ReactNode }) {
+  const label = "직접 하신 조치 기록";
+  if (!pane) {
+    return (
+      <div className="space-y-2 border-t border-line pt-3">
+        <p className="break-keep text-sm font-semibold text-ink">직접 하신 조치가 있으면 기록해 두세요</p>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div className="border-t border-line pt-2">
+      <Disclosure
+        label={label}
+        note={done ? `· ${DECISION_DONE_LABEL[done]}` : undefined}
+        summaryClassName="-ml-2"
+      >
+        <div className="space-y-2 pt-2">{children}</div>
+      </Disclosure>
+    </div>
   );
 }

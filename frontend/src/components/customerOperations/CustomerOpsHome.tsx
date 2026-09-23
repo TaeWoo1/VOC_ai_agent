@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Btn } from "../ui/Btn";
 import { RepeatedProblemList } from "../home/RepeatedProblemList";
 import { MasterDetail, selectionHref, useWideLayout } from "../workspace/MasterDetail";
-import { WorkRows, selectedRow } from "../workspace/WorkRows";
+import { WorkRows } from "../workspace/WorkRows";
 import { WorkItemPane } from "../workspace/WorkItemPane";
 import { IssueDetailPanel } from "../memory/IssueDetailPanel";
 import { ReviewCaseView } from "../../pages/app/ReviewReplyTask";
@@ -121,15 +121,10 @@ export function CustomerOpsHome({
 
       {running && co.status === "ACTIVE" ? (
         <div className="space-y-3" data-testid="today-summary">
-          {/* The top of the morning is only what the seller can act on (UI/UX v2 Phase 1): three counts, each one
-              press from its list. What Reviewnary checked is context, so it is one quiet line under them — it used to
-              be the left half of the first card, the largest number on the page and none of it the seller's work. */}
-          <TodaySummary
-            work={work}
-            awaiting={awaiting.count}
-            problems={ops?.problems ?? null}
-            next={next}
-          />
+          {/* The top of the morning is only what the seller can act on: TWO counts (Home v3 — 반복 문제 is a
+              pattern, not work, and stands in its own section below), each one press from its list. What Reviewnary
+              checked is context, so it is one quiet line under them, never a count of the seller's work. */}
+          <TodaySummary work={work} awaiting={awaiting.count} next={next} />
           <CheckedLine co={co} />
           {warnings.length > 0 ? (
             <ul className="space-y-1.5 rounded-xl bg-[#FFF8EF] px-4 py-3 text-sm text-warn" aria-label="집계에서 빠진 곳">
@@ -175,9 +170,15 @@ export function CustomerOpsHome({
 
       {work.rows.length > 0 ? (
         <section aria-label={COPY.listTitle}>
-          <div className="mb-3 mt-8 flex items-center gap-2">
-            <h2 className="text-[17px] font-bold tracking-tight text-ink">{COPY.listTitle}</h2>
-            <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">{COPY.listOrder}</span>
+          <div className="mb-2.5 mt-6">
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+              <h2 className="text-[17px] font-bold tracking-tight text-ink">{COPY.listTitle}</h2>
+              <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">{COPY.listOrder}</span>
+              {/* What the count above is made of, said where the rows are — one sentence, one place. */}
+              <span className="break-keep text-sm text-muted">
+                <Items parts={reasonCounts(work.rows)} />
+              </span>
+            </div>
           </div>
           <WorkRows
             rows={shown}
@@ -261,8 +262,17 @@ export function useHomeQueue(enabled = true): InquiryQueueResponse | null | unde
  *
  * <p>The same sections, the same reads and the same counts as before; what changed is where an item opens. A row of
  * 확인할 일, an approved reply and a repeated problem each open in the pane on the right, drawn by the screen that owns
- * it, and the conversation box is docked under the list. With nothing chosen the first row of 확인할 일 is open —
- * the item the list itself says to look at first.
+ * it, and the conversation box is docked under the list.
+ *
+ * <p><b>Nothing is chosen until the seller chooses it</b> (Home v3). This screen's question is 「오늘 무엇을 해야
+ * 하지?」 and the honest answer to it is the list, not one row of it. Opening the first row on arrival made the
+ * loudest thing on the morning a case the seller had not asked for — measured at 1440×900, the pane ran 2,290px
+ * against a 1,807px list and carried the only filled buttons on screen — and there was no way back out of it,
+ * because the URL had no value for «nothing»: a missing {@code item} meant «the first row», so no control could
+ * ask for the closed state.
+ *
+ * <p>So the URL owns it. No {@code item} is closed, {@code item=<key>} is that row, and <b>a key that matches
+ * nothing is closed too</b> — a stale address must not quietly open a different record than the one it names.
  */
 export function TodayWorkspace({
   co,
@@ -282,6 +292,7 @@ export function TodayWorkspace({
 }) {
   const wide = useWideLayout();
   const location = useLocation();
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const queue = useHomeQueue();
   const reviewWork = useReviewWork();
@@ -299,10 +310,10 @@ export function TodayWorkspace({
     } else if (problem) {
       selectedKey = key;
       detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={onProblemChanged ?? (() => undefined)} />;
-    } else {
-      const row = selectedRow(work.rows.slice(0, HOME_ROWS), key) ?? null;
-      const any = key ? work.rows.find((r) => r.key === key) : undefined;
-      const chosen = any ?? row;
+    } else if (key) {
+      // Only what the address names. `selectedRow` still falls back to the first row for the queue screen,
+      // whose job IS the item in front of the seller; the Home's job is the list.
+      const chosen = work.rows.find((r) => r.key === key) ?? null;
       if (chosen) {
         selectedKey = chosen.key;
         detail = <WorkItemPane row={chosen} now={now} />;
@@ -310,11 +321,14 @@ export function TodayWorkspace({
     }
   }
 
+  const close = () => navigate({ pathname: location.pathname, search: withoutItem(location.search) }, { replace: true });
+
   return (
     <MasterDetail
       wide={wide}
       detailLabel="선택한 항목"
       detail={detail}
+      onClose={detail ? close : undefined}
       footer={dock}
       list={
         <CustomerOpsHome
@@ -331,63 +345,61 @@ export function TodayWorkspace({
   );
 }
 
+/** The address of the closed state: this page, with the selection dropped and every other parameter kept. */
+function withoutItem(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete("item");
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
+}
+
 const PREPARED = "prepared:";
 const PROBLEM = "problem:";
 
 /**
- * Three counts, each the size of a list one press away — and only counts the seller can act on. 확인할 일 counts what
- * waits for their decision, 실행 대기 what they approved and have not posted, 반복 문제 the problems that need a
- * judgement; the observed ones are named beside it and never added.
+ * <b>The two counts the seller can act on this morning</b> (Home v3).
+ *
+ * <p>확인할 일 is what waits for their decision; 실행 대기 is what they already decided and have not posted. Both are
+ * obligations, and both are one press from the list that owns them.
+ *
+ * <p><b>반복 문제 used to stand here as a third card and does not any more.</b> It is a pattern over many reviews,
+ * not another customer waiting — the screen's own section below the list has always said so in words («no verb and
+ * no button»), while its presence up here contradicted that by giving it the same weight as work. The count is not
+ * hidden and not changed: the section keeps it, and keeps both populations separate.
  */
-function TodaySummary({
-  work,
-  awaiting,
-  problems,
-  next,
-}: {
-  work: HomeWork;
-  awaiting: number;
-  problems: OperationsHome["problems"] | null;
-  next: string | null;
-}) {
+function TodaySummary({ work, awaiting, next }: { work: HomeWork; awaiting: number; next: string | null }) {
   const cells: { label: string; value: string; line: ReactNode; to: string }[] = [
     {
       label: COPY.listTitle,
       value: work.rows.length > 0 ? `${work.rows.length.toLocaleString("ko-KR")}${work.truncated ? "+" : ""}` : COPY.none,
-      line: work.rows.length > 0 ? <Items parts={reasonCounts(work.rows)} /> : next ? <span>다음 확인 {next}</span> : null,
+      // The breakdown of this count stands on the heading of the list it breaks down (below), not here:
+      // printed in a 760px column it wrapped to two lines and pushed the first actual row to y=322.
+      line: work.rows.length > 0 ? null : next ? <span>다음 확인 {next}</span> : null,
       to: "/customer-operations/cases",
     },
     {
       label: "실행 대기",
       value: awaiting > 0 ? awaiting.toLocaleString("ko-KR") : COPY.none,
-      line: <span>승인함 · 판매자센터 등록 전</span>,
+      // 「승인함 · 등록 전」 already stands on that section's own heading, four rows down. Said twice it cost
+      // the summary a line and told the seller nothing the second time.
+      line: null,
       to: "#실행-대기",
-    },
-    {
-      label: "반복 문제",
-      value: problems && problems.decidable > 0 ? problems.decidable.toLocaleString("ko-KR") : COPY.none,
-      line: problems ? (
-        <span>
-          판단 필요{problems.observing > 0 ? ` · 지켜보는 중 ${problems.observing.toLocaleString("ko-KR")}` : ""}
-        </span>
-      ) : null,
-      to: "/memory",
     },
   ];
   return (
-    <ul aria-label="오늘 요약" className="grid grid-cols-1 overflow-hidden rounded-2xl border border-line bg-surface sm:grid-cols-3">
+    <ul aria-label="오늘 요약" className="grid grid-cols-1 overflow-hidden rounded-2xl border border-line bg-surface sm:grid-cols-2">
       {cells.map((cell, i) => (
         <li key={cell.label} className={i > 0 ? "border-t border-line sm:border-l sm:border-t-0" : ""}>
           <Link
             to={cell.to}
-            className="block h-full px-5 py-4 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+            className="flex h-full flex-wrap items-baseline gap-x-2.5 gap-y-1 px-5 py-3 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
           >
-            <span className="block text-sm font-semibold text-muted">{cell.label}</span>
-            <span className="mt-1 block text-[28px] font-extrabold leading-tight tracking-tight tabular-nums text-ink">
+            <span className="text-sm font-semibold text-muted">{cell.label}</span>
+            <span className="text-[26px] font-extrabold leading-tight tracking-tight tabular-nums text-ink">
               {cell.value}
               {/^\d/.test(cell.value) ? <span className="ml-0.5 text-base font-semibold text-muted">건</span> : null}
             </span>
-            {cell.line ? <span className="mt-1 block break-keep text-sm text-muted">{cell.line}</span> : null}
+            {cell.line ? <span className="w-full break-keep text-sm text-muted">{cell.line}</span> : null}
           </Link>
         </li>
       ))}

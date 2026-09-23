@@ -13,11 +13,25 @@ import { Link } from "react-router-dom";
  * they read it. Measured in a real browser, composited, on 2026-08-27. `brand-800` is 7.38:1.
  */
 
-export type BtnVariant = "solid" | "outline" | "ghost";
+/**
+ * <b>`selected` is a state, not an action</b> (Home v3).
+ *
+ * <p>A segmented control marking which option is currently recorded was using `solid`, so the strongest
+ * value in the product — reserved above for «the thing this screen is for» — was being spent on
+ * «this is the value you already chose». Measured on the Review Case pane at 1440×900: the filled
+ * control at y=405 was a classification the seller had already made, while the action the pane exists
+ * for sat at y=960, below the fold and no louder than a save button.
+ *
+ * <p>The treatment is not new. `bg-brand/10 text-brand-700` is what the disposition control beside it
+ * already used for exactly this meaning, so the two segmented controls in one pane stop answering the
+ * same question two ways.
+ */
+export type BtnVariant = "solid" | "selected" | "outline" | "ghost";
 export type BtnSize = "md" | "sm";
 
 const VARIANT: Record<BtnVariant, string> = {
   solid: "bg-brand-700 text-white hover:bg-brand-800 disabled:opacity-50",
+  selected: "bg-brand/10 text-brand-700 hover:bg-brand/15 disabled:opacity-50",
   outline: "border border-line bg-surface text-ink hover:bg-canvas disabled:opacity-50",
   ghost: "text-muted hover:text-ink hover:bg-canvas disabled:opacity-50",
 };
