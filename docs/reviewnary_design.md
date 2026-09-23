@@ -222,8 +222,9 @@ Home이 답하는 질문은 그대로 **「오늘 무엇을 해야 하지?」**�
 | Top summary | **의무를 뜻하는 숫자만.** 확인할 일 = 판매자의 결정을 기다리는 것, 실행 대기 = 승인했고 아직 등록하지 않은 것. **반복 문제는 여기 서지 않는다** — 패턴이지 기다리는 고객이 아니고, 목록 아래 자기 섹션이 이미 그렇게 말한다 |
 | 자동 확인 | reviewnary가 한 일에 대한 보고이므로 숫자 카드가 아니라 **약한 한 줄**. 판매자의 할 일로 세지 않는다 |
 | Detail panel | **기본 닫힘.** 행을 눌렀을 때만 열리고, 명시적 「닫기」와 `Esc`로 닫힌다. **URL이 소유한다** — `item` 없음 = 닫힘, `item=<key>` = 그 행, **매치되지 않는 key = 닫힘**(낡은 주소가 다른 레코드를 조용히 열지 않는다) |
+| Panel 크기·깊이 (v3.1) | **목록이 주인공이다.** 닫힘이면 목록이 열의 남은 폭을 쓰고(cap 1,160 — 760px 고정이라 좌우 ~224px가 비어 있었다), 열리면 panel은 **440px 고정 preview**(46%/556px가 아니다). Panel은 **판단 form을 펼치지 않는다** — 고객 원문 → 왜 올라왔나요 → 확인한 사실 → 추천 → **하단 고정 CTA 하나**이고, 중요도 수정 · 처리 방법 · 직접 조치 기록은 **전체 Case가 소유한다**(숨기는 것은 form이지 사실이 아니며, 읽기 · 쓰기 · 상태는 두 깊이에서 동일하다). Panel 안의 카드는 hairline section으로 — 페이지 안 panel 안 카드는 한 가지를 말하는 테두리 셋이다. **solid는 panel당 하나**: panel이 스스로 누를 것을 들고 있으면(문의 답변 패널 · 반복 문제 판단) 하단 CTA는 outline이 된다. **preview는 opt-in**이고 `확인할 일` 큐 화면처럼 「앞에 놓인 그 건」이 일인 화면은 예전 panel 그대로다 |
 | Dashboard | KPI · 추이 · 채널별 수치는 **`/overview`가 계속 소유한다**. Home은 그 숫자를 복제하지 않는다 — 같은 숫자가 두 정의로 두 곳에 있는 것이 이 저장소가 여러 번 고쳐 온 결함이다 |
-| Composer | 한 줄 dock, Enter sends, Shift+Enter breaks. 예시 칩은 빈 스레드에서만. 발송 fence 문장은 그대로 — 문장이 전송을 요구하는 순간 상자 아래 선다 |
+| Composer | 한 줄 dock, Enter sends, Shift+Enter breaks. **Home에서는 shell의 유일한 elevation을 반납한다**(v3.1) — 목록이 주제인 화면에서 상자는 돌아오는 표면이 아니라 손을 뻗는 표면이고, 폭은 그 아래 목록 열을 따라간다. 예시 칩은 빈 스레드에서만. 발송 fence 문장은 그대로 — 문장이 전송을 요구하는 순간 상자 아래 선다 |
 | Suggested prompts | chips are examples (「오늘 리뷰 뭐 들어왔어?」「이번 주 매출 왜 이래?」…), never the capability boundary; anything typed goes to the planner |
 | Shortcuts | exact-match only (a chip label); a match renders a local turn labelled 「바로 보기」. Containment matching is forbidden — that is how 「오늘 새 리뷰」 became 「리뷰 문제」 |
 | History | 「새 대화」 and 「지난 대화」 (the seller's own first sentences); the current thread survives reload and navigation |

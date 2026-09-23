@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { Btn } from "../ui/Btn";
+import { Btn, BtnLink } from "../ui/Btn";
 import { RepeatedProblemList } from "../home/RepeatedProblemList";
 import { MasterDetail, selectionHref, useWideLayout } from "../workspace/MasterDetail";
 import { WorkRows } from "../workspace/WorkRows";
-import { WorkItemPane } from "../workspace/WorkItemPane";
+import { WorkItemPane, paneCarriesOwnAction, workItemFullScreen } from "../workspace/WorkItemPane";
 import { IssueDetailPanel } from "../memory/IssueDetailPanel";
 import { ReviewCaseView } from "../../pages/app/ReviewReplyTask";
 import { PreparedWorkList } from "../home/PreparedWorkList";
@@ -124,8 +124,7 @@ export function CustomerOpsHome({
           {/* The top of the morning is only what the seller can act on: TWO counts (Home v3 — 반복 문제 is a
               pattern, not work, and stands in its own section below), each one press from its list. What Reviewnary
               checked is context, so it is one quiet line under them, never a count of the seller's work. */}
-          <TodaySummary work={work} awaiting={awaiting.count} next={next} />
-          <CheckedLine co={co} />
+          <TodaySummary work={work} awaiting={awaiting.count} next={next} co={co} />
           {warnings.length > 0 ? (
             <ul className="space-y-1.5 rounded-xl bg-[#FFF8EF] px-4 py-3 text-sm text-warn" aria-label="집계에서 빠진 곳">
               {warnings.map((line, i) => (
@@ -301,22 +300,32 @@ export function TodayWorkspace({
 
   let detail: ReactNode = null;
   let selectedKey: string | null = null;
+  // The pane's one action. Set beside the detail it belongs to, so a pane can never dock a control that
+  // opens something else.
+  // `primary` is a rule, not a per-kind taste: the docked control is solid exactly when the pane offers
+  // nothing else to press. A repeated problem's panel still carries its own 판단과 조치 — it is that
+  // section's workspace, not a preview of a customer waiting — so there the dock is the way out, not the
+  // thing to do, and the pane keeps exactly one solid either way.
+  let open: { to: string; label: string; primary: boolean } | null = null;
   if (wide) {
     const prepared = key?.startsWith(PREPARED) ? ops?.prepared.rows.find((r) => `${PREPARED}${r.id}` === key) : undefined;
     const problem = key?.startsWith(PROBLEM) ? ops?.problems.rows.find((r) => `${PROBLEM}${r.issue.id}` === key) : undefined;
     if (prepared && prepared.kind === "REVIEW_REPLY") {
       selectedKey = key;
-      detail = <ReviewCaseView key={key} reviewId={prepared.id} variant="pane" />;
+      detail = <ReviewCaseView key={key} reviewId={prepared.id} variant="pane" depth="preview" />;
+      open = { to: `/reviews/reply/${prepared.id}?from=work`, label: "전체 화면에서 처리하기", primary: true };
     } else if (problem) {
       selectedKey = key;
       detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={onProblemChanged ?? (() => undefined)} />;
+      open = { to: `/memory/${problem.issue.id}`, label: "근거 전체 보기", primary: false };
     } else if (key) {
       // Only what the address names. `selectedRow` still falls back to the first row for the queue screen,
       // whose job IS the item in front of the seller; the Home's job is the list.
       const chosen = work.rows.find((r) => r.key === key) ?? null;
       if (chosen) {
         selectedKey = chosen.key;
-        detail = <WorkItemPane row={chosen} now={now} />;
+        detail = <WorkItemPane row={chosen} now={now} depth="preview" />;
+        open = { to: workItemFullScreen(chosen), label: "전체 화면에서 처리하기", primary: !paneCarriesOwnAction(chosen) };
       }
     }
   }
@@ -329,6 +338,14 @@ export function TodayWorkspace({
       detailLabel="선택한 항목"
       detail={detail}
       onClose={detail ? close : undefined}
+      preview
+      paneFooter={
+        open ? (
+          <BtnLink to={open.to} variant={open.primary ? "solid" : "outline"} className="w-full">
+            {open.label}
+          </BtnLink>
+        ) : null
+      }
       footer={dock}
       list={
         <CustomerOpsHome
@@ -367,7 +384,17 @@ const PROBLEM = "problem:";
  * no button»), while its presence up here contradicted that by giving it the same weight as work. The count is not
  * hidden and not changed: the section keeps it, and keeps both populations separate.
  */
-function TodaySummary({ work, awaiting, next }: { work: HomeWork; awaiting: number; next: string | null }) {
+function TodaySummary({
+  work,
+  awaiting,
+  next,
+  co,
+}: {
+  work: HomeWork;
+  awaiting: number;
+  next: string | null;
+  co: CustomerOperationsHome;
+}) {
   const cells: { label: string; value: string; line: ReactNode; to: string }[] = [
     {
       label: COPY.listTitle,
@@ -386,24 +413,34 @@ function TodaySummary({ work, awaiting, next }: { work: HomeWork; awaiting: numb
       to: "#실행-대기",
     },
   ];
+  // One band, not two blocks (Home v3.1). The counts and the line about what Reviewnary checked were a
+  // 2×1 card plus a paragraph under it — 96px of the fold for four facts, and the reference this round was
+  // read against puts the same kind of summary in a single strip. The facts and their links are unchanged;
+  // 자동 확인 keeps its quieter weight by sitting under a hairline inside the same border, which is also
+  // what keeps it from reading as a third count of the seller's work.
   return (
-    <ul aria-label="오늘 요약" className="grid grid-cols-1 overflow-hidden rounded-2xl border border-line bg-surface sm:grid-cols-2">
-      {cells.map((cell, i) => (
-        <li key={cell.label} className={i > 0 ? "border-t border-line sm:border-l sm:border-t-0" : ""}>
-          <Link
-            to={cell.to}
-            className="flex h-full flex-wrap items-baseline gap-x-2.5 gap-y-1 px-5 py-3 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
-          >
-            <span className="text-sm font-semibold text-muted">{cell.label}</span>
-            <span className="text-[26px] font-extrabold leading-tight tracking-tight tabular-nums text-ink">
-              {cell.value}
-              {/^\d/.test(cell.value) ? <span className="ml-0.5 text-base font-semibold text-muted">건</span> : null}
-            </span>
-            {cell.line ? <span className="w-full break-keep text-sm text-muted">{cell.line}</span> : null}
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <div className="overflow-hidden rounded-2xl border border-line bg-surface">
+      <ul aria-label="오늘 요약" className="grid grid-cols-1 sm:grid-cols-2">
+        {cells.map((cell, i) => (
+          <li key={cell.label} className={i > 0 ? "border-t border-line sm:border-l sm:border-t-0" : ""}>
+            <Link
+              to={cell.to}
+              className="flex h-full flex-wrap items-baseline gap-x-2.5 gap-y-1 px-5 py-2.5 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+            >
+              <span className="text-sm font-semibold text-muted">{cell.label}</span>
+              <span className="text-[22px] font-extrabold leading-tight tracking-tight tabular-nums text-ink">
+                {cell.value}
+                {/^\d/.test(cell.value) ? <span className="ml-0.5 text-sm font-semibold text-muted">건</span> : null}
+              </span>
+              {cell.line ? <span className="w-full break-keep text-sm text-muted">{cell.line}</span> : null}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <div className="border-t border-line px-5 py-2">
+        <CheckedLine co={co} />
+      </div>
+    </div>
   );
 }
 

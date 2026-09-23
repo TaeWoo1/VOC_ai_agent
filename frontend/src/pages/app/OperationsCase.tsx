@@ -5,7 +5,7 @@ import { Btn, BtnLink } from "../../components/ui/Btn";
 import { Disclosure } from "../../components/ui/Disclosure";
 import { WorkFlowCard } from "../../components/ui/WorkFlowCard";
 import { Facts } from "../../components/ui/ObjectRow";
-import { CaseBlock, CaseLayout, CaseQuote, type CaseVariant } from "../../components/workspace/CaseLayout";
+import { CaseBlock, CaseLayout, CaseQuote, type CaseVariant, type PaneDepth } from "../../components/workspace/CaseLayout";
 import { api } from "../../lib/apiClient";
 import { actionKo, subjectFallback } from "../../lib/customerOperations";
 import { COPY, DRAFT_UNSENT, decisionOf, photoWord, shortDate, sourceLabel, waitLabel } from "../../lib/copy/customerOps";
@@ -41,10 +41,16 @@ export function OperationsCase() {
 export function OperationsCaseView({
   caseId,
   variant,
+  depth = "full",
   queue = null,
 }: {
   caseId: string;
   variant: CaseVariant;
+  /**
+   * {@link PaneDepth}. 「preview」 shows the recommended draft as TEXT and leaves every form — applying
+   * it, correcting the case, teaching the missing fact — to the full case, which is unchanged.
+   */
+  depth?: PaneDepth;
   queue?: string[] | null;
 }) {
   const [detail, setDetail] = useState<OperationsCaseDetail | null | undefined>(undefined);
@@ -88,6 +94,7 @@ export function OperationsCaseView({
   const index = queue ? queue.indexOf(caseId) : -1;
   const showTeach = Boolean(detail.gap) && !receipt;
   const pane = variant === "pane";
+  const preview = pane && depth === "preview";
   // The title is the customer's first line. When that line IS the whole message, the subject block would print the
   // same sentence a second time one block below — measured on the demo org, 「교환 신청은 언제까지 가능한가요?」 was
   // both the h1 and the only line of 문의 내용. The block stays whenever it adds anything: more text, or photos.
@@ -97,6 +104,7 @@ export function OperationsCaseView({
   return (
     <CaseLayout
       variant={variant}
+      depth={depth}
       decisionLabel={COPY.mineLabel}
       nav={
         pane ? undefined : (
@@ -124,7 +132,7 @@ export function OperationsCaseView({
       sub={detail.productName ?? undefined}
       title={title}
       headerAction={
-        pane ? (
+        preview ? undefined : pane ? (
           <Link
             to={`/customer-operations/cases/${caseId}`}
             className="rounded font-semibold text-muted hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
@@ -166,6 +174,9 @@ export function OperationsCaseView({
         ) : null
       }
       decision={
+        preview ? (
+          <DraftPreview detail={detail} />
+        ) : (
         <>
           {receipt ? <TaughtReceipt receipt={receipt} redrafted={Boolean(detail.draft)} /> : null}
           {showTeach ? (
@@ -184,6 +195,7 @@ export function OperationsCaseView({
           ) : null}
           <CorrectionCard caseId={caseId} detail={detail} onApplied={applied} onFailed={failed} />
         </>
+        )
       }
       context={
         <CaseBlock title={COPY.checks}>
@@ -505,6 +517,34 @@ function NeedLists({ needs }: { needs: OperationsCaseNeed[] }) {
           </ul>
         </section>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * <b>추천 — the draft, as text</b> (Home v3.1 preview).
+ *
+ * <p>The same `detail.draft` the case applies, printed and not offered: no textarea, no 적용, no
+ * 다르게 처리, no 가르치기. What the case RECOMMENDS is already said one block above by
+ * {@link WorkFlowCard}'s 「내 확인 필요」 cell, so this block says only the thing that cell cannot — the
+ * sentence itself — and when there is no draft it says nothing rather than repeating the reason the
+ * cell already gave.
+ *
+ * <p>Every control that changes it stands on the full case, one press away through the pane's docked
+ * action. No read and no write differs.
+ */
+function DraftPreview({ detail }: { detail: OperationsCaseDetail }) {
+  const draft = detail.draft;
+  if (!draft) return null;
+  return (
+    <div className="border-t border-line pt-4">
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-sm font-bold text-muted">{COPY.draftTitle}</h3>
+        <Tag tone="line">{DRAFT_UNSENT}</Tag>
+      </div>
+      <p className="whitespace-pre-wrap break-keep rounded-xl bg-canvas px-4 py-3 text-[15px] leading-[1.8] text-ink [overflow-wrap:anywhere]">
+        {draft.body}
+      </p>
     </div>
   );
 }

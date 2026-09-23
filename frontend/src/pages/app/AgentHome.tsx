@@ -373,6 +373,8 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
       chips={beforeFirstConnection ? FIRST_USE_PROMPTS : coHome ? [] : HOME_PROMPTS}
       placeholder={coHome ? COPY.composer : "무엇이든 물어보세요"}
       onBeforeSend={onBeforeSend}
+      // 오늘 (Home v3.1): the list is the subject here, so the box gives up the shell's one elevation.
+      quietDock={Boolean(coHome)}
       // 오늘 (UI/UX v2 Phase 1): the job's Home is a work list with the selected item beside it, and the box sits
       // under the list. The first sentence turns it back into the transcript. Example prompts are left out here —
       // four chips under the box every morning were the same four sentences, and the box already says what it takes.

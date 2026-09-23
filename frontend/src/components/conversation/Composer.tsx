@@ -25,6 +25,7 @@ export function Composer({
   chips = [],
   footer,
   compact = false,
+  quiet = false,
   inputId = "conversation-input",
   attachedTop = false,
 }: {
@@ -40,6 +41,13 @@ export function Composer({
   chips?: readonly string[];
   footer?: ReactNode;
   compact?: boolean;
+  /**
+   * <b>One step down in weight</b> (Home v3.1). On a screen whose subject is the work list, the box is a
+   * command surface the seller reaches for, not the live surface they return to — so it gives up the one
+   * elevation the shell spends and sits flat under the list. The control, its placement and everything it
+   * does are unchanged.
+   */
+  quiet?: boolean;
   inputId?: string;
   /**
    * The context bar is sitting directly on top of the box, and the two are ONE thing: the object the
@@ -93,7 +101,7 @@ export function Composer({
         // paper ground a flat outlined box disappeared into the transcript; the shadow is what makes
         // this read as the live surface a seller returns to, and it is the only place elevation is
         // spent (`shadow-composer`).
-        className={`flex items-end gap-2 border border-line bg-surface shadow-composer transition focus-within:border-brand-700 ${attachedTop ? "rounded-b-xl rounded-t-none border-t-0" : "rounded-xl"} ${compact ? "px-3 py-2" : "px-4 py-3"} ${disabled ? "opacity-60" : ""}`}
+        className={`flex items-end gap-2 border border-line bg-surface transition focus-within:border-brand-700 ${quiet ? "" : "shadow-composer"} ${attachedTop ? "rounded-b-xl rounded-t-none border-t-0" : "rounded-xl"} ${compact ? "px-3 py-2" : "px-4 py-3"} ${disabled ? "opacity-60" : ""}`}
         data-state={canStop ? "running" : disabled ? "disabled" : "idle"}
       >
         <label htmlFor={inputId} className="sr-only">

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Section, ListBox } from "../../ui/Section";
+import { usePaneDepth } from "../../workspace/CaseLayout";
 import { SEVERITY_LABEL_KO } from "../../../lib/reviewIssuesView";
 import { ratingLabel } from "../../../lib/reviewRecord";
 import type { IssueSeverity, ReviewDecisionProblem } from "../../../lib/types";
@@ -34,6 +35,7 @@ export function RepeatedSignal({
   /** The context read did not return. Renders nothing — see above. */
   failed: boolean;
 }) {
+  const preview = usePaneDepth() === "preview";
   if (failed) return null;
 
   if (problems.length === 0) {
@@ -49,14 +51,20 @@ export function RepeatedSignal({
 
   return (
     <Section title="반복 신호" count={problems.length}>
-      <ListBox>
+      {/* A preview is already inside a panel inside the page: the box around these rows is the third
+          border saying one thing, and in a 440px column it also costs the padding twice over. The rows,
+          the quotes and the links are unchanged. */}
+      <ListBox className={preview ? "rounded-none border-0 bg-transparent" : ""}>
         {problems.map((problem) => {
           const severity =
             problem.severity && problem.severity in SEVERITY_LABEL_KO
               ? SEVERITY_LABEL_KO[problem.severity as IssueSeverity]
               : null;
           return (
-            <div key={problem.issueId} className="space-y-2 border-b border-line p-4 last:border-b-0">
+            <div
+              key={problem.issueId}
+              className={`space-y-2 border-b border-line last:border-b-0 ${preview ? "pb-3 last:pb-0" : "p-4"}`}
+            >
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <Link
                   to={`/memory/${problem.issueId}`}
@@ -72,7 +80,10 @@ export function RepeatedSignal({
 
               {problem.similar.length > 0 ? (
                 <ul className="space-y-1.5">
-                  {problem.similar.map((similar) => (
+                  {/* A preview shows ONE example and keeps 「근거 N건 ›」 beside it, which is the whole set
+                      and the way to it. The number is not reduced and nothing is summarised — the list is
+                      bounded here the same way 왜 올라왔나요 is folded, so 추천 below it stays on screen. */}
+                  {(preview ? problem.similar.slice(0, 1) : problem.similar).map((similar) => (
                     <li key={`${similar.reviewId}-${similar.occurredOn ?? ""}`} className="space-y-0.5">
                       {/* The quote is masked at read time and is null when masking suppressed it — then
                           the row says only when and how it was rated, rather than showing an empty

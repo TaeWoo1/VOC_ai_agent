@@ -34,6 +34,7 @@ export function ConversationWorkspace({
   footer,
   onBeforeSend,
   emptyLayout,
+  quietDock = false,
 }: {
   surface: ConversationSurface;
   compact?: boolean;
@@ -56,6 +57,8 @@ export function ConversationWorkspace({
    * The first sentence the seller sends turns it back into the transcript — the same thread, the same send path.
    */
   emptyLayout?: (dock: ReactNode) => ReactNode;
+  /** {@link Composer}'s 「quiet」 — for a surface where the list, not the box, is the subject. */
+  quietDock?: boolean;
 }) {
   const conversation = useConversation();
   const panel = useAgentPanel();
@@ -92,9 +95,9 @@ export function ConversationWorkspace({
       {/* The dock (Chat Motion v1): the box sits 20px off the viewport edge on a solid ground, and the
           transcript slides UNDER a short fade above it — a deliberate edge, not a box floating in the
           scroll. One fade, one place; it is the only gradient in the shell. */}
-      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : "bg-surface px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
+      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : quietDock ? "bg-surface px-4 pb-4 pt-0 md:px-8" : "bg-surface px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
         {!compact ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-surface to-transparent" /> : null}
-        <div className={compact ? "" : "mx-auto w-full max-w-thread"}>
+        <div className={compact ? "" : `mx-auto w-full ${quietDock ? "max-w-[1160px]" : "max-w-thread"}`}>
           {conversation.plannerOff ? (
             <p className="mb-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn" role="status">
               이 계정에서는 자유 문장 요청이 아직 열려 있지 않습니다.
@@ -117,6 +120,7 @@ export function ConversationWorkspace({
             autoFocus={autoFocus}
             chips={empty ? (chips ?? promptsFor(registered?.surface)) : []}
             compact={compact}
+            quiet={quietDock}
             inputId={compact ? "agent-panel-input" : "conversation-input"}
             footer={footer}
           />

@@ -19,7 +19,8 @@ import { reviewWord } from "../../lib/channelVocabulary";
 import { plainText } from "../../lib/plainText";
 import { COPY, sourceLabel } from "../../lib/copy/customerOps";
 import { Disclosure } from "../../components/ui/Disclosure";
-import { CaseBlock, CaseLayout, DecisionCard, type CaseVariant } from "../../components/workspace/CaseLayout";
+import { CaseBlock, CaseLayout, DecisionCard, type CaseVariant, type PaneDepth } from "../../components/workspace/CaseLayout";
+import { DECISION_ACTION_NOTE, DECISION_ACTION_WORD } from "../../lib/reviewDecision";
 import type {
   ChannelReviewDetailView,
   ReviewDecisionContext,
@@ -95,14 +96,21 @@ export function ReviewReplyTask() {
 export function ReviewCaseView({
   reviewId,
   variant,
+  depth = "full",
   from = null,
 }: {
   reviewId: string;
   variant: CaseVariant;
+  /**
+   * {@link PaneDepth}. 「preview」 leaves the two judgments and the record control to the full case and
+   * says instead what stands — see {@link DecisionSoFar}.
+   */
+  depth?: PaneDepth;
   /** Where a full page was opened from — decides which way back it offers. */
   from?: "chat" | "work" | "record" | null;
 }) {
   const pane = variant === "pane";
+  const preview = pane && depth === "preview";
 
   const [detail, setDetail] = useState<ChannelReviewDetailView | null>(null);
   const [failed, setFailed] = useState(false);
@@ -298,9 +306,10 @@ export function ReviewCaseView({
           )
         ) : undefined
       }
+      depth={depth}
       title={title}
       headerAction={
-        pane ? (
+        preview ? undefined : pane ? (
           <Link to={`/reviews/reply/${detail.id}?from=work`} className="rounded font-semibold text-muted hover:text-ink hover:underline">
             전체 화면으로
           </Link>
@@ -335,6 +344,12 @@ export function ReviewCaseView({
         )
       }
       decision={
+        preview ? (
+          <>
+            <ChannelAnsweredState state={replyWork?.channelReplyState ?? null} />
+            <DecisionSoFar decision={decision} replySupported={replyWork !== null} reason={detail.replyUnavailableReason} />
+          </>
+        ) : (
         <>
           {/* The channel's own statement, said BEFORE anyone decides anything. */}
           <ChannelAnsweredState state={replyWork?.channelReplyState ?? null} />
@@ -406,6 +421,7 @@ export function ReviewCaseView({
             </div>
           ) : null}
         </>
+        )
       }
       context={
         <>
@@ -415,6 +431,44 @@ export function ReviewCaseView({
       }
       more={<DecisionLog entries={log ?? []} failed={logFailed || log === null} />}
     />
+  );
+}
+
+/**
+ * <b>추천 — what stands, in a preview that does not offer the forms</b> (Home v3.1).
+ *
+ * <p>Two facts and no third: the `TriageDisposition` that is recorded right now (or that none is), and
+ * whether a draft can be prepared for this review at all — the same three reasons
+ * {@link DECISION_ACTION_NOTE} already distinguishes, in the same words, so the preview and the case
+ * cannot describe one review's reply lane differently.
+ *
+ * <p><b>It reads and never writes.</b> The controls that change either fact live on the full case, one
+ * press away through the pane's docked action.
+ */
+function DecisionSoFar({
+  decision,
+  replySupported,
+  reason,
+}: {
+  decision: TriageDisposition | null;
+  replySupported: boolean;
+  reason: "CHANNEL_HAS_NO_REPLY_FLOW" | "NO_SELLER_ACCOUNT" | null;
+}) {
+  return (
+    <div className="space-y-1.5 border-t border-line pt-4">
+      <h3 className="text-sm font-bold text-muted">처리 방법</h3>
+      <p className="break-keep text-[15px] font-semibold leading-relaxed text-ink">
+        {decision ? `「${DECISION_ACTION_WORD[decision]}」로 정해 두셨습니다.` : "아직 처리 방법을 정하지 않았습니다."}
+      </p>
+      {/* Only when there is no reply lane. `withReply` promises 「아래에서 …준비하고 승인할 수 있습니다」 and in a
+          preview there is no 아래 — the way to it is the docked action under this block, which says so itself.
+          The other two are statements about the channel and this seller's setup, true wherever they are read. */}
+      {replySupported ? null : (
+        <p className="break-keep text-sm leading-relaxed text-muted">
+          {reason === "NO_SELLER_ACCOUNT" ? DECISION_ACTION_NOTE.withoutAccount : DECISION_ACTION_NOTE.withoutReply}
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -29,8 +29,29 @@ export function useCaseVariant(): CaseVariant {
   return useContext(VariantContext);
 }
 
+/**
+ * <b>How deep the pane goes</b> (Home v3.1).
+ *
+ * <p>A pane can be the workspace — every control the page has, in one column — or a <b>preview</b>: what
+ * this is, why it was brought up, what was checked, what is recommended, and one way in. The second
+ * reading exists because the morning screen's subject is the list: a 440px column that unfolds two
+ * segmented judgments and a record control is not a preview of the work, it is a second copy of the
+ * workspace competing with the list for the eye.
+ *
+ * <p><b>It hides forms, never facts.</b> Everything a preview leaves out stands one press away on the
+ * full case, which is unchanged, and no state, endpoint or write differs between the two readings.
+ */
+export type PaneDepth = "full" | "preview";
+
+const DepthContext = createContext<PaneDepth>("full");
+
+export function usePaneDepth(): PaneDepth {
+  return useContext(DepthContext);
+}
+
 export function CaseLayout({
   variant,
+  depth = "full",
   nav,
   meta,
   title,
@@ -47,6 +68,8 @@ export function CaseLayout({
   label = "선택한 항목",
 }: {
   variant: CaseVariant;
+  /** {@link PaneDepth}. Only read in the pane — a page is never a preview. */
+  depth?: PaneDepth;
   /** Breadcrumb or back link. */
   nav?: ReactNode;
   /** One muted line: source · product · wait. */
@@ -107,15 +130,19 @@ export function CaseLayout({
 
   return (
     <VariantContext.Provider value={variant}>
+      <DepthContext.Provider value={pane ? depth : "full"}>
       {pane ? (
-        <article aria-label={label} className="space-y-4" data-case-variant="pane">
+        <article aria-label={label} className="space-y-4" data-case-variant="pane" data-pane-depth={depth}>
           {nav}
           {header}
           {summary}
           {notice}
           {subject}
-          {decisionBlock}
-          {context}
+          {/* 고객 원문 → 왜 올라왔나요 → 확인한 사실 → 추천. A preview reads before it recommends, so what
+              was checked comes before what to do with it; the full pane keeps the decision straight after
+              the customer's words, which is what a workspace is for. */}
+          {depth === "preview" ? context : decisionBlock}
+          {depth === "preview" ? decisionBlock : context}
           {more}
         </article>
       ) : (
@@ -135,6 +162,7 @@ export function CaseLayout({
           </div>
         </div>
       )}
+      </DepthContext.Provider>
     </VariantContext.Provider>
   );
 }

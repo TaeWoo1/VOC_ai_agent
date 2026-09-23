@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Section } from "../../ui/Section";
+import { usePaneDepth } from "../../workspace/CaseLayout";
 import { Facts } from "../../ui/ObjectRow";
 import type { ReviewDecisionContext } from "../../../lib/types";
 
@@ -25,6 +26,7 @@ import type { ReviewDecisionContext } from "../../../lib/types";
  */
 export function GroundingOnHand({ context }: { context: ReviewDecisionContext }) {
   const { knowledge, productSignal } = context;
+  const preview = usePaneDepth() === "preview";
   /**
    * <b>이름은 있는데 상품이 없다</b> — the review arrived with the channel's own product name and this
    * org holds no catalogue product for it yet. The only producer of a name without an id is that
@@ -34,7 +36,7 @@ export function GroundingOnHand({ context }: { context: ReviewDecisionContext })
   const unlinked = context.productId == null && context.productName != null;
   return (
     <Section title="이 상품에 대해 우리가 아는 것">
-      <div className="space-y-2 rounded-2xl border border-line bg-surface p-4">
+      <div className={preview ? "space-y-2" : "space-y-2 rounded-2xl border border-line bg-surface p-4"}>
         <Facts className="text-sm text-muted">
           {context.productId && context.productName ? (
             <Link to={`/products/${context.productId}`} className="break-keep font-medium text-ink hover:underline">
@@ -92,8 +94,12 @@ export function GroundingOnHand({ context }: { context: ReviewDecisionContext })
           ) : null}
         </Facts>
 
+        {/* The second sentence points at 「아래 초안」, and a preview has no draft below it — the same wrong
+            pointer the 처리 방법 note had. The first sentence is the one that matters (these are counts of
+            what is FILED, not of what a draft used), so the preview keeps it and drops the direction. */}
         <p className="break-keep text-sm leading-relaxed text-muted">
-          여기 있는 것은 등록된 자료의 수입니다. 초안이 실제로 무엇을 근거로 썼는지는 아래 초안에 인용으로 나옵니다.
+          여기 있는 것은 등록된 자료의 수입니다.
+          {preview ? null : " 초안이 실제로 무엇을 근거로 썼는지는 아래 초안에 인용으로 나옵니다."}
         </p>
       </div>
     </Section>

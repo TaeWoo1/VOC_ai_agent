@@ -42,6 +42,8 @@ export function MasterDetail({
   wide,
   footer,
   onClose,
+  preview = false,
+  paneFooter,
 }: {
   /** The page head, the actionable summary and the list — everything in the middle column. */
   list: ReactNode;
@@ -64,6 +66,27 @@ export function MasterDetail({
    * state has one owner (the URL) and no second copy to disagree with.
    */
   onClose?: () => void;
+  /**
+   * <b>The pane is a contextual preview, not the workspace</b> (Home v3.1).
+   *
+   * <p>One claim about the screen, with two consequences for its geometry. A screen whose subject is the
+   * LIST — the morning's work — gives the list the room: closed, the column widens past the reading
+   * measure and uses the space the sidebar left it; open, the pane is a fixed <b>440px</b> preview
+   * rather than a 46% column that ends up the same weight as the work it describes. Measured at
+   * 1440×900 before this: the list was 760px centred inside 1208 (two ~224px dead gutters), and the
+   * open pane was 556px against a 652px list.
+   *
+   * <p>A screen whose subject is the ITEM — a queue whose job is the one case in front of you — wants
+   * the opposite, so this is opt-in and leaving it out keeps exactly the layout that shipped.
+   */
+  preview?: boolean;
+  /**
+   * Docked at the bottom of the pane, outside its scroll — the preview's single primary action.
+   *
+   * <p>A preview that can be read but not acted on is a dead end, and an action that scrolls away with
+   * the case is an action the seller has to go looking for. Requires {@link preview}.
+   */
+  paneFooter?: ReactNode;
 }) {
   const open = wide && detail !== null;
   useEffect(() => {
@@ -84,35 +107,48 @@ export function MasterDetail({
         {/* `relative`: each scroller is the containing block of what it holds. Without it an absolutely positioned
             descendant (an sr-only label) is placed against the document and stretches the PAGE past the viewport. */}
         <div className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-28 pt-5 md:px-8 md:pb-10 md:pt-6" data-testid="master-list">
-          <div className="mx-auto w-full max-w-[760px] space-y-5">{list}</div>
+          {/* Closed, a work table may use the width it was given; open, it goes back to the reading measure
+              so the row a seller is comparing against the pane does not run the whole screen. */}
+          <div className={`mx-auto w-full space-y-5 ${preview && !open ? "max-w-[1160px]" : "max-w-[760px]"}`}>{list}</div>
         </div>
         {footer}
       </div>
       {open ? (
         <aside
           aria-label={detailLabel}
-          className={`relative w-[46%] min-w-[440px] max-w-[620px] shrink-0 overflow-y-auto border-l border-line bg-surface px-7 pb-10 ${
-            onClose ? "pt-0" : "pt-6"
+          className={`relative shrink-0 border-l border-line bg-surface ${
+            preview ? "flex w-[440px] min-w-[440px] flex-col" : `w-[46%] min-w-[440px] max-w-[620px] overflow-y-auto px-7 pb-10 ${onClose ? "pt-0" : "pt-6"}`
           }`}
           data-testid="master-detail"
         >
-          {onClose ? (
-            // Sticky, because the case below it is taller than the viewport: a close control that scrolls
-            // away is a close control the seller has to scroll back up to find.
-            <div className="sticky top-0 z-10 -mx-7 mb-2 flex justify-end border-b border-line bg-surface px-7 py-1.5">
-              <button
-                type="button"
-                onClick={onClose}
-                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-muted transition hover:bg-canvas hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          <div className={preview ? "min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-0" : "contents"}>
+            {onClose ? (
+              // Sticky, because the case below it is taller than the viewport: a close control that scrolls
+              // away is a close control the seller has to scroll back up to find.
+              <div
+                className={`sticky top-0 z-10 mb-2 flex justify-end border-b border-line bg-surface py-1.5 ${
+                  preview ? "-mx-6 px-6" : "-mx-7 px-7"
+                }`}
               >
-                닫기
-                <span aria-hidden="true" className="text-base leading-none">
-                  ✕
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-muted transition hover:bg-canvas hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                >
+                  닫기
+                  <span aria-hidden="true" className="text-base leading-none">
+                    ✕
+                  </span>
+                </button>
+              </div>
+            ) : null}
+            {detail}
+          </div>
+          {preview && paneFooter ? (
+            <div className="shrink-0 border-t border-line bg-surface px-6 py-3" data-testid="pane-footer">
+              {paneFooter}
             </div>
           ) : null}
-          {detail}
         </aside>
       ) : null}
     </div>

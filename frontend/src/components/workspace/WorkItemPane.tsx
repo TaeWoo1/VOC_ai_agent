@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Facts } from "../ui/ObjectRow";
-import { CaseLayout } from "./CaseLayout";
+import { CaseLayout, type PaneDepth } from "./CaseLayout";
 import { InquiryResponsePanel } from "../inbox/InquiryResponsePanel";
 import { OperationsCaseView } from "../../pages/app/OperationsCase";
 import { ReviewCaseView } from "../../pages/app/ReviewReplyTask";
@@ -14,19 +14,26 @@ import type { HomeWorkRow } from "../../lib/homeWork";
  * Review Case, an inquiry by the same response panel 문의 uses. Nothing is re-implemented here, so deciding in the
  * pane and deciding on the full page are the same reads and the same writes. `key` forces a clean mount per item: a
  * half-written draft must never follow the seller to the next row.
+ *
+ * <p><b>{@link PaneDepth} decides how much of that screen unfolds</b> (Home v3.1). At 「full」 the pane is the
+ * workspace, as it has been. At 「preview」 every form is left to the screen that owns it and the pane answers the
+ * questions a seller asks before opening anything — what this is, why it was brought up, what was checked, what is
+ * recommended — with one way in docked under it. Same components, same state; what differs is what is offered,
+ * never what is true.
  */
-export function WorkItemPane({ row, now }: { row: HomeWorkRow; now?: Date }) {
+export function WorkItemPane({ row, now, depth = "full" }: { row: HomeWorkRow; now?: Date; depth?: PaneDepth }) {
   if (row.kind === "CASE") {
-    return <OperationsCaseView key={row.key} caseId={row.subjectId} variant="pane" />;
+    return <OperationsCaseView key={row.key} caseId={row.subjectId} variant="pane" depth={depth} />;
   }
   if (row.kind === "REVIEW") {
-    return <ReviewCaseView key={row.key} reviewId={row.subjectId} variant="pane" />;
+    return <ReviewCaseView key={row.key} reviewId={row.subjectId} variant="pane" depth={depth} />;
   }
   const wait = waitLabel(row.since, now);
   return (
     <CaseLayout
       key={row.key}
       variant="pane"
+      depth={depth}
       decisionLabel="판매자의 결정"
       // The response panel prints the channel and the time with the question; drawn here too it was the same line
       // twice, one block apart. Kept only when there is no panel to say it.
@@ -46,6 +53,12 @@ export function WorkItemPane({ row, now }: { row: HomeWorkRow; now?: Date }) {
         </Link>
       }
       decision={
+        // <b>An inquiry's pane keeps its panel at either depth</b>, and that is not an exception to the preview
+        // rule — it is the rule reading correctly. What a preview leaves out are the JUDGMENT forms, and this row
+        // has none: the response panel is the reply lane itself, and the row carries only a truncated first line,
+        // so a preview of it would be a title with an ellipsis and a button. Rendered once at 440px it was exactly
+        // that — an empty pane where the work used to be. See {@link paneCarriesOwnAction}, which is how the dock
+        // knows not to put a second solid beside this one.
         row.workItemId ? (
           <InquiryResponsePanel workItemId={row.workItemId} />
         ) : (
@@ -56,4 +69,19 @@ export function WorkItemPane({ row, now }: { row: HomeWorkRow; now?: Date }) {
       }
     />
   );
+}
+
+/** Where the pane's docked action takes the seller: the full screen that owns the row. */
+export function workItemFullScreen(row: HomeWorkRow): string {
+  if (row.kind === "CASE") return `/customer-operations/cases/${row.subjectId}`;
+  if (row.kind === "REVIEW") return `/reviews/reply/${row.subjectId}?from=work`;
+  return `/inquiries/${row.subjectId}`;
+}
+
+/**
+ * Whether this row's pane offers something to press of its own — so the docked action is the way out
+ * rather than the thing to do, and the pane still has exactly one solid.
+ */
+export function paneCarriesOwnAction(row: HomeWorkRow): boolean {
+  return row.kind === "INQUIRY" && row.workItemId !== null;
 }
