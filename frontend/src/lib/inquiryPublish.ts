@@ -96,19 +96,45 @@ export function canEditDraft(status: PublishStatusView | null): boolean {
  * and nobody observed the answer — and the product's rule there is verify, never resend. Telling the
  * seller it failed is how a duplicate reply gets sent by hand.
  */
-export function publishCategoryLabel(category: PublishOutcomeCategory): string {
+export function publishCategoryLabel(category: PublishOutcomeCategory | string): string {
   switch (category) {
+    case "PENDING":
+      return "승인은 끝났고 아직 등록되지 않았습니다.";
     case "PUBLISHING":
       return "등록 중입니다. 잠시 후 상태를 확인해 주세요.";
     case "COMPLETED":
       return "답변이 등록되었습니다.";
     case "CHECKING_REQUIRED":
       return "등록 여부를 확인하는 중입니다. 다시 보내지 않고 채널 상태만 다시 조회합니다.";
-    case "RETRYABLE":
+    case "RETRYABLE_FAILURE":
       return "일시적인 문제로 등록되지 않았습니다. 다시 시도할 수 있습니다.";
-    case "PERMANENT":
+    case "PERMANENT_FAILURE":
       return "등록할 수 없습니다. 판매자센터에서 직접 답변해 주세요.";
+    default:
+      // A token this build does not know — a newer backend, or a vocabulary that drifted again.
+      //
+      // This arm exists because its ABSENCE is what made the original defect invisible: with no
+      // `default` TypeScript treated the switch as exhaustive over a union that was wrong, and the
+      // function returned `undefined` into a `<p>`. An empty sentence is the one outcome this screen
+      // must never produce, because the seller reads it as "nothing happened" about a reply that may
+      // well have reached their customer.
+      //
+      // So it says the only thing that is certainly true — this screen cannot read the state — and
+      // points at the surface that can. It claims neither success nor failure, and prints no token.
+      return "등록 상태를 이 화면에서 확인하지 못했습니다. 판매자센터에서 확인해 주세요.";
   }
+}
+
+/** Whether `category` is a token this build actually understands. */
+function known(category: string): boolean {
+  return (
+    category === "PENDING" ||
+    category === "PUBLISHING" ||
+    category === "COMPLETED" ||
+    category === "CHECKING_REQUIRED" ||
+    category === "RETRYABLE_FAILURE" ||
+    category === "PERMANENT_FAILURE"
+  );
 }
 
 /**
@@ -118,13 +144,33 @@ export function publishCategoryLabel(category: PublishOutcomeCategory): string {
  * status returned by the press, and — after a reload lost that — the delivery the detail read carries.
  * Both are the same backend token, so the rule must not fork with the shape holding it.
  */
-export function canResumePublish(status: { category: PublishOutcomeCategory } | null): boolean {
-  return status !== null && (status.category === "RETRYABLE" || status.category === "PUBLISHING");
+export function canResumePublish(status: { category: PublishOutcomeCategory | string } | null): boolean {
+  if (status === null) return false;
+  // `PENDING` is bound-but-never-dispatched, and `RETRYABLE_FAILURE` is dispatched-and-nothing-left:
+  // in both the customer has seen nothing, so continuing is the seller's way forward rather than a
+  // second reply. An UNKNOWN token is deliberately NOT here — resuming can put a message in front of
+  // a customer, and this build cannot tell whether one is already there.
+  return (
+    status.category === "RETRYABLE_FAILURE" ||
+    status.category === "PENDING" ||
+    status.category === "PUBLISHING"
+  );
 }
 
-/** Whether "상태 다시 확인" should be offered — the verify-only path, which never resends. */
-export function canVerifyPublish(status: { category: PublishOutcomeCategory } | null): boolean {
-  return status !== null && (status.category === "CHECKING_REQUIRED" || status.category === "PUBLISHING");
+/**
+ * Whether "상태 다시 확인" should be offered — the verify-only path, which never resends.
+ *
+ * Offered for an unknown token too, and that asymmetry with {@link canResumePublish} is the point:
+ * re-querying is read-only, so it is the one control that is safe in a state we cannot name, and it
+ * is what turns the unknown sentence above from a dead end into a next step.
+ */
+export function canVerifyPublish(status: { category: PublishOutcomeCategory | string } | null): boolean {
+  if (status === null) return false;
+  return (
+    status.category === "CHECKING_REQUIRED" ||
+    status.category === "PUBLISHING" ||
+    !known(status.category)
+  );
 }
 
 /**

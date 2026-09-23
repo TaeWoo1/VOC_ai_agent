@@ -1982,13 +1982,27 @@ export interface PublishCapabilityView {
   replyAdapterChannelCodes: string[];
 }
 
-/** Mirrors com.sellerops.inquiry.publish.PublishOutcomeCategory — the coarse outcome the UI renders. */
+/**
+ * Mirrors com.sellerops.inquiry.publish.PublishOutcomeCategory — the coarse outcome the UI renders.
+ *
+ * <b>These are the backend enum's own constant names, and that is the whole contract.</b> The backend
+ * serialises the enum with `name()` — no `@JsonValue`, no enum-naming strategy — so a token spelled
+ * differently here is a token that never arrives.
+ *
+ * This union once read `"RETRYABLE"` / `"PERMANENT"` and omitted `PENDING` entirely, while its own
+ * comment called it a mirror. Nothing failed: `COMPLETED` happens to match, so the success path
+ * worked, and the consumer's `switch` had no `default`, so TypeScript believed it exhaustive and
+ * returned `undefined` at runtime for the two failure states. A seller who came back to a refused
+ * send read an empty box with no control. `publishOutcomeCategoryContract.test.ts` now pins these
+ * names against the Java source, so the next divergence fails a test rather than a person.
+ */
 export type PublishOutcomeCategory =
+  | "PENDING"
   | "PUBLISHING"
   | "COMPLETED"
   | "CHECKING_REQUIRED"
-  | "RETRYABLE"
-  | "PERMANENT";
+  | "RETRYABLE_FAILURE"
+  | "PERMANENT_FAILURE";
 
 /** Mirrors com.sellerops.inquiry.publish.dto.PublishStatusView. No token, no provider message text. */
 export interface PublishStatusView {

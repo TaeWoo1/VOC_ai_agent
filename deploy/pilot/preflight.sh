@@ -90,6 +90,28 @@ for n in SELLEROPS_SEED_ENABLED SELLEROPS_SEED_DEMO_CONTENT SELLEROPS_CONNECTOR_
 done
 [[ "${SELLEROPS_MAIL_MODE:-off}" != "dev-outbox" ]] && ok "mail mode is not the developer outbox" || bad "SELLEROPS_MAIL_MODE=dev-outbox logs password-reset links"
 
+# ── 5-A. routine collection actually runs (Pilot Readiness v3 §1-3 · blocker B3) ─────────────────
+# Two halves: self-pilot CREATES the schedules, the collect poller EXECUTES them. Only the first and
+# the schedules sit due forever while the connect-result screen promises automatic collection. This
+# is the cheapest possible moment to learn it — before an image is built, and long before a seller
+# connects a store and waits for data that is never coming.
+if [[ "${SELLEROPS_SELF_PILOT_ENABLED:-false}" == "true" ]]; then
+  [[ "${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}" == "true" ]] \
+    && ok "routine collection: self-pilot creates schedules and the collect poller runs them" \
+    || bad "SELLEROPS_SELF_PILOT_ENABLED=true but SELLEROPS_COLLECT_SCHEDULER_ENABLED is not true — schedules would be created and never executed"
+  case "${SELLEROPS_SELF_PILOT_SCOPE:-ALLOW_LIST}" in
+    CONNECTED_SELLERS) ok "self-pilot scope CONNECTED_SELLERS — a new seller is picked up without an env edit" ;;
+    ALLOW_LIST)
+      [[ -n "${SELLEROPS_SELF_PILOT_ORG_IDS:-}" ]] \
+        && ok "self-pilot scope ALLOW_LIST with named organisations" \
+        || bad "self-pilot scope ALLOW_LIST with SELLEROPS_SELF_PILOT_ORG_IDS blank collects for nobody" ;;
+    LOCAL_SINGLE_USER) bad "self-pilot scope LOCAL_SINGLE_USER is the local single-user posture, not a pilot answer" ;;
+    *) bad "SELLEROPS_SELF_PILOT_SCOPE must be CONNECTED_SELLERS or ALLOW_LIST" ;;
+  esac
+else
+  note "self-pilot is OFF — no routine collection will be scheduled on this host"
+fi
+
 # ── 6. schema safety (§1) ────────────────────────────────────────────────────────────────────────
 [[ "${SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE:-false}" == "false" ]] && ok "baseline-on-migrate is false" \
   || bad "SELLEROPS_FLYWAY_BASELINE_ON_MIGRATE must be false (a half-restored schema must fail the boot, not be assumed current)"

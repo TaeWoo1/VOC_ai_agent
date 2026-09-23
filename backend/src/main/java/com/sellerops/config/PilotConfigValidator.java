@@ -49,6 +49,18 @@ public class PilotConfigValidator {
     private final String agentAccessScope;
     private final boolean mockConnectorEnabled;
     /**
+     * The inquiry answer send — the one marketplace WRITE this product performs.
+     *
+     * <p>Read as properties, the same way the connector switches above are, because these are
+     * deployment facts rather than capabilities that describe themselves. They exist here for the
+     * reason every other condition does: on their own they produce a half-working runtime.
+     */
+    private final boolean inquiryPublishEnabled;
+    private final String cafe24LiveApprovalId;
+    private final String cafe24ClientIp;
+    private final int cafe24ShopNo;
+    private final String naverLiveApprovalId;
+    /**
      * The AI capabilities, as beans that describe themselves.
      *
      * <p><b>Not their property keys.</b> A file that reads {@code sellerops.agent.plan.*} AND
@@ -69,7 +81,17 @@ public class PilotConfigValidator {
             @Value("${sellerops.connector.cafe24.oauth.redirect-uri:}") String cafe24RedirectUri,
             @Value("${sellerops.agent.access.scope:ALLOW_LIST}") String agentAccessScope,
             @Value("${sellerops.connector.mock.enabled:false}") boolean mockConnectorEnabled,
+            @Value("${sellerops.inquiry.publish.execution-enabled:false}") boolean inquiryPublishEnabled,
+            @Value("${sellerops.inquiry.publish.cafe24.live-approval-id:}") String cafe24LiveApprovalId,
+            @Value("${sellerops.inquiry.publish.cafe24.client-ip:}") String cafe24ClientIp,
+            @Value("${sellerops.inquiry.publish.cafe24.shop-no:0}") int cafe24ShopNo,
+            @Value("${sellerops.inquiry.publish.naver.live-approval-id:}") String naverLiveApprovalId,
             List<AgentCapabilityGate> agentCapabilities) {
+        this.inquiryPublishEnabled = inquiryPublishEnabled;
+        this.cafe24LiveApprovalId = cafe24LiveApprovalId;
+        this.cafe24ClientIp = cafe24ClientIp;
+        this.cafe24ShopNo = cafe24ShopNo;
+        this.naverLiveApprovalId = naverLiveApprovalId;
         this.mockConnectorEnabled = mockConnectorEnabled;
         this.naverEnabled = naverEnabled;
         this.coupangEnabled = coupangEnabled;
@@ -151,7 +173,60 @@ public class PilotConfigValidator {
                     + "오프라인 모의 커넥터와 실제 채널 커넥터가 함께 켜져 있습니다. "
                     + "합성된 리뷰·문의는 판매자가 수집한 행과 구분되지 않으므로 함께 켤 수 없습니다.");
         }
+        problems.addAll(inquiryWriteProblems());
         problems.addAll(agentProblems());
+        return problems;
+    }
+
+    /**
+     * <b>A reply send that is switched on but cannot carry anything.</b> Pilot Readiness v3 §2-2 (S1).
+     *
+     * <p>This is the same failure class as a keyless vault, and it costs more than the others,
+     * because of where in the lifecycle it lands. {@code PublishExecutionWiring} registers the Cafe24
+     * adapter on {@code execution-enabled} AND the Cafe24 connector flag — <em>the arming values are
+     * not part of that condition</em>. So a half-armed deployment has a real adapter bean, the
+     * publish core's fail-fast finds one and lets the confirm through, the single-use approval is
+     * bound and the work item moves to {@code ACTION_PENDING} — and only then does the adapter refuse
+     * on its own blank {@code client_ip} or {@code shop_no = 0} and come back as a retryable failure.
+     *
+     * <p>Nothing was sent and nothing is corrupt; the lifecycle is behaving exactly as designed.
+     * What is wrong is that the seller pressed the one irreversible-looking control in the product
+     * and got a failure that no screen can explain and no retry can fix, because the missing value is
+     * on the host. Every one of these is knowable at boot, and none of them was said at boot.
+     *
+     * <p><b>Off is checked for nothing.</b> {@code execution-enabled} is false by default and on that
+     * default no adapter bean exists at all, so a deployment that does not send must boot with every
+     * value below blank — which is the posture this pilot ships in.
+     */
+    List<String> inquiryWriteProblems() {
+        List<String> problems = new ArrayList<>();
+        if (!inquiryPublishEnabled) {
+            return problems;
+        }
+        // Per channel, because the adapter beans are per channel: a Cafe24-only deployment must not
+        // be asked for NAVER's approval id, for the same reason it is not asked for NAVER's egress IP.
+        if (cafe24Enabled) {
+            if (blank(cafe24ClientIp)) {
+                problems.add("SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP — "
+                        + "답변 등록을 켰지만 카페24가 요구하는 작성자 IP(이 배포의 외부 주소)가 없습니다. "
+                        + "승인은 소진되고 전송은 되지 않습니다.");
+            }
+            if (cafe24ShopNo <= 0) {
+                problems.add("SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO — "
+                        + "답변 등록을 켰지만 어느 상점에 쓸지가 정해지지 않았습니다 "
+                        + "(관측된 값이어야 하며 기본값 1을 가정하지 않습니다). 승인은 소진되고 전송은 되지 않습니다.");
+            }
+            if (blank(cafe24LiveApprovalId)) {
+                problems.add("SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID — "
+                        + "답변 등록을 켰지만 라이브 실행 승인 ID가 없어 요청이 조립되기 전에 거부됩니다. "
+                        + "승인은 소진되고 전송은 되지 않습니다.");
+            }
+        }
+        if (naverEnabled && blank(naverLiveApprovalId)) {
+            problems.add("SELLEROPS_INQUIRY_PUBLISH_NAVER_LIVE_APPROVAL_ID — "
+                    + "답변 등록을 켰지만 네이버 라이브 실행 승인 ID가 없어 답변이 나갈 수 없습니다. "
+                    + "승인은 소진되고 전송은 되지 않습니다.");
+        }
         return problems;
     }
 

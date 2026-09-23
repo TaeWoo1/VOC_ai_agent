@@ -114,6 +114,34 @@ if [[ "${PILOT_GUIDED_HELPER_ENABLED:-false}" == "true" ]]; then
     "$PILOT_PUBLIC_HOST" "$PILOT_PUBLIC_HOST"
 fi
 [[ "${SELLEROPS_PROACTIVE_ENABLED:-false}" == "false" ]] || printf 'note: proactive is ON — a deliberate choice, not the pilot default\n'
+
+# Routine collection is TWO halves and neither is useful alone. Self-pilot CREATES the schedules (one
+# per routine data type per connected account, next_run_at = now); the collect poller EXECUTES them,
+# and its bean exists only when its own flag is true. With the first on and the second off, schedules
+# pile up due and nothing is ever collected — while Cafe24's connect-result screen tells the seller
+# 「이제 문의·리뷰·주문이 자동으로 수집됩니다」. That sentence is the product's promise, and a
+# deployment that cannot keep it should not start (Pilot Readiness v3 §1-3, blocker B3).
+#
+# Checked here rather than in the backend on purpose: the combination is a DEPLOYMENT mistake, not a
+# code one, and application.yml's fail-closed defaults (both false) stay exactly as they are, so an
+# ordinary development boot is byte-identical to before.
+if [[ "${SELLEROPS_SELF_PILOT_ENABLED:-false}" == "true" && "${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}" != "true" ]]; then
+  fail "SELLEROPS_SELF_PILOT_ENABLED=true but SELLEROPS_COLLECT_SCHEDULER_ENABLED is not true — self-pilot creates the collection schedules and the collect poller runs them; with only the first, schedules appear and nothing is ever collected"
+fi
+# The same failure one level down: self-pilot on, but scoped to nobody. ALLOW_LIST with an empty org
+# list is the shipped DEFAULT, so a pilot env that merely turns self-pilot on inherits it and collects
+# for no one. CONNECTED_SELLERS is the pilot answer — connecting a channel IS the request to collect.
+if [[ "${SELLEROPS_SELF_PILOT_ENABLED:-false}" == "true" ]]; then
+  case "${SELLEROPS_SELF_PILOT_SCOPE:-ALLOW_LIST}" in
+    CONNECTED_SELLERS) ;;
+    ALLOW_LIST)
+      [[ -n "${SELLEROPS_SELF_PILOT_ORG_IDS:-}" ]] \
+        || fail "SELLEROPS_SELF_PILOT_SCOPE=ALLOW_LIST with SELLEROPS_SELF_PILOT_ORG_IDS blank collects for nobody — name the organisations, or use CONNECTED_SELLERS" ;;
+    LOCAL_SINGLE_USER)
+      fail "SELLEROPS_SELF_PILOT_SCOPE=LOCAL_SINGLE_USER is the local single-user posture (it refuses to boot off loopback) — not a pilot answer" ;;
+    *) fail "SELLEROPS_SELF_PILOT_SCOPE must be CONNECTED_SELLERS or ALLOW_LIST on a pilot host" ;;
+  esac
+fi
 for flag in NAVER COUPANG CAFE24; do
   v="SELLEROPS_CONNECTOR_${flag}_ENABLED"
   if [[ "${!v:-false}" == "true" ]]; then

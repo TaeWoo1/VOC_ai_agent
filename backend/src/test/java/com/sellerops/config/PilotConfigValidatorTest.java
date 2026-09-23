@@ -23,13 +23,13 @@ class PilotConfigValidatorTest {
     private PilotConfigValidator v(boolean naver, boolean coupang, boolean cafe24, String vault,
                                    String egress, String id, String secret, String redirect) {
         return new PilotConfigValidator(naver, coupang, cafe24, vault, egress, id, secret, redirect,
-                "ALLOW_LIST", false, java.util.List.of());
+                "ALLOW_LIST", false, false, "", "", 0, "", java.util.List.of());
     }
 
     /** An AI capability with three switches, everything else off. */
     private PilotConfigValidator agent(String scope, boolean enabled, String key, String orgIds) {
         return new PilotConfigValidator(false, false, false, "", "", "", "", "",
-                scope, false, java.util.List.of(capability(enabled, key, orgIds)));
+                scope, false, false, "", "", 0, "", java.util.List.of(capability(enabled, key, orgIds)));
     }
 
     /** One AI capability, described the way the real property beans describe themselves. */
@@ -78,14 +78,14 @@ class PilotConfigValidatorTest {
     @Test
     void aCapabilityThatDeclinesTheWidening_stillNeedsAWrittenDownOrgList() {
         PilotConfigValidator narrow = new PilotConfigValidator(false, false, false, "", "", "", "", "",
-                "CONNECTED_SELLERS", false, java.util.List.of(narrowCapability(true, "sk-key", "")));
+                "CONNECTED_SELLERS", false, false, "", "", 0, "", java.util.List.of(narrowCapability(true, "sk-key", "")));
         assertThat(narrow.problems()).singleElement().asString()
                 .contains("SELLEROPS_KNOWLEDGE_INTENT_ORG_IDS")
                 .doesNotContain("CONNECTED_SELLERS");
         assertThatThrownBy(narrow::validate).isInstanceOf(IllegalStateException.class);
 
         PilotConfigValidator named = new PilotConfigValidator(false, false, false, "", "", "", "", "",
-                "CONNECTED_SELLERS", false,
+                "CONNECTED_SELLERS", false, false, "", "", 0, "", 
                 java.util.List.of(narrowCapability(true, "sk-key", "11111111-1111-1111-1111-111111111111")));
         assertThat(named.problems()).as("named: the correct pilot configuration").isEmpty();
     }
@@ -135,7 +135,7 @@ class PilotConfigValidatorTest {
     @Test
     void theOfflineMockAndARealConnectorMayNotBeOnTogether() {
         PilotConfigValidator mixed = new PilotConfigValidator(false, false, true, "key", "",
-                "id", "secret", HTTPS, "ALLOW_LIST", true, java.util.List.of());
+                "id", "secret", HTTPS, "ALLOW_LIST", true, false, "", "", 0, "", java.util.List.of());
 
         assertThat(mixed.problems())
                 .anySatisfy(p -> assertThat(p).contains("SELLEROPS_CONNECTOR_MOCK_ENABLED"));
@@ -146,7 +146,7 @@ class PilotConfigValidatorTest {
     @Test
     void theOfflineMockAloneIsNotAProblem() {
         assertThat(new PilotConfigValidator(false, false, false, "", "", "", "", "",
-                "ALLOW_LIST", true, java.util.List.of()).problems()).isEmpty();
+                "ALLOW_LIST", true, false, "", "", 0, "", java.util.List.of()).problems()).isEmpty();
     }
 
     /** I — NAVER without an advertised call IP tells the seller to register a value we cannot name. */
@@ -237,6 +237,95 @@ class PilotConfigValidatorTest {
         assertThat(ok.passed()).isFalse();
         ok.validate();
         assertThat(ok.passed()).isTrue();
+    }
+
+    // ── The reply send: armed, or not switched on ────────────────────────────────────────────────
+    //
+    // Pilot Readiness v3 §2-2 (S1). `PublishExecutionWiring` registers the Cafe24 adapter on
+    // `execution-enabled` AND the connector flag — the arming VALUES are not part of that condition.
+    // So a half-armed host has a real adapter bean, the publish core's fail-fast finds one and lets
+    // the confirm through, the single-use approval binds, the work item reaches ACTION_PENDING, and
+    // only then does the adapter refuse on its own blank client_ip or shop_no = 0. The seller pressed
+    // the one irreversible-looking control in the product and got a failure whose cause is on the
+    // host. Every value below is knowable at boot.
+
+    /** A Cafe24 deployment with the reply send ON and the three Cafe24 arming values given. */
+    private PilotConfigValidator sending(String clientIp, int shopNo, String approvalId) {
+        return new PilotConfigValidator(false, false, true, "key", "", "id", "secret", HTTPS,
+                "ALLOW_LIST", false, true, approvalId, clientIp, shopNo, "", java.util.List.of());
+    }
+
+    @Test
+    void theReplySendOffAsksForNothing() {
+        // The shipped posture, and the one this pilot starts in: with the send off no adapter bean
+        // exists at all, so a host with every arming value blank must boot perfectly.
+        PilotConfigValidator off = new PilotConfigValidator(false, false, true, "key", "", "id", "secret",
+                HTTPS, "ALLOW_LIST", false, false, "", "", 0, "", java.util.List.of());
+        assertThat(off.problems()).as("the send is off — nothing about it is a problem").isEmpty();
+        assertThat(off.inquiryWriteProblems()).isEmpty();
+    }
+
+    @Test
+    void theReplySendOnWithNoWriterIpIsRefusedAtBoot() {
+        assertThat(sending("", 1, "apr-c24-live-1234abcd").problems())
+                .singleElement().asString()
+                .contains("SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP")
+                .contains("승인은 소진되고");
+    }
+
+    @Test
+    void theReplySendOnWithNoObservedShopIsRefusedAtBoot() {
+        // 0 is the shipped default and the adapter refuses it, deliberately: the value must come from
+        // having OBSERVED the target article, never from the contract's documented default of 1.
+        assertThat(sending("203.0.113.9", 0, "apr-c24-live-1234abcd").problems())
+                .singleElement().asString()
+                .contains("SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO");
+    }
+
+    @Test
+    void theReplySendOnWithNoLiveApprovalIdIsRefusedAtBoot() {
+        assertThat(sending("203.0.113.9", 1, "").problems())
+                .singleElement().asString()
+                .contains("SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID");
+    }
+
+    @Test
+    void aFullyArmedSendBootsAndEveryMissingValueIsNamedAtOnce() {
+        assertThat(sending("203.0.113.9", 1, "apr-c24-live-1234abcd").problems())
+                .as("armed: the correct configuration for a sending host").isEmpty();
+
+        // All three at once rather than one per restart — an operator fixing a pilot host should not
+        // have to rediscover this three times.
+        assertThat(sending("", 0, "").inquiryWriteProblems()).hasSize(3);
+    }
+
+    @Test
+    void aChannelThatIsOffIsNotAskedForItsArming() {
+        // Cafe24 off, NAVER on, the send on: the Cafe24 adapter bean does not exist, so its values are
+        // not this deployment's business — the same rule that lets a Coupang-less host boot with no
+        // Coupang secret. Only NAVER's own approval id is missing here.
+        PilotConfigValidator naverOnly = new PilotConfigValidator(true, false, false, "key", "1.2.3.4", "", "",
+                "", "ALLOW_LIST", false, true, "", "", 0, "", java.util.List.of());
+        assertThat(naverOnly.inquiryWriteProblems())
+                .singleElement().asString()
+                .contains("SELLEROPS_INQUIRY_PUBLISH_NAVER_LIVE_APPROVAL_ID");
+
+        PilotConfigValidator naverArmed = new PilotConfigValidator(true, false, false, "key", "1.2.3.4", "", "",
+                "", "ALLOW_LIST", false, true, "", "", 0, "apr-nv-live-1234abcd", java.util.List.of());
+        assertThat(naverArmed.inquiryWriteProblems())
+                .as("Cafe24's blank client_ip and shop_no are not a problem on a host with no Cafe24")
+                .isEmpty();
+    }
+
+    @Test
+    void aHalfArmedSendingHostDoesNotStart() {
+        // The point of the whole check: the refusal is a thrown boot, not a logged warning. A process
+        // that starts here is one that will spend a seller's approval on a send it cannot make.
+        PilotConfigValidator halfArmed = sending("203.0.113.9", 0, "apr-c24-live-1234abcd");
+        assertThatThrownBy(halfArmed::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO");
+        assertThat(halfArmed.passed()).isFalse();
     }
 
 }

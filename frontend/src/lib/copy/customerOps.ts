@@ -25,23 +25,32 @@ export const DRAFT_UNSENT = "미발송";
  * case still labelling their delivered answer 「미발송」, which is the same class of defect as the
  * Home badge that claimed an approval nobody had granted.
  *
- * <p>`category` is the backend's `PublishOutcomeCategory`. An unknown token falls back to
- * {@link DRAFT_UNSENT} rather than printing itself: this is a tag on a seller's screen.
+ * <p>`category` is the backend's `PublishOutcomeCategory`, spelled with the enum's own constant
+ * names. It used to be spelled `RETRYABLE` / `PERMANENT`, which the backend has never sent, so
+ * both failures fell through to {@link DRAFT_UNSENT} — and for `PERMANENT_FAILURE` that made this
+ * tag say 「미발송」 about a reply that WAS dispatched and refused by the channel. A false sentence,
+ * and precisely the defect class this file's own header exists to prevent.
+ *
+ * <p><b>No delivery row and an unreadable token are different answers.</b> Absent means nothing was
+ * ever handed to a transport, which is what 「미발송」 asserts and the only case that may assert it.
+ * A token this build cannot read is not evidence of anything, so it says so instead of guessing in
+ * either direction — and it never prints itself.
  */
 export function draftSendWord(delivery: { category: string } | null | undefined): string {
-  switch (delivery?.category) {
+  if (delivery === null || delivery === undefined) return DRAFT_UNSENT;
+  switch (delivery.category) {
     case "COMPLETED":
       return "등록됨";
     case "PUBLISHING":
     case "CHECKING_REQUIRED":
       return "등록 확인 중";
-    case "RETRYABLE":
+    case "RETRYABLE_FAILURE":
     case "PENDING":
       return "등록 대기";
-    case "PERMANENT":
+    case "PERMANENT_FAILURE":
       return "등록 실패";
     default:
-      return DRAFT_UNSENT;
+      return "등록 상태 확인 필요";
   }
 }
 

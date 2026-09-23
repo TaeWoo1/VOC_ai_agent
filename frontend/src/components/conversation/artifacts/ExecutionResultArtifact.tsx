@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ExecutionResultArtifact as ExecutionResult, ObjectKind } from "../../../lib/conversation/types";
 import { publishCategoryLabel } from "../../../lib/inquiryPublish";
-import type { PublishOutcomeCategory } from "../../../lib/types";
 import { Status } from "../../ui/Status";
 import { ArtifactCard } from "./ArtifactCard";
 
@@ -32,7 +31,12 @@ export const VERIFICATION_WORD: Record<string, { word: string; sentence: string;
   SUBMISSION_OBSERVED_CONTENT_UNVERIFIED: { word: "답변 있음", sentence: "채널에 답변이 있는 것을 확인했습니다. 내용이 초안과 같은지는 확인하지 않습니다.", tone: "info" },
 };
 
-const CATEGORIES: readonly string[] = ["PUBLISHING", "COMPLETED", "CHECKING_REQUIRED", "RETRYABLE", "PERMANENT"];
+// The category vocabulary is NOT repeated here. This file used to keep its own allow-list of the
+// five tokens it would render, spelled the same wrong way as the type — a second copy of the same
+// mistake, which is how one divergence became silence on two surfaces. `publishCategoryLabel` owns
+// the vocabulary and now answers safely for a token it does not know, so there is nothing left for
+// a list here to decide. An absent category still renders no sentence: that is a missing field,
+// not an unreadable state, and the phase chip above already says what is known.
 
 function screenLabel(objectKind: ObjectKind | undefined): string {
   return objectKind === "REVIEW" ? "리뷰 화면에서 확인" : "문의 화면에서 확인";
@@ -52,7 +56,7 @@ export function ExecutionResultView({
   to: string;
 }) {
   const word = PHASE_WORD[phase];
-  const sentence = CATEGORIES.includes(category) ? publishCategoryLabel(category as PublishOutcomeCategory) : null;
+  const sentence = category ? publishCategoryLabel(category) : null;
   const verified = verification ? (VERIFICATION_WORD[verification] ?? null) : null;
   return (
     <div className="space-y-2">
