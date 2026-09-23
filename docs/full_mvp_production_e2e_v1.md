@@ -298,3 +298,179 @@ approval/execution/marketplace WRITE 0. 중단 조건 발동 0. 신규 문의 1 
 - 초안 **문장**은 결정론이 아니다. 고정된 것은 어떤 근거가 실렸는가이지 모델이 쓴 문장이 아니다.
 - retrieval 세 단계 중 둘이 매 검색마다 새 모델 호출이므로 경계선 비결정성은 남는다.
 - **전송은 증명하지 않았다**(WRITE 0). 판매자가 초안을 복사해 채널에 올리는 단계는 이 run의 범위 밖이다.
+
+## 4. Stage 3 — 승인된 답변이 실제로 고객에게 등록되는가 · **manifest (미실행)**
+
+Draft → 승인 → 실행 → 완료 lifecycle을 **실제 marketplace WRITE 1회**로 닫는 단계. 이 절은 **계획이고 실행
+기록이 아니다** — 작성 시점까지 marketplace WRITE **0**, 승인 소진 **0**, DB 행 변경 **0**.
+
+### 4-0. 기준 코드와 선행 조건
+
+- 기준 커밋 **`cbab8347`**(「승인은 소진됐는데 아무것도 실어 나르지 않는 경로가 열려 있었다」 — Stage 3
+  lifecycle gap G1~G4 종결). 이 manifest는 **그 커밋에서만** 유효하다: G1이 arming 순서를 바꿨고
+  G4가 절차에서 한 단계를 없앴으므로, 이전 커밋 기준의 manifest를 재사용하면 절차가 틀린다.
+- 선행: Stage 3 감사(코드·DB 추적, 수정 0)와 §3 Stage 2 rerun `PASS`.
+- 승인 **`apr-c24-a3678-stage3-01c3d8b4bf78ab87`** — mode **WRITE**, max WRITE **1**, 자동 재시도 **0**,
+  단일 사용. **미소진**. 이 manifest에 bind되며, 코드·브랜치·스코프·계정이 바뀌면 계약대로 `REVOKED`다.
+
+### 4-1. 대상 — 하나, 그리고 그 하나뿐
+
+| 항목 | 값 |
+|---|---|
+| org | `7146c50f-ff6d-4c83-ae96-18c930e6d8e0` (Demo Org) |
+| seller account | `78da0eb3-3088-4ecb-919f-3e08dad1d402` (CAFE24, API) |
+| inquiry | `11b6a729-3159-468a-9ee4-f5b2ea8a8043` |
+| external id | `cafe24:b6:a3678` (board 6, article 3678) |
+| source subtype | **NULL** — 이 채널의 유일한 문의 리소스 |
+| work item | `4c53cbee-0472-44e5-81ad-158f24f27bc3` · phase **`PROPOSED`** |
+| case | `e1df3bb5-b5b9-4b9e-942b-27fc5e2f885c` · status **`PREPARED`** |
+| draft head | **v1** · `author_kind=MODEL` · `answer_basis=GROUNDED` · `created_by=SYSTEM:RESPONSIBILITY` |
+
+**전송될 draft v1의 정확한 전문.** 이것이 고객에게 그대로 등록된다. 한 글자도 다르면 지문이 달라지고
+confirm이 409로 거절한다.
+
+- 제목: `교환 신청 기한 및 개봉 여부 기준 안내`
+- 본문(132자):
+
+```
+문의 주셔서 감사합니다. 상품 교환은 상품을 수령하신 날로부터 7일 이내에 신청해 주셔야 하며, 사용하지 않은 상태여야 합니다. 특히 포장을 개봉하지 않은 미사용 상품에 한해 교환 및 반품이 가능합니다. 도움이 필요하시면 말씀해 주세요.
+```
+
+- **full fingerprint** (`esm-answer-v1`):
+  `5b8f503710e013c4caa7ec7ffaac8fed2e5d6d24c0824369e61a1a22a37d18c3`
+
+**이것은 `MODEL` 초안이다.** 지금까지의 두 live WRITE(Cafe24 `a3672`, NAVER `686514802`)는 **모두 판매자가
+고쳐 쓴 v2 `SELLER`**를 보냈고, `MODEL` 원문이 그대로 고객에게 나간 적은 이 제품에서 **한 번도 없다**.
+v1을 그대로 보낼지, 판매자가 v2를 써서 보낼지는 **product-owner 결정**이며 이 manifest는 v1 기준으로
+적는다(v2를 만들면 지문이 바뀌므로 §4-1의 지문과 §4-4의 단계 2를 그 값으로 갱신해야 한다).
+
+### 4-2. arming — 이제 confirm **앞에** 서야 한다
+
+`cbab8347` G1 이후 `confirm-publish`는 **바인딩 전에** capability와 transport를 묻는다. 무장되지 않은 채
+누르면 **409**이고 approval · intent · execution **어느 것도 쓰이지 않으며** work item은 `PROPOSED`로 남고
+초안도 잠기지 않는다. 즉 arming 누락은 이제 조용한 교착이 아니라 **되돌릴 것이 없는 거절**이다.
+
+| 게이트 | 요구 값 | 현재 | 막으면 나타나는 것 |
+|---|---|---|---|
+| Cafe24 write scope | `mall.write_community` | **✅ 이미 보유** | adapter가 `RETRYABLE_FAILURE`로 거절(전송 0) |
+| publish flag | `SELLEROPS_INQUIRY_PUBLISH_EXECUTION_ENABLED=true` | ❌ `false` | confirm **409**, 행 0 |
+| connector flag | `SELLEROPS_CONNECTOR_CAFE24_ENABLED=true` | ❌ `false` | confirm **409**, 행 0 |
+| live approval gate | `SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID=apr-c24-a3678-stage3-01c3d8b4bf78ab87` | ❌ 공백 | `Cafe24WriteApprovalRequired` — 요청이 조립되기 전에 throw |
+| client ip | `SELLEROPS_INQUIRY_PUBLISH_CAFE24_CLIENT_IP=<이 배포의 egress IPv4>` | ❌ 공백 | adapter가 `RETRYABLE_FAILURE`(전송 0) |
+| shop no | `SELLEROPS_INQUIRY_PUBLISH_CAFE24_SHOP_NO=1` | ❌ `0` | adapter가 `RETRYABLE_FAILURE`(전송 0) |
+
+`client_ip`는 **배포 설정**이다 — 08-25 관측값을 재사용하지 않고 이 프로세스가 실제로 나가는 주소를 넣는다.
+나머지 프로세스 자세는 Stage 1~3과 동일: 격리 backend(18080), collect · self-pilot · proactive · aside ·
+responsibility scheduler **전부 OFF**, 리뷰 publish **OFF**, 모델 capability 전부 OFF + key 제거.
+
+### 4-3. 예산과 금지
+
+| 항목 | 상한 |
+|---|---|
+| marketplace **WRITE** | **정확히 1회** (`POST /api/v2/admin/boards/6/articles`) |
+| 자동 재시도 | **0** — `Cafe24ReplyArticleClient`에 재시도 메서드가 없다 |
+| verification **READ** | **최대 2회** (`fetchByArticleNumbers` 1 + 자식 번호를 못 받았을 때만 같은 날짜 `fetchPage` 1) |
+| 토큰 갱신 | ≤2 (기존 성질) |
+| 모델 호출 | **0** — 이 경로에 drafter · planner · retrieval이 없다 |
+| 새 문의 유입 | 0 (수집 스케줄러 OFF) |
+| DB 직접 수정 | **0** |
+
+**금지**: `rearm` 사용, 두 번째 POST, 다른 문의 접촉, `57ee2220` 수정(그 행은 G1 회귀 증거다).
+
+### 4-4. 절차
+
+1. **bounded READ 1회 — 대상이 아직 거기 있고 미답변인가.** `GET /api/v2/admin/boards/6/articles`에
+   `article_no=3678` exact 필터. 확인할 것 셋: 글이 **존재**한다 · `parent_article_no`가 비어 있다(ROOT) ·
+   댓글/자식 답변이 없다(미답변). **이 단계는 생략하지 않는다** — 직전 테스트 문의 `a3676`은 operator가
+   marketplace에서 직접 삭제했고(§1-7), 로컬 행은 그대로 남았다. 삭제된 대상에 POST하면 실패가 예산을
+   태운다. 없거나 이미 답변돼 있으면 **여기서 중단**하고 WRITE로 가지 않는다.
+2. **head draft 재확인.** `version=1`, `content_fingerprint=5b8f5037…d18c3`. 다르면 중단.
+3. **`POST /api/inquiries/4c53cbee-0472-44e5-81ad-158f24f27bc3/confirm-publish`** 1회
+   (`commandId` = 새 UUID, `expectedFingerprint` = 위 지문). 이 **한 요청 안에서** 승인 바인딩 → intent →
+   execution → **marketplace POST 1회** → exact READ 검증 → work item/inquiry 갱신 → case 수렴이 전부
+   일어난다. 판매자 관점에서 승인과 전송은 두 단계가 아니다.
+4. **§4-5 / §4-6과 대조.** 추가 responsibility run은 **필요 없다** — G4가 case 수렴을 이 요청 안으로 옮겼다.
+
+### 4-5. 성공 시 예상 상태
+
+| 대상 | 기대 |
+|---|---|
+| `inquiry_approval` | **+1** — `approved_draft_version=1` · `approved_fingerprint=5b8f5037…` · `action_kind=POST_INQUIRY_REPLY` · `target_external_id=cafe24:b6:a3678` · `source_subtype=NULL` |
+| `inquiry_action_intent` | **+1** |
+| `inquiry_execution` | **+1** · `status=COMPLETED` · `provider_message_no=<몰이 이름 지은 자식 article_no; 이름 짓지 않았으면 대상 번호 `3678`>` · `verify_attempts=1` |
+| `inquiry_verification` | **+1** · `verified=true` · `observed_status=ANSWERED` |
+| work item `4c53cbee` | `PROPOSED → ACTION_PENDING → EXECUTED → **COMPLETED**` |
+| `inquiry_work_item_audit` | **+4** (`APPROVAL_GRANTED` · `ACTION_INTENT_CREATED` · `EXECUTION_RECORDED` · `VERIFICATION_RECORDED`) |
+| inquiry `11b6a729` | **즉시 `ANSWERED`** · `answered_at` 최초 1회 각인 (수집을 기다리지 않는다) |
+| case `e1df3bb5` | **즉시 `ACTED` / `SELLER_ACTED`** · `acted_at` 각인 · `reconciled_at` 각인 |
+| `operations_case_event` | **+1** `SELLER_ACTED`, provenance에 `WORK_ITEM_COMPLETED;delivery=COMPLETED;outcome=COMPLETED;verified=true;observed=ANSWERED` 인용 |
+| `answer_memory` | **+1** `EXECUTOR_SENT_VERIFIED` (검증 성공 뒤에만) |
+| 문의 상세 / Case 화면 | **새로고침 후에도** 「답변이 등록되었습니다」 · Case 태그 「등록됨」 (G3) |
+| Home 「실행 대기」 / 확인할 일 | 이 행이 **즉시** 사라진다(phase `COMPLETED`는 `AWAITING_SELLER` 밖) |
+| `agent_llm_usage` | **+0** |
+
+검증은 2xx가 아니라 **exact READ**가 정한다: 자식 글 존재 · `parent_article_no==3678` · 답글 구조 ·
+**정규화 본문 해시 == 승인 초안** · 부모 `reply_status`. 다섯 중 하나라도 어긋나면 성공이 아니다.
+
+### 4-6. 실패 시 예상 상태 — 어디에 정확히 남는가
+
+**모든 분기에서 approval과 intent는 이미 쓰였고 남는다**(POST 이전에 바인딩되므로). 초안은 `PROPOSED`를
+떠났으므로 **얼어 있다**. 자동 재시도는 어느 분기에도 없다.
+
+| 분기 | execution | work item | case (G1b 적용) | inquiry |
+|---|---|---|---|---|
+| **POST 4xx**(401/403/429 제외) — 명시적 거절 | `FAILED` · `failure_reason=EXECUTION_FAILED` · `result_code=<HTTP>` | `FAILED` | **`ACTED`/`SELLER_ACTED`**, `delivery=FAILED;outcome=PERMANENT_FAILURE` 인용 | `UNANSWERED` 유지 |
+| **POST 401 / 403 / 429** — 아무것도 안 나감 | `ACTION_PENDING`(복귀) | `ACTION_PENDING` | **`PREPARED` 유지** — 아무것도 실려가지 않았으므로 카드가 열려 있다 | `UNANSWERED` |
+| **POST 5xx 또는 transport 예외** — 나갔는지 모름 | `DELIVERY_UNKNOWN` | `ACTION_PENDING`(불변) | **`ACTED`/`SELLER_ACTED`**, `delivery=DELIVERY_UNKNOWN;outcome=CHECKING_REQUIRED` | `UNANSWERED` |
+| **POST 2xx + 검증 불일치**(자식 없음/부모 불일치/해시 불일치) | `EXECUTED` 유지 · `verify_attempts=1` | `EXECUTED` | **`ACTED`/`SELLER_ACTED`**, `delivery=EXECUTED;outcome=CHECKING_REQUIRED;verified=false;observed=DELIVERY_UNKNOWN` | `UNANSWERED` |
+| **POST 2xx + 자식 확인 · 부모 `reply_status≠C`** | `EXECUTED` 유지 | `EXECUTED` | 위와 같되 `observed=ANSWER_POSTED_STATUS_UNRESOLVED` | `UNANSWERED` |
+| **arming 누락** — confirm 자체가 거절 | **행 없음** | `PROPOSED` 유지 | `PREPARED` 유지 | `UNANSWERED` |
+
+세 번째·네 번째·다섯 번째 분기에서 **답변이 고객에게 갔을 수 있다**. 그때 규칙은 하나다 — **재전송하지 않고
+`POST /verify`로 다시 읽는다**(두 번째 답변은 덮어쓰기가 아니라 두 번째 자식 글이 된다). `answer_memory`는
+검증 성공에서만 쓰이므로 이 분기들에서 **+0**이다.
+
+### 4-7. 실행 전후로 비교할 DB — 실측 스냅샷 (2026-09-23, org `7146c50f`)
+
+| 카운터 | 실행 전 | 성공 시 기대 |
+|---|---|---|
+| `inquiry_approval` | **3** | 4 |
+| `inquiry_action_intent` | **3** | 4 |
+| `inquiry_execution` | **3** | 4 |
+| `inquiry_verification` | **2** | 3 |
+| `answer_memory` | **25** | 26 |
+| `agent_llm_usage` | **2575** | 2575 (불변) |
+| work item `COMPLETED` | **8** | 9 |
+| work item `PROPOSED` | **14** | 13 |
+| work item `ACTION_PENDING` | **1** | 1 (불변 — 그 1건은 `57ee2220`이고 건드리지 않는다) |
+| case `PREPARED` | **5** | 4 |
+| case `ACTED` | **0** | 1 |
+| `inquiries` UNANSWERED · REAL | **3270** | 3269 |
+| 대상 case event | **3** | 4 |
+| 대상 work item audit | **2** | 6 |
+| 대상 draft 행 | **1** (v1) | 1 (append-only, 불변) |
+
+**대상 row snapshot (실행 전, 실측)**
+
+```
+inquiry_work_item 4c53cbee : phase=PROPOSED       updated_at=2026-09-23 04:00:31.890439+09
+inquiries        11b6a729 : status=UNANSWERED  operational_state=ACTIVE  thread_role=ROOT
+                            data_origin=REAL   external_id=cafe24:b6:a3678  source_subtype=NULL
+proactive_case   e1df3bb5 : status=PREPARED  prepared_action=DRAFT_PREPARED  draft_version=1
+                            acted_at=NULL  closed_at=NULL  reconciled_at=NULL
+                            responsibility_id=82ea2751  recommended_action_type=REPLY_TO_CUSTOMER
+inquiry_reply_draft       : v1  MODEL  GROUNDED  fp=5b8f503710e013c4caa7ec7ffaac8fed2e5d6d24c0824369e61a1a22a37d18c3
+inquiry_approval/execution/verification for 4c53cbee : 없음
+```
+
+**불변이어야 하는 것**: `57ee2220`(ACTION_PENDING 고아 — G1 회귀 증거) · `a492dba2`·`7eafaf5a`(과거 live
+WRITE 증명 행) · `knowledge_candidate` · `knowledge_embedding` · 리뷰 lane 전부 · 다른 org.
+
+### 4-8. 이 단계가 증명하는 것과 증명하지 않는 것
+
+**증명한다**: OperationsCase가 연 일 하나가 draft → 승인 → 실행 → 검증 → case 종결까지 **하나의 production
+경로**로 닫히는가. 지금까지 증명된 것은 **adapter**였다 — 08-25 Cafe24 WRITE는 case 행이 **아예 없었고**,
+08-26 NAVER WRITE의 case는 work item이 `COMPLETED`인데 `PREPARED`에 멈춘 채로 남아 있다.
+
+**증명하지 않는다**: 초안 **문장**의 결정론(고정된 것은 어떤 근거가 실렸는가이다) · 다른 채널의 전송 ·
+리뷰 답변 전송 · `MODEL` 초안을 그대로 보내는 것이 옳은 제품 결정인가(§4-1의 미결).
