@@ -802,3 +802,88 @@ ERROR **0** · WARN **1**(위 ①). 18080은 세 번 모두 종료했고 8080은
 
 **불변이어야 하는 것**: `57ee2220`(G1 회귀 증거) · `a492dba2` · `7eafaf5a` · `11b6a729`(삭제된 a3678) ·
 `knowledge_candidate` · `knowledge_embedding` · 리뷰 lane · 다른 org.
+
+### 6-5. 실행 결과 — `PASS (VERIFIED)` (2026-09-23 22:17~22:21 KST)
+
+승인 **`apr-c24-a3679-stage3-605841f3915e59b3`** 소진. **marketplace WRITE 정확히 1회 · 자동 재시도 0 ·
+rearm 0 · 모델 호출 0.**
+
+**SellerOps가 연 일 하나가 수집에서 고객에게 닿는 데까지 하나의 production 경로로 처음 끝까지 갔다.**
+2026-08-25의 Cafe24 답변 게시는 adapter를 증명했지만 그 work item에는 case 행이 **아예 없었고**,
+08-26의 NAVER 답변은 case가 `PREPARED`에 멈춘 채로 남았다(§4 감사). 이번에는 case가 같은 요청 안에서
+`ACTED`로 닫혔다.
+
+**보낸 문장은 `MODEL` 초안 원문이다.** v1 `MODEL` · `GROUNDED` · fp `16881518…868ea6`, 판매자 편집 0.
+지금까지의 두 live WRITE는 모두 판매자가 고쳐 쓴 v2 `SELLER`였으므로, **모델이 쓴 문장이 그대로 실제
+고객에게 등록된 것은 이 제품에서 처음이다**(§6-1의 product-owner 결정, 2026-09-23).
+
+**전송 직전 재확인**(22:18:00, 쓰기 arming과 같은 프로세스의 boot 단계):
+`article=3679 shop_no=1 board_no=6 parent=null reply_depth=0 reply_status=N` — 존재 · ROOT · 미답변.
+로컬 상태도 대조했다: `PROPOSED` · `MARKETPLACE` · `answerStateProven=true` · head fp 일치 ·
+capability `DIRECT_API` · adapter `[CAFE24, GMARKET]`.
+
+**실행 (실측 타임라인, 총 1.12초)**
+
+| 시각 | 사건 |
+|---|---|
+| 22:20:31.788 | `APPROVAL_GRANTED` — v1, fp `16881518…`, command `cafe24-a3679-live-1`, approver `SELLER:242829f0` |
+| 22:20:31.793 | `ACTION_INTENT_CREATED` → `ACTION_PENDING` |
+| 22:20:32.492 | `EXECUTION_RECORDED` → **`EXECUTED`** — POST **1회**, 자식 글 **3680** |
+| 22:20:32.862 | verification **`verified=true` · `observed_status=ANSWERED`** (`verify_attempts=1`) |
+| 22:20:32.867 | inquiry **`ANSWERED`**, `answered_at` 각인 |
+| 22:20:32.890 | `VERIFICATION_RECORDED` → **`COMPLETED`** |
+| 22:20:32.909 | case **`ACTED` / `SELLER_ACTED`**, `acted_at` · `reconciled_at` 각인 |
+
+**감사 추적은 여섯 줄이고 그 안에 `FAILED`도 `REARM`도 없다** — `OPEN → PROPOSED → APPROVED →
+ACTION_PENDING → EXECUTED → COMPLETED`. 08-25의 첫 Cafe24 게시는 `400 → rearm → 422 → rearm → 2xx`로
+POST 3회가 필요했고(§inquiry_answer_execution_v1), 이번은 **첫 시도에 통과**했다. 그때 확정한 봉투
+구조가 그대로 맞았다는 뜻이다.
+
+**판정은 2xx가 아니라 exact READ가 했다** — 자식 존재 · `parent_article_no==3679` · 답글 구조 ·
+**정규화 본문 해시 == 승인 초안** · 부모 `reply_status`. verification READ **1회**(몰이 자식 번호
+`3680`을 응답에 실어 주어 같은 날짜 fallback 조회가 필요 없었다), 상한 2.
+
+#### 6-5-1. G1~G4가 라이브에서 증명된 지점
+
+| gap | 이번 run에서 |
+|---|---|
+| **G1** 승인이 실어 나를 것 없이 소진되는 경로 | 무장 여섯 게이트가 전부 서 있어 fail-fast가 발동할 필요가 없었다. 고아 `57ee2220`은 **ACTION_PENDING 그대로** — 회귀 증거로 보존 |
+| **G1b** ACTION_PENDING만으로 case를 닫지 않기 | case는 `ACTION_PENDING` 구간(22:20:31.79~32.49)에 **닫히지 않았고**, execution이 실제로 움직인 뒤에야 `ACTED`가 됐다 |
+| **G3** 전송 결과가 새로고침을 넘는가 | 세션 기억 없는 새 읽기가 `delivery={"status":"COMPLETED","category":"COMPLETED","verified":true,"observedSignal":"ANSWERED"}`를 그대로 돌려줬다. 이 커밋 이전에는 그 칸이 없었다 |
+| **G4** 2시간을 기다리지 않는 수렴 | **responsibility scheduler는 꺼져 있었다.** run 0건. case는 검증 **41ms 뒤** 같은 요청 안에서 닫혔다 |
+| **G5** case는 「보냄」을 주장하지 않는다 | 이벤트가 인용한다: `{"observed":"WORK_ITEM_COMPLETED;delivery=COMPLETED;outcome=COMPLETED;verified=true;observed=ANSWERED"}` — `CaseResolution`에는 여전히 sent/verified 낱말이 없다 |
+
+#### 6-5-2. DB (§6-4 대비)
+
+approval 3 → **4** · action intent 3 → **4** · execution 3 → **4** · verification 2 → **3** ·
+work item `COMPLETED` 8 → **9** · `PROPOSED` 15 → **14** · case `PREPARED` 6 → **5** · `ACTED` 0 → **1** ·
+inquiries UNANSWERED REAL 3271 → **3270** · `agent_llm_usage` **2577 불변**(모델 0) ·
+대상 draft **1행 불변**(v1, append-only).
+
+**불변 확인**: `57ee2220` `ACTION_PENDING` · `a492dba2` `COMPLETED` · `7eafaf5a` `COMPLETED` ·
+`4c53cbee`/`a3678` `PROPOSED`·`UNANSWERED`(삭제된 대상의 로컬 행 보존) · `knowledge_candidate` ·
+`knowledge_embedding` · 리뷰 lane · 다른 org.
+
+#### 6-5-3. 예측이 틀린 곳 하나
+
+**`answer_memory`는 +1이 아니라 +2다.** §4-5와 §6-4는 「검증 성공 뒤 `EXECUTOR_SENT_VERIFIED` 1건」만
+적었는데, 실제로는 **바인딩 시점에 `USER_APPROVED`가 먼저 쓰인다**:
+
+```
+USER_APPROVED           approved:05fbc8cd…:1    22:20:31.818
+EXECUTOR_SENT_VERIFIED  verified:05fbc8cd…      22:20:32.885
+```
+
+`confirmAndPublish`가 바인딩 직후 `rememberApproved`를 부르고, `runVerify`가 검증 성공 뒤
+`rememberVerified`를 부른다 — 두 훅 모두 원래부터 그 자리에 있었고, manifest를 쓸 때 내가 하나만 세었다.
+동작은 옳고 **틀린 것은 예측이다**. 25 → **27**.
+
+ERROR **0** · WARN **0**. 18080 종료, 8080 무접촉.
+
+#### 6-5-4. 이 run이 증명하지 않는 것
+
+- 초안 **문장**은 결정론이 아니다. 고정된 것은 어떤 근거가 실렸는가와 **무엇이 승인·발송·검증됐는가**이지
+  모델이 고른 낱말이 아니다.
+- `MODEL` 원문을 보내는 것이 **옳은 제품 기본값인지**는 이 run이 답하지 않는다. 한 번 그렇게 했다는
+  사실만 남는다.
+- 다른 채널의 전송, 리뷰 답변 전송, 그리고 `3672`가 왜 빈손인지는 여전히 범위 밖이다.
