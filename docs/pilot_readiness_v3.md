@@ -4,18 +4,18 @@
 
 > **현재 상태: `code ready for provisioning; deployment prerequisites remain`.**
 >
-> **코드 blocker는 전부 `CLOSED`다**(B2 · B3 · S1 — `f85ac7f2`). 전체 판정이 여전히
-> `NOT_DEPLOYABLE`인 이유는 **남은 셋이 저장소 안에 없기** 때문이다:
+> **코드 blocker는 전부 `CLOSED`다**(B2 · B3 · S1 — `f85ac7f2`), 그리고 **B1도 `CLOSED`다**
+> (`release/pilot-cafe24-v1` — §9). 전체 판정이 여전히 `NOT_DEPLOYABLE`인 이유는 **남은 둘이
+> 저장소 안에 없기** 때문이다:
 >
 > | | 남은 blocker | 성격 |
 > |---|---|---|
-> | **B1** | 배포 가능한 remote canonical commit | 저장소 운영 — 병합/태그 결정 |
 > | **B4** | canonical public HTTPS host | product-owner 입력 + 호스트 프로비저닝 |
 > | **B5** | off-host backup | 운영 리소스 |
 >
-> 셋 중 어느 것도 코드 수정으로 닫히지 않는다. 이 문서의 §1-2 · §1-3 · §2-2 S1은 **결함이
-> 무엇이었는지의 기록으로 보존**하고, 각 항목 끝에 무엇으로 닫혔는지를 적는다 — 닫힌 결함의
-> 이유를 지우면 같은 모양이 다시 들어오는 것을 막을 근거가 사라진다.
+> 둘 다 코드 수정으로 닫히지 않는다. 이 문서의 §1-1 · §1-2 · §1-3 · §2-2 S1은 **결함이 무엇이었는지의
+> 기록으로 보존**하고, 각 항목 끝에 무엇으로 닫혔는지를 적는다 — 닫힌 결함의 이유를 지우면 같은
+> 모양이 다시 들어오는 것을 막을 근거가 사라진다.
 
 §0~§7은 **읽기 전용 감사**(`e1725c47`)다. **코드 변경 0 · 인프라 생성 0 · 마켓플레이스 호출 0 ·
 모델 호출 0 · DB 변경 0 · push 0.** §8이 그 감사가 낸 코드 blocker를 닫은 기록(`f85ac7f2`)이며,
@@ -48,7 +48,7 @@ topology는 `docs/pilot_host_provisioning_v1.md`와 `docs/pilot_runtime_foundati
 > 아래 넷은 **감사가 관측한 그대로** 보존한다. `1-2`와 `1-3`은 그 뒤 `f85ac7f2`로 닫혔고 제목에
 > 그렇게 적혀 있다 — 결함의 기록을 지우면 같은 모양이 다시 들어올 때 근거가 없다.
 
-### 1-1. 배포할 것이 remote에 없다 (blocker)
+### 1-1. 배포할 것이 remote에 없다 (blocker — **CLOSED** `release/pilot-cafe24-v1`, §9)
 
 `deploy/pilot/`은 **`main`에 존재하지 않는다.** compose overlay · Caddyfile · `deploy.sh` ·
 `backup.sh` · `restore.sh` · `smoke.sh` · `preflight.sh` · `pilot.env.example` 전부
@@ -139,13 +139,13 @@ TLS · CORS · Cafe24 redirect URI · 번들 CSP · 도우미 패키지 스탬�
 
 | # | 항목 | 상태 | 근거 |
 |---|---|---|---|
-| B1 | 배포 가능한 remote canonical commit 없음 | **OPEN** | §1-1 · §5 |
+| B1 | 배포 가능한 remote canonical commit 없음 | **CLOSED** `release/pilot-cafe24-v1` | §1-1 · §5 · §9 |
 | B2 | publish outcome vocabulary 불일치 — 실패 두 상태가 빈 상자 + 통제 없음 | **CLOSED** `f85ac7f2` | §1-2 · §8-1 |
 | B3 | self-pilot on + collect scheduler off ⇒ 수집이 영원히 일어나지 않음 | **CLOSED** `f85ac7f2` | §1-3 · §8-2 |
 | B4 | canonical public host 미정 | **OPEN** | §1-4 |
 | B5 | **off-host backup 부재** — product-owner가 첫 외부 판매자 전 필수로 결정 | **OPEN** | §2-2의 S4, §3 |
 
-**남은 셋은 코드가 아니다.** 코드 쪽은 provisioning을 받을 준비가 됐고, 배포 전제가 남아 있다.
+**남은 둘은 코드가 아니다.** 코드 쪽은 provisioning을 받을 준비가 됐고, 호스트와 백업이라는 배포 전제가 남아 있다.
 
 ### 2-2. Should-fix (첫 판매자 전에 닫는 것이 옳다)
 
@@ -306,7 +306,9 @@ A 레코드가 가리키는 안정적 HTTPS 이름.
 로컬 체크아웃을 손으로 옮겨 `deploy.sh --no-pull`로 도는 것은 **한 번은 되지만 절차가 아니다**:
 무엇이 배포됐는지 말해 줄 remote 기록이 없고, 다음 배포의 diff 기준이 사라진다.
 
-**오늘 상태**: 조건 1·2·3 전부 미충족(§1-1).
+**감사 시점 상태**: 조건 1·2·3 전부 미충족(§1-1).
+**현재 상태**: 조건 **1·2·3·4 전부 충족** — `release/pilot-cafe24-v1`이 origin에 있고, 그 tip이
+`pilot-cafe24-v1-rc1` 태그로 고정돼 있다(§9). **deploy candidate는 이 브랜치다.**
 
 ---
 
@@ -458,3 +460,45 @@ env가 그 기본값을 물려받아 아무에게도 수집하지 않는다.
 - `application.yml`의 어떤 기본값도 바꾸지 않았다.
 - **should-fix S2~S8은 그대로 열려 있다** — `/health` 리터럴 · 로그 로테이션 · 백업 cron ·
   스케줄러 pool=1 · raw `lastError` 노출 · `SyncScheduler` initialDelay 부재 · 부팅 write 러너 둘.
+
+---
+
+## 9. B1 종결 — `release/pilot-cafe24-v1` (2026-09-24)
+
+`deploy.sh`의 1단계가 `git pull --ff-only`인데 배포 키트 전체가 **origin에 없는 브랜치에만** 있었다
+(§1-1). 그것을 닫았다. **코드 변경 0 · 인프라 0 · 마켓플레이스 0 · 모델 0.**
+
+### 9-1. 무엇을 만들었나
+
+| | 값 |
+|---|---|
+| **remote branch** | **`release/pilot-cafe24-v1`** — 이것이 **deploy candidate**다 |
+| 분기 시점 커밋 | `04b4d5be` (당시 `feat/review-decision-workspace-v1` tip) |
+| **immutable RC tag** | **`pilot-cafe24-v1-rc1`** — annotated, 이 브랜치의 최종 커밋을 가리킨다 |
+| `main` 병합 | **하지 않았다.** `main`은 `2491f1ab` 그대로 |
+| force push · history rewrite | **없음.** 둘 다 새 ref이고 기존 ref는 하나도 움직이지 않았다 |
+
+**`main`에 merge하지 않은 것은 결정이다**(product-owner, 2026-09-24). 파일럿은 자기 브랜치에서
+출발하고, `main` 병합은 rehearsal과 첫 판매자 이후의 별도 질문으로 남는다. 그래서 호스트는
+`main`이 아니라 **이 브랜치**를 체크아웃한다.
+
+### 9-2. 절차와 그 안전성
+
+1. tracked 파일 수정 **0** 확인(untracked는 `node_modules` 둘뿐 — 커밋 트리에 들어가지 않는다).
+2. `git fetch origin --prune --tags`.
+3. **같은 이름의 remote branch·tag가 이미 있는지 먼저 확인** — 둘 다 없었다. 있었다면 덮어쓰지 않고
+   중단하는 것이 지시였고, 그것이 force push 금지의 실질적 의미다.
+4. `04b4d5be`에서 브랜치 생성 → origin push(새 ref, 460 커밋).
+5. 이 문서 갱신 → **문서 전용 커밋** → 같은 브랜치에 push.
+6. 그 최종 커밋에 annotated tag → tag push.
+7. origin의 branch와 tag가 **정확히 같은 커밋**을 가리키는지 확인.
+
+### 9-3. 아직 닫히지 않은 것
+
+B1이 닫혔다고 **배포 준비가 끝난 것이 아니다.** 남은 것은 **B4(canonical public HTTPS host)**와
+**B5(off-host backup)**이고 둘 다 저장소 밖이다. 그리고 **§6의 clean-org rehearsal은 아직 수행되지
+않았다** — RC1은 「배포할 수 있는 것이 이름을 갖게 됐다」는 뜻이지 「배포해서 동작하는 것을 봤다」는
+뜻이 아니다. R1~R15 중 어느 것도 실행되지 않았고, 그중 R7·R10·R11·R12는 이 저장소에서 **한 번도**
+실행된 적이 없다.
+
+**현재 상태: `code ready for provisioning; deployment prerequisites remain`.**
