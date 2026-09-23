@@ -667,3 +667,138 @@ approval **3** · action intent **3** · execution **3** · verification **2** �
 marketplace WRITE **0**. 승인 `apr-resp-e2e5-5a615e1f2167a6f5`는 **전송을 허가하지 않으며**, 전송 경로는
 설정으로 꺼진 것이 아니라 **bean이 없어 도달 불가**다. 초안은 `PROPOSED`에서 멈추고 승인·intent·execution은
 한 행도 쓰이지 않는다. 전송은 §6의 별도 WRITE manifest와 **별도 단일 사용 승인**으로만 시작한다.
+
+### 5-9. 실행 결과 — `PASS` (2026-09-23 21:49~21:53 KST)
+
+승인 **`apr-resp-e2e5-5a615e1f2167a6f5`** 소진. **marketplace WRITE 0.**
+
+**「정확히 1 run」은 예측대로 스케줄이 보증했다.** `responsibility: tick 생성=1 놓친창=7 실행=1` —
+06·08·10·12·14·16·18 창이 `MISSED`로 취소되고 열린 **20:00–22:00** 하나만 실행됐다(run `317fc467`,
+21:50:09–21:50:32). pause/resume 조작 0.
+
+**예측한 로그가 글자 그대로 나왔다**: `변화없음=3 새Case=1 갱신=0 조사=0 조사생략=1 초안=1 장애열림=0`.
+기존 넷은 모델을 한 번도 부르지 않았다 — §5-5가 적어 둔 이유 그대로다.
+
+| 단계 | 결과 |
+|---|---|
+| 수집 | CAFE24 문의 `COMPLETE` **관측 1 / 새 1**(수신 1 저장 1, 비밀글·창밖·스레드답글 제외 0, `reply_status[PENDING=1]`) · CAFE24 리뷰 `COMPLETE` 0 · NAVER 문의 `COMPLETE` 0 |
+| 새 문의 | **`dbc45c35`** · `cafe24:b6:a3679` · REAL · ROOT · UNANSWERED · 제목 「교환 가능 기간 문의」 · 수신 21:10:50 |
+| work item | **`05fbc8cd`** `PROPOSED` |
+| Case | **`c0d2fbd9`** `PREPARED` · `DRAFT_PREPARED` · **`REPLY_TO_CUSTOMER`** · 이벤트 3(OPENED · INVESTIGATION_SKIPPED · DRAFT_PREPARED) |
+| Goal | `INTERPRETED` · `customer-goal-interpreter/v3` · 3.38s |
+| Knowledge | **FOUND** — eligibility 2회 호출, 둘 다 `answered=true`, 거절 0 |
+| Draft | v1 **`MODEL`** · **`answer_basis=GROUNDED`** · 95자 |
+
+**vendor 7 / 상한 36**: goal 1 · knowledge embedding(QUESTION) **2** · intent 1 · eligibility 2 · draft 1.
+**PASSAGE embedding 0**(`knowledge_embedding` 157 → **157**, 캐시 적중 — 예측대로). 과금 **2 / 상한 3**
+(오늘 3 → **5**, 일일 상한 6). 켜지 않은 capability 호출 **0**.
+
+**DB 실측 (§5-7 대비)**: inquiries REAL 3345 → **3346** · wi `PROPOSED` 14 → **15** · case 5 → **6** ·
+case event 10 → **13** · goal interp 4 → **5** · proposal 21 → **22** · draft 18 → **19** ·
+draft evidence 138 → **139** · `agent_llm_usage` 2575 → **2577** · sync_jobs 2303 → **2307** ·
+`responsibility_run` 6 → **14**(MISSED 7 + 실행 1, 예측대로). **불변**: approval **3** · action intent **3** ·
+execution **3** · verification **2** · `knowledge_candidate` **3**(gap 적재 0 ⇒ GROUNDED와 일관) ·
+`knowledge_embedding` **157** · answer_memory **25** · `11b6a729`(삭제된 a3678) 로컬 행 **무변경**.
+
+#### 5-9-1. 3단계 — 새 `article_no` exact READ **성공**, 그리고 §4-9가 열어 둔 질문이 닫혔다
+
+쓰기 불가 프로세스(`execution-enabled=false`)에서 `Cafe24ShopScopeProbe` **1회**, 대상 **두 개**:
+새 `3679`와 operator가 삭제한 `3678`을 **같은 요청**에 넣었다 — 하나를 돌려주고 하나를 돌려주지 않는
+호출은 그 자체가 대조군이다.
+
+```
+[cafe24-shop-scope] 요청=1회 조회대상=2 응답=1
+[cafe24-shop-scope] article=3679 shop_no=1 board_no=6 parent=null reply_depth=0 reply_status=N
+```
+
+`3679`는 **존재하고 ROOT이며 미답변**이다(`reply_status=N`, 수집이 본 `PENDING=1`과 일치). `3678`은 없다.
+
+**그러므로 exact-id 경로는 멀쩡하다.** §4-9가 「목표의 성질인가 경로의 성질인가」로 남겨 둔 질문에 대해,
+경로는 **정상임이 증명됐다** — 있는 글은 돌려주고 지워진 글은 돌려주지 않는다. §4의 중단이 scope 결함도
+API 결함도 아니었다는 판정이 관측으로 한 번 더 확인됐다. `3672`가 왜 빈손인지는 여전히 진단하지 않으며
+(product-owner 지시), 이제 남은 후보는 「그 글도 없다」 하나뿐이다.
+
+#### 5-9-2. 정직하게 적는 편차 둘
+
+1. **run status는 `SUCCESS`가 아니라 `PARTIAL`이다.** COUPANG 문의가
+   `completeness=NONE · failure_reason=CONFIGURATION_REQUIRED`로 거절됐다 —
+   「Collection refused for lack of a live/read approval」. **이 arming이 Coupang의 라이브 읽기 승인 게이트를
+   채우지 않았기 때문이고**(§1-0은 그것을 명시적으로 넣었다), 게이트는 설계대로 fail-closed로 동작해
+   마켓플레이스를 부르지 않았다. 이 lane의 결과에는 영향이 없고 **`장애열림=0`이라 GAP case도 열리지
+   않았다**. 다음 run에서 Coupang까지 정상으로 만들려면 그 승인 id를 함께 무장해야 한다.
+2. **draft evidence가 1건이다** — `ORG_POLICY 교환·반품 기준` 하나. §3-3은 **2건**이었다
+   (교환·반품 기준 + 배송교환정책). eligibility는 두 lane에서 각각 `passages=1`로 호출됐다. 질문 문장이
+   다르므로(「교환 가능 기간 문의」) 같은 수를 기대할 근거는 없지만, **§3-3과 같다고 말할 수도 없다.**
+   초안은 GROUNDED이고 인용된 문서는 판매자 자신의 정책이다.
+
+ERROR **0** · WARN **1**(위 ①). 18080은 세 번 모두 종료했고 8080은 건드리지 않았다.
+
+## 6. Stage 3 — `cafe24:b6:a3679`에 답변 등록 · **WRITE manifest (미실행)**
+
+§4를 이 대상으로 다시 쓴 것이다. 절차와 실패 분기는 §4-3~§4-6과 **동일하며**, 아래는 달라진 값과
+이번에 이미 확인된 사실만 적는다.
+
+### 6-0. 승인과 기준
+
+- 승인 **`apr-c24-a3679-stage3-605841f3915e59b3`** · mode **WRITE** · max WRITE **1** · 자동 재시도 **0** ·
+  단일 사용 · **미소진**. 기준 커밋 **`aa31b5a8`**(제품 코드는 `cbab8347`과 동일).
+- 은퇴한 `apr-c24-a3678-stage3-01c3d8b4bf78ab87`은 **무장하지 않는다**.
+
+### 6-1. 대상
+
+| 항목 | 값 |
+|---|---|
+| inquiry | `dbc45c35-5890-4d3b-95e8-ad9d84573b13` · `cafe24:b6:a3679` · REAL · ROOT · UNANSWERED |
+| work item | `05fbc8cd-4285-45d1-a64b-1bf3754a5b93` · **`PROPOSED`** |
+| case | `c0d2fbd9-e79f-46d2-9f28-5db59eadce58` · `PREPARED` |
+| account / board / shop | `78da0eb3` / board **6** / **shop_no 1** (§5-9-1에서 관측) |
+| source subtype | **NULL** ⇒ `CAFE24`/null → `DIRECT_API`, adapter가 null subtype을 섬긴다 |
+| **채널 상태 (관측됨)** | **존재 · ROOT(`parent=null`) · 미답변(`reply_status=N`)** — §5-9-1, 2026-09-23 21:52 |
+
+**전송될 draft v1의 정확한 전문.** 한 글자라도 다르면 지문이 달라지고 confirm이 409로 거절한다.
+
+- 제목: `교환 가능 기간 안내`
+- 본문(95자):
+
+```
+문의 감사합니다. 교환·반품은 상품 수령 후 7일 이내, 포장을 개봉하지 않은 미개봉 상태인 경우에만 가능합니다. 안내드린 기준 확인 부탁드리며, 도움이 되셨길 바랍니다.
+```
+
+- **full fingerprint** (`esm-answer-v1`):
+  `16881518d8954eab4bc2cbe10db558a8a8d9c8aa7e9937dfbe94eda85e868ea6`
+- provenance: `author_kind=MODEL` · `answer_basis=GROUNDED` · `created_by=SYSTEM:RESPONSIBILITY` ·
+  `agent-draft/v1+openai:gpt-5-2025-08-07+agent-draft-prompt/v12+schema/v1+out4000+effort:low+style/default`
+- 근거 **1건**: `ORG_POLICY 교환·반품 기준`
+
+**이것은 `MODEL` 초안이다.** §4-1의 미결이 그대로 남아 있다 — 지금까지의 두 live WRITE는 모두 판매자가
+고쳐 쓴 v2 `SELLER`였고, `MODEL` 원문이 고객에게 그대로 나가는 것은 이 제품에서 **처음**이다. v2를 쓰기로
+하면 지문이 바뀌므로 위 값과 §6-2의 2단계를 그 값으로 갱신해야 한다. **product-owner 결정.**
+
+### 6-2. arming과 절차 — §4-2 / §4-4와 같고, 두 가지가 다르다
+
+여섯 게이트는 §4-2 그대로이되 **live approval gate는
+`SELLEROPS_INQUIRY_PUBLISH_CAFE24_LIVE_APPROVAL_ID=apr-c24-a3679-stage3-605841f3915e59b3`**,
+`CLIENT_IP`는 이 프로세스의 실제 egress(직전 측정 `211.222.138.6` — 재측정한다), `SHOP_NO=1`.
+
+절차도 §4-4와 같되 **1단계가 이미 통과했다**(§5-9-1, 22분 전 관측). 재실행 시각이 그로부터 멀어지면
+같은 bounded READ를 한 번 더 하고 들어간다 — 그 사이 판매자가 관리자에서 답변했을 수 있고, 로컬
+`ALREADY_ANSWERED` 검사는 그것을 알지 못한다.
+
+### 6-3. 예산 · 성공/실패 시 상태
+
+§4-3 · §4-5 · §4-6을 그대로 따른다(WRITE 정확히 1 · 자동 재시도 0 · verification READ ≤2 · 모델 0 ·
+다섯 실패 분기의 착지점 동일).
+
+### 6-4. 실행 전 DB 스냅샷 (실측, 2026-09-23 21:53 KST, org `7146c50f`)
+
+| 카운터 | 전 | 성공 시 | | 카운터 | 전 | 성공 시 |
+|---|---|---|---|---|---|---|
+| `inquiry_approval` | **3** | 4 | | work item `COMPLETED` | **8** | 9 |
+| `inquiry_action_intent` | **3** | 4 | | work item `PROPOSED` | **15** | 14 |
+| `inquiry_execution` | **3** | 4 | | case `PREPARED` | **6** | 5 |
+| `inquiry_verification` | **2** | 3 | | case `ACTED` | **0** | 1 |
+| `answer_memory` | **25** | 26 | | inquiries UNANSWERED REAL | **3271** | 3270 |
+| `agent_llm_usage` | **2577** | 2577 (불변) | | 대상 draft 행 | **1**(v1) | 1 (불변) |
+
+**불변이어야 하는 것**: `57ee2220`(G1 회귀 증거) · `a492dba2` · `7eafaf5a` · `11b6a729`(삭제된 a3678) ·
+`knowledge_candidate` · `knowledge_embedding` · 리뷰 lane · 다른 org.
