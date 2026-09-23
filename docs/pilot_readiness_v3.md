@@ -1,8 +1,25 @@
 # Pilot Readiness v3 — Cafe24 Inquiry 파일럿
 
-**2026-09-23 · 판정 `NOT_DEPLOYABLE` · 감사 기준 커밋 `e1725c47`**
+**2026-09-23 · 판정 `NOT_DEPLOYABLE` · 감사 기준 커밋 `e1725c47` · 수정 반영 `f85ac7f2`**
 
-읽기 전용 감사다. **코드 변경 0 · 인프라 생성 0 · 마켓플레이스 호출 0 · 모델 호출 0 · DB 변경 0 · push 0.**
+> **현재 상태: `code ready for provisioning; deployment prerequisites remain`.**
+>
+> **코드 blocker는 전부 `CLOSED`다**(B2 · B3 · S1 — `f85ac7f2`). 전체 판정이 여전히
+> `NOT_DEPLOYABLE`인 이유는 **남은 셋이 저장소 안에 없기** 때문이다:
+>
+> | | 남은 blocker | 성격 |
+> |---|---|---|
+> | **B1** | 배포 가능한 remote canonical commit | 저장소 운영 — 병합/태그 결정 |
+> | **B4** | canonical public HTTPS host | product-owner 입력 + 호스트 프로비저닝 |
+> | **B5** | off-host backup | 운영 리소스 |
+>
+> 셋 중 어느 것도 코드 수정으로 닫히지 않는다. 이 문서의 §1-2 · §1-3 · §2-2 S1은 **결함이
+> 무엇이었는지의 기록으로 보존**하고, 각 항목 끝에 무엇으로 닫혔는지를 적는다 — 닫힌 결함의
+> 이유를 지우면 같은 모양이 다시 들어오는 것을 막을 근거가 사라진다.
+
+§0~§7은 **읽기 전용 감사**(`e1725c47`)다. **코드 변경 0 · 인프라 생성 0 · 마켓플레이스 호출 0 ·
+모델 호출 0 · DB 변경 0 · push 0.** §8이 그 감사가 낸 코드 blocker를 닫은 기록(`f85ac7f2`)이며,
+그 작업도 **인프라 0 · 마켓플레이스 0 · 모델 0 · 마이그레이션 0 · push 0**이다.
 
 이 문서는 `docs/pilot_readiness_v2.md`(2026-09-13, `READY_PENDING_HOST`)를 **대체한다**. 그 판정은
 「코드 쪽에 남은 파일럿 blocker는 없다」였고, 그 뒤 **149 커밋**이 착지했다(Full MVP Stage 1~3,
@@ -26,7 +43,10 @@ topology는 `docs/pilot_host_provisioning_v1.md`와 `docs/pilot_runtime_foundati
 
 ---
 
-## 1. 판정 `NOT_DEPLOYABLE` — 근거 넷
+## 1. 판정 `NOT_DEPLOYABLE` — 근거 넷 (감사 시점 `e1725c47`)
+
+> 아래 넷은 **감사가 관측한 그대로** 보존한다. `1-2`와 `1-3`은 그 뒤 `f85ac7f2`로 닫혔고 제목에
+> 그렇게 적혀 있다 — 결함의 기록을 지우면 같은 모양이 다시 들어올 때 근거가 없다.
 
 ### 1-1. 배포할 것이 remote에 없다 (blocker)
 
@@ -49,7 +69,7 @@ topology는 `docs/pilot_host_provisioning_v1.md`와 `docs/pilot_runtime_foundati
 `feat/proactive-operations-agent-v1`(`de1838f6`)은 `feat/review-decision-workspace-v1`의 **조상**이므로
 (검증: `git merge-base --is-ancestor` YES) 후보 커밋은 **하나**로 좁혀진다. 갈라진 두 줄기가 아니다.
 
-### 1-2. Stage 3가 증명한 lane의 실패 상태가 화면에서 사라진다 (blocker)
+### 1-2. Stage 3가 증명한 lane의 실패 상태가 화면에서 사라진다 (blocker — **CLOSED** `f85ac7f2`, §8-1)
 
 백엔드 `PublishOutcomeCategory`(`backend/src/main/java/com/sellerops/inquiry/publish/PublishOutcomeCategory.java:8-20`)는
 `PENDING · PUBLISHING · COMPLETED · CHECKING_REQUIRED · RETRYABLE_FAILURE · PERMANENT_FAILURE`를
@@ -84,7 +104,7 @@ TypeScript는 이것을 잡을 수 없다. union이 손으로 쓰였고, `publis
 두 vocabulary를 묶는 테스트가 저장소에 없다. 유일한 FE delivery fixture
 (`InquiryResponsePanel.publish.test.tsx:88`)도 `category: "COMPLETED"`를 쓴다.
 
-### 1-3. 배포용 pilot env가 수집 스케줄을 만들고 실행하지 않는다 (blocker)
+### 1-3. 배포용 pilot env가 수집 스케줄을 만들고 실행하지 않는다 (blocker — **CLOSED** `f85ac7f2`, §8-2)
 
 `deploy/pilot/pilot.env.example:128-133`이 그 함정을 **스스로 적어 두고 그대로 출고한다**:
 
@@ -117,19 +137,21 @@ TLS · CORS · Cafe24 redirect URI · 번들 CSP · 도우미 패키지 스탬�
 
 ### 2-1. Pilot blocker (닫히기 전에는 배포하지 않는다)
 
-| # | 항목 | 근거 |
-|---|---|---|
-| B1 | 배포 가능한 remote canonical commit 없음 | §1-1 · §5 |
-| B2 | publish outcome vocabulary 불일치 — 실패 두 상태가 빈 상자 + 통제 없음 | §1-2 |
-| B3 | self-pilot on + collect scheduler off ⇒ 수집이 영원히 일어나지 않음 | §1-3 |
-| B4 | canonical public host 미정 | §1-4 |
-| B5 | **off-host backup 부재** — product-owner가 첫 외부 판매자 전 필수로 결정 | §2-2의 S4, §3 |
+| # | 항목 | 상태 | 근거 |
+|---|---|---|---|
+| B1 | 배포 가능한 remote canonical commit 없음 | **OPEN** | §1-1 · §5 |
+| B2 | publish outcome vocabulary 불일치 — 실패 두 상태가 빈 상자 + 통제 없음 | **CLOSED** `f85ac7f2` | §1-2 · §8-1 |
+| B3 | self-pilot on + collect scheduler off ⇒ 수집이 영원히 일어나지 않음 | **CLOSED** `f85ac7f2` | §1-3 · §8-2 |
+| B4 | canonical public host 미정 | **OPEN** | §1-4 |
+| B5 | **off-host backup 부재** — product-owner가 첫 외부 판매자 전 필수로 결정 | **OPEN** | §2-2의 S4, §3 |
+
+**남은 셋은 코드가 아니다.** 코드 쪽은 provisioning을 받을 준비가 됐고, 배포 전제가 남아 있다.
 
 ### 2-2. Should-fix (첫 판매자 전에 닫는 것이 옳다)
 
 | # | 항목과 근거 |
 |---|---|
-| S1 | **WRITE arming을 boot에서 검증하지 않음** — `PilotConfigValidator`에 publish · client-ip · shop-no 검사가 **0**. `execution-enabled=true`면 adapter bean이 **존재**하므로 G1 fail-fast를 통과하고, 승인이 바인딩된 뒤 `Cafe24ChannelReplyAdapter.java:110`(`clientIp.isEmpty() \|\| shopNo <= 0`)에서 거절 → `RETRYABLE_FAILURE`. **B2와 합쳐지면 빈 상자.** validator의 docblock(`:19-22`)이 막겠다고 적은 실패 유형 그 자체 |
+| S1 | **WRITE arming을 boot에서 검증하지 않음** — `PilotConfigValidator`에 publish · client-ip · shop-no 검사가 **0**. `execution-enabled=true`면 adapter bean이 **존재**하므로 G1 fail-fast를 통과하고, 승인이 바인딩된 뒤 `Cafe24ChannelReplyAdapter.java:110`(`clientIp.isEmpty() \|\| shopNo <= 0`)에서 거절 → `RETRYABLE_FAILURE`. **B2와 합쳐지면 빈 상자.** validator의 docblock(`:19-22`)이 막겠다고 적은 실패 유형 그 자체. **CLOSED** `f85ac7f2` — §8-3 |
 | S2 | `/health`가 리터럴 — `common/HealthController.java:11`이 `{"status":"UP"}` 고정. DB를 보지 않으므로 Postgres를 잃은 backend도 healthy이고 `restart: unless-stopped`가 발동하지 않는다. (기동 시점 추론은 유효하다: validator가 거부하면 컨텍스트가 뜨지 않아 health에 도달하지 못한다. 없는 것은 **지속적 readiness**다) |
 | S3 | 로그 로테이션 없음 — `deploy/`·compose 전체에 `max-size`/`log-opts` **0**, `host-bootstrap.sh`가 `daemon.json`도 쓰지 않음. 기본 `json-file` 무제한 |
 | S4 | 백업이 설치되지 않음 — cron 줄은 `backup.sh` 헤더 주석에만 있고 `host-bootstrap.sh`는 디렉터리만 만든다. 실제로 도는 유일한 백업은 `deploy.sh` 3단계의 pre-migration 덤프. 덤프는 **같은 호스트 디스크**이고, vault 마스터 키는 덤프에 없고 `/etc/sellerops/pilot.env`에만 있다(키를 잃으면 덤프의 봉인 자격은 복구 불가) |
@@ -150,6 +172,19 @@ TLS · CORS · Cafe24 redirect URI · 번들 CSP · 도우미 패키지 스탬�
 - 공개 호스트에서 signup 무제한(`SecurityConfig.java:79` `permitAll`, 플래그 없음). 하류는 안전하다 —
   연결이 없는 org는 `CONNECTED_SELLERS` scope가 집지 않는다.
 - `deploy.sh` 주석의 "97 migrations"는 stale — 실제 113 파일 / 최신 `V99`.
+- **Review publish lane은 같은 S1 형상을 그대로 갖고 있다 — 고치지 않았다.**
+  `sellerops.review.publish.*`는 자기 flag · 자기 live-approval-id를 가진 **별도 실행 lane**이고,
+  `Cafe24ReviewCommentAdapter.java:80`이 `shopNo <= 0`에서 거절하는 모양도 inquiry lane과 같다. 켜면
+  같은 「승인 소진 + 전송 0」이 가능하다. **닫지 않은 이유**: product-owner 결정으로 이 lane은 꺼져
+  있고(§3-3), capability가 `IMPLEMENTED — 어떤 몰에도 게시된 적 없음`이라 첫 라이브 증명 자체가 아직
+  없다. 그 증명을 준비하는 패키지가 이 검사를 **함께** 가져가는 것이 맞고, 지금 넣으면 아무도 켜지
+  않을 lane에 대한 추측이 된다. **이 lane을 켜기로 결정하는 순간 S1과 같은 boot 검증이 전제다.**
+- **`PilotConfigValidator` 생성자가 11 → 16 인자가 됐다(§8-3).** 지금은 허용한다 — 인자들은 커넥터
+  스위치와 같은 모양의 배포 사실이고, 테스트는 헬퍼로 호출을 모으고 있다. **다음에 config를 하나라도
+  더 추가하면 그때가 refactor trigger다**: 채널별 config 객체(예: `Cafe24DeploymentConfig`,
+  `NaverDeploymentConfig`)로 묶어 넘기고 validator는 그 객체에 묻는다. 지금 묶지 않는 이유는 이
+  클래스가 스스로 「not a configuration framework」라고 적어 두었기 때문이고, 그 선을 넘는 것은
+  인자 하나가 아니라 **다음 하나**여야 한다.
 
 ### 2-4. 재확인한 것 (다시 감사하지 않는다)
 
@@ -319,7 +354,107 @@ A 레코드가 가리키는 안정적 HTTPS 이름.
 ## 7. 이 감사가 하지 않은 것
 
 - 코드를 고치지 않았다. 위 blocker·should-fix는 **제안**이고 착수는 별도 결정이다.
+  (§8이 그중 셋을 실제로 닫은 별도 작업의 기록이다.)
 - 인프라를 만들지 않았다. AWS 리소스 생성 **0**.
 - 마켓플레이스와 모델을 부르지 않았다. **호출 0 · WRITE 0 · DB 변경 0.**
 - push하지 않았다.
 - `main` 병합 전략을 정하지 않았다 — §5는 조건을 적고 방법(merge / release tag)은 열어 둔다.
+
+---
+
+## 8. 코드 blocker 종결 — `f85ac7f2` (2026-09-23)
+
+§1~§2가 낸 것 중 **코드로 닫을 수 있는 셋만** 닫았다. Stage 3 lifecycle · workflow · state 의미 ·
+고아 `57ee2220` · legacy lane **무변경**. 파일 10개, **인프라 0 · 마켓플레이스 0 · 모델 0 ·
+마이그레이션 0 · DB 변경 0 · push 0.**
+
+검증: **backend 4,811 tests · frontend 3,109 tests · 실패 0** (전체 스위트, 이 커밋 기준).
+
+### 8-1. B2 — publish outcome vocabulary `CLOSED`
+
+**backend enum이 canonical이다.** `PublishOutcomeCategory`의 constant 이름이 wire 위의 토큰이므로
+(직렬화는 `name()`, `@JsonValue` 없음, naming strategy 없음) frontend union·label·gate·tag를 전부
+그 이름으로 맞췄다 — `PENDING` · `PUBLISHING` · `COMPLETED` · `CHECKING_REQUIRED` ·
+`RETRYABLE_FAILURE` · `PERMANENT_FAILURE`.
+
+**unknown token은 truthful fallback을 받는다.** `default` 절의 **부재**가 이 결함을 보이지 않게 만든
+원인이었으므로(§1-2), 이제 모르는 토큰도 문장을 받는다. 그 문장은 확실히 참인 것 하나만 말하고
+— 이 화면이 상태를 읽지 못했다 — **성공도 실패도 주장하지 않으며 토큰을 인쇄하지 않는다.**
+
+**복구 경로는 비대칭으로 열었다.** 읽기 전용인 「상태 다시 확인」은 모르는 상태에서도 제공한다
+(재조회는 고객 앞에 아무것도 놓지 않는다). **두 번째 customer write가 될 수 있는 「이어서 등록」은
+fail-closed** — 이 빌드가 이미 메시지가 나갔는지 알 수 없기 때문이다.
+
+「미발송」은 **delivery 행이 아예 없을 때만** 쓴다. 없는 것과 읽지 못한 것은 다른 사실이고, 그 둘을
+합쳤기 때문에 거절당한 답변이 「미발송」으로 불렸다.
+
+`ExecutionResultArtifact`가 들고 있던 **같은 철자의 두 번째 allow-list는 삭제**했다 — 한 번의 어긋남이
+두 화면의 침묵이 된 경로다. vocabulary의 소유자는 `publishCategoryLabel` 하나다.
+
+**cross-language contract test**: `frontend/src/lib/publishOutcomeCategoryContract.test.ts`가 **Java
+소스를 읽어** 두 vocabulary를 대조한다(손으로 적은 세 번째 목록이 아니다 — 이미 두 번 어긋난 것을
+또 베끼는 일이다). 더해서 모든 backend constant가 문장과 태그를 받는지, unknown이 빈 화면·거짓
+주장·raw 토큰을 만들지 않는지, 그리고 §1-2 표의 각 행이 이제 무엇을 렌더하는지를 단언한다.
+**옛 union에서 red 1건, 옛 gate/label에서 red 3건**을 확인한 뒤 남겼다.
+
+### 8-2. B3 — self-pilot / collect scheduler `CLOSED`
+
+`deploy/pilot/pilot.env.example`의 `SELLEROPS_COLLECT_SCHEDULER_ENABLED`를 **`true`**로 바꾸고,
+`deploy.sh`와 `preflight.sh`가 반쪽 조합을 **hard fail**한다. `application.yml`의 fail-closed
+기본값 둘(`self-pilot.enabled` · `collect.scheduler-enabled` 모두 `false`)은 **건드리지 않았다** —
+일반 개발 부팅은 바이트 동일하다. 이것은 배포 형상의 실수이지 코드의 실수가 아니다.
+
+**실측 matrix**(실제 스크립트 실행, docker·네트워크 stub, 인프라 0):
+
+| 설정 | `deploy.sh` |
+|---|---|
+| Cafe24 파일럿 baseline | **통과** |
+| self-pilot on + collect **off** | **거절** — 「schedules appear and nothing is ever collected」 |
+| self-pilot on + collect **미설정** | **거절** (같은 메시지) |
+| scope `ALLOW_LIST` + org ids **공백** | **거절** — 「collects for nobody」 |
+| scope `ALLOW_LIST` + org ids 명시 | 통과 |
+| scope `LOCAL_SINGLE_USER` | **거절** — loopback 전용 자세 |
+| scope 오타 | **거절** |
+| self-pilot **off** + collect off | 통과 — 수집하지 않는 배포는 정상 |
+
+`preflight.sh` §5-A가 **이미지 빌드 전에** 같은 조합을 잡는다(실측 확인). scope가 `ALLOW_LIST`인데
+org 목록이 빈 경우를 함께 거절하는 이유는 **그것이 shipped 기본값**이기 때문이다 — self-pilot만 켠
+env가 그 기본값을 물려받아 아무에게도 수집하지 않는다.
+
+기존 거절 7종(seed · mock · `ALL_ORGS` · dev-outbox · flyway baseline · vault · localhost)은
+**회귀 없이 유지**됨을 같은 harness로 확인했다.
+
+### 8-3. S1 — WRITE arming boot validation `CLOSED`
+
+`PilotConfigValidator.inquiryWriteProblems()`가 **전송이 켜졌을 때만, 채널별로** 검사한다.
+
+**invariant는 Cafe24와 NAVER가 같다** — 두 adapter 모두 `PublishExecutionWiring`에서
+`execution-enabled` + 자기 커넥터 플래그로 등록되고 **arming 값은 그 조건에 없다**. 그래서 반쯤
+무장된 배포에는 진짜 adapter bean이 있고, publish core의 fail-fast가 그것을 찾아 confirm을
+통과시키며, 단일 사용 승인이 바인딩되고 work item이 `ACTION_PENDING`까지 간 다음에야 adapter가
+자기 빈 `client_ip`나 `shop_no = 0`에서 거절한다. 브리프는 Cafe24였으나 NAVER를 빼면 **같은 형상에
+대한 문서화된 구멍**이 남으므로 함께 닫았다.
+
+| 전송 | 채널 설정 | 결과 |
+|---|---|---|
+| **off** | 전 값 공백 | **정상 부팅** — 출고 자세이며 adapter bean 자체가 없다 |
+| on | Cafe24 `client_ip` 공백 | **boot 거절** |
+| on | Cafe24 `shop_no = 0` | **boot 거절** (관측된 값이어야 하며 기본값 1을 가정하지 않는다) |
+| on | Cafe24 `live-approval-id` 공백 | **boot 거절** |
+| on | Cafe24 셋 다 공백 | **한 번에 3건 모두 지목** — 재시작마다 하나씩 발견하게 두지 않는다 |
+| on | NAVER `live-approval-id` 공백 | **boot 거절** |
+| on | 커넥터가 **꺼진** 채널의 값 | **묻지 않는다** — Coupang 없는 호스트가 Coupang 비밀 없이 뜨는 것과 같은 규칙 |
+
+회귀 테스트는 `PilotConfigValidatorTest`에 6건(위 표의 각 행 + 「반쯤 무장된 호스트는 **뜨지
+않는다**」 — 로그 경고가 아니라 throw임을 단언). 클래스 전체 **25 tests · 실패 0**.
+
+### 8-4. 이 작업이 하지 않은 것
+
+- 인프라를 만들지 않았고, 마켓플레이스·모델을 부르지 않았고, 마이그레이션을 추가하지 않았고,
+  push하지 않았다.
+- **Stage 3 lifecycle · 승인 경계 · workflow · state 의미를 바꾸지 않았다.** 바뀐 것은 이미 흐르던
+  사실을 화면이 **어떤 이름으로 읽는가**, 그리고 배포가 **무엇을 거절하는가**다.
+- 고아 `57ee2220`과 legacy lane을 건드리지 않았다.
+- `application.yml`의 어떤 기본값도 바꾸지 않았다.
+- **should-fix S2~S8은 그대로 열려 있다** — `/health` 리터럴 · 로그 로테이션 · 백업 cron ·
+  스케줄러 pool=1 · raw `lastError` 노출 · `SyncScheduler` initialDelay 부재 · 부팅 write 러너 둘.
