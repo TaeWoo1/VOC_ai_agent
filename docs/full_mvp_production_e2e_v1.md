@@ -304,6 +304,11 @@ approval/execution/marketplace WRITE 0. 중단 조건 발동 0. 신규 문의 1 
 Draft → 승인 → 실행 → 완료 lifecycle을 **실제 marketplace WRITE 1회**로 닫는 단계. 이 절은 **계획이고 실행
 기록이 아니다** — 작성 시점까지 marketplace WRITE **0**, 승인 소진 **0**, DB 행 변경 **0**.
 
+> **이 manifest는 은퇴했다 (2026-09-23).** 대상 `cafe24:b6:a3678`은 operator가 마켓플레이스에서 직접
+> 삭제했고(§4-9), 승인 `apr-c24-a3678-stage3-01c3d8b4bf78ab87`은 **소진되지 않은 채 이 대상에 대해
+> 재사용하지 않는다**. 아래 §4-0~§4-8은 **그 대상에 대한 기록으로 보존**하며 실행 지시로 읽지 않는다 —
+> 특히 §4-2의 live approval gate 값은 더 이상 무장해서는 안 되는 값이다. 다음 대상의 manifest는 §5가 된다.
+
 ### 4-0. 기준 코드와 선행 조건
 
 - 기준 커밋 **`cbab8347`**(「승인은 소진됐는데 아무것도 실어 나르지 않는 경로가 열려 있었다」 — Stage 3
@@ -480,6 +485,11 @@ WRITE 증명 행) · `knowledge_candidate` · `knowledge_embedding` · 리뷰 la
 승인 **`apr-c24-a3678-stage3-01c3d8b4bf78ab87`**(mode WRITE, max 1) 아래에서 §4-4를 시작했고 **1단계에서
 멈췄다**. **marketplace WRITE 0 · POST 0 · 승인 미소진.**
 
+**결론(operator 확인으로 확정, 2026-09-23): 대상은 operator가 Cafe24 관리자에서 직접 삭제했다.** 즉 이 중단은
+scope 결함도 API 결함도 아니고, **전송 전 조건 가드가 제 일을 한 사건**이다 — 존재하지 않는 고객 문의에 답변을
+게시하려던 단일 사용 WRITE가 그 앞에서 멈췄다. 아래의 관측 기록은 판정이 무엇에서 나왔는지 남기기 위한
+것이고, 판정 자체는 이 문단이다.
+
 **자세.** 1단계는 `inquiry.publish.execution-enabled=**false**`인 프로세스에서 했다 — 그 설정에서는
 `PublishExecutionWiring`이 조건을 만족하지 못해 **어떤 ChannelReplyAdapter bean도 존재하지 않으므로**, 실수로도
 POST에 도달할 수 없다. 「읽기만 하겠다」가 의도가 아니라 **구조**인 상태에서 읽었다. 커넥터는 CAFE24만 ON,
@@ -495,25 +505,23 @@ article 번호만, 쓰기 없음).
 | ② | 1회 | `3672, 3673, 3676, 3678` | `OK` · 조회대상 4 · **응답 0** |
 | ③ | 1회 | `3672` | `OK` · 조회대상 1 · **응답 0** |
 
-**③이 판정의 근거다.** `article_no=3672` 단건 필터는 2026-08-25에 이 계측기가 `shop_no=1 · board_no=6`을
-확정하며 **행을 돌려준 바로 그 호출**이다(§inquiry_answer_execution_v1 Part D). 지금은 HTTP 200에 `articles`
-배열이 비어서 온다. **필터가 무시된 것이 아니다** — 무시됐다면 무관한 행이라도 돌아왔을 것이고, 0이 온다는
-것은 몰이 이 스코프에 그런 글이 없다고 답한 것이다. 따라서 부재는 목표 하나의 성질이 아니라 **exact-id 경로
-전체**의 성질이다.
+**목표 `3678`의 부재는 설명된다.** 같은 날 04:00 수집은 이 글을 실제로 관측했고(§3-3, CAFE24 문의
+`COMPLETE` **관측 1 / 새 1**, 같은 자격·같은 board 6), 그 사이에 operator가 마켓플레이스에서 지웠다. 로컬 행은
+계약대로 보존돼 있다 — 「absence는 삭제로 자동 판정되지 않는다」(`docs/inquiry_operational_truth_v1.md`)는
+여전히 지켜졌고, 여기서 삭제는 **추론이 아니라 operator의 진술**로 확정됐다. §1-7의 `a3676`과 같은 종류의
+사건이며, 테스트 문의를 쓰는 stage에서는 이것이 반복되는 조건임을 기록해 둔다.
 
-**「삭제」로 판정하지 않는다.** 관측된 것은 부재뿐이고, 「absence는 삭제로 자동 판정되지 않는다」
-(`docs/inquiry_operational_truth_v1.md`)가 그것을 금지한다. 다만 §1-7에 operator가 `a3676`을 마켓플레이스에서
-직접 삭제한 전례가 있고, 부재한 넷 중 하나가 바로 그 `3676`이다.
+**`3672`가 빈손인 것은 원인 미확정 관측으로만 남긴다.** 그 호출은 2026-08-25에 이 계측기가
+`shop_no=1 · board_no=6`을 확정하며 행을 돌려준 모양과 같고(§inquiry_answer_execution_v1 Part D), 지금은
+HTTP 200에 빈 배열이 온다. 그 글도 이미 지워졌을 수 있고, exact-id 필터의 의미가 바뀌었을 수도 있다.
+**어느 쪽인지 이 기록은 주장하지 않으며, product-owner 지시에 따라 추가 진단도 하지 않는다**(2026-09-23).
+그것을 가르는 일은 다음 Stage 3의 3단계 — 새 `article_no`의 exact READ가 성공하는지 — 가 대신 답한다.
 
-**같은 날 04:00 수집은 `a3678`을 실제로 관측했다** — §3-3의 CAFE24 문의 `COMPLETE` **관측 1 / 새 1**이 그것이고,
-같은 자격·같은 board 6이다. 그 경로는 **날짜창 목록**이고 이번에 빈손인 것은 **article_no 지정 조회**다. 두
-경로의 관측이 갈린다는 것이 이 기록의 핵심 관측이며, 원인은 미확정이다.
-
-**진행하지 않은 두 번째 이유 — 검증이 같은 읽기 위에 서 있다.** `Cafe24ChannelReplyAdapter.verifyCreated`는
-`fetchByArticleNumbers`로 자식 글을 찾는다. exact-id 경로가 빈손인 상태에서는 POST가 성공해도 자식을 찾지
-못해 판정이 **`DELIVERY_UNKNOWN`**으로 떨어진다. 그러면 단일 사용 WRITE를 쓰고도 `VERIFIED`에 도달할 수 없고,
-재전송은 금지(덮어쓰기가 아니라 두 번째 자식 글이 된다)이므로 복구 경로도 없다. **검증 불가가 예정된 전송은
-승인이 허가한 것이 아니다.**
+**부수 관측 — 검증도 같은 읽기 위에 서 있다.** `Cafe24ChannelReplyAdapter.verifyCreated`는
+`fetchByArticleNumbers`로 자식 글을 찾는다. 이번 중단의 이유는 대상의 부재이지 이것이 아니지만, 다음 Stage 3의
+3단계가 **새 `article_no`의 exact READ 성공을 명시적으로 확인하는 이유**가 여기에 있다: 그 읽기가 되지 않으면
+POST가 성공해도 판정이 `DELIVERY_UNKNOWN`에서 멈추고, 재전송은 금지(덮어쓰기가 아니라 두 번째 자식 글이
+된다)이므로 복구 경로가 없다.
 
 **DB (실행 전후 동일).** approval **3** · action intent **3** · execution **3** · verification **2** ·
 work item `4c53cbee` **`PROPOSED`** · case `e1df3bb5` **`PREPARED`** · inquiry `11b6a729` **`UNANSWERED`** ·
@@ -525,9 +533,12 @@ draft **v1**(fp `5b8f5037…d18c3`) · `agent_llm_usage` **2575**(모델 호출 
 marketplace 요청: LIST **3** + 토큰 갱신 ≤3. WRITE **0**. ERROR/WARN **0**. 18080 프로세스는 전부 종료했고
 기존 8080 backend는 건드리지 않았다.
 
-**승인 상태**: `apr-c24-a3678-stage3-01c3d8b4bf78ab87`은 **소진되지 않았다**. 코드가 `720c3cee` 그대로이고
-계정·채널·대상 범위가 유지되는 동안 같은 세션에서 유효하다.
+**승인 상태**: `apr-c24-a3678-stage3-01c3d8b4bf78ab87`은 **소진되지 않았고, 이번 Stage 3 대상으로 재사용하지
+않는다**(product-owner 결정, 2026-09-23). 승인은 대상에 묶여 있었고 그 대상은 더 이상 존재하지 않는다 —
+살아 있는 승인을 다른 글에 옮겨 쓰는 것이 이 계약이 금지하는 바로 그 모양이다. 새 대상에는 새 단일 사용
+승인을 받는다.
 
-**다음에 필요한 것**(셋 중 하나, 전부 product-owner 입력): 마켓플레이스 관리자에서 board 6에 `a3678`이
-실제로 있는지 육안 확인 · 없으면 새 테스트 문의를 올려 수집 run 1회로 새 대상을 만들고 manifest를 갱신 ·
-있으면 스코프 축(shop_no / mall / board)을 좁히는 bounded READ.
+**다음 순서**(product-owner 지시, 2026-09-23): operator가 새 Cafe24 테스트 문의를 올린 뒤 ① 정상 수집 →
+② Case / Goal / Knowledge / Grounded Draft 생성 → ③ **새 `article_no`의 exact READ 성공 확인** →
+④ 새 draft 전문과 fingerprint 확정 → ⑤ 새 Stage 3 승인 manifest. ①②는 마켓플레이스 READ와 모델 호출을
+쓰므로 그 자체로 별도의 단일 사용 승인이 필요하고, ⑤의 WRITE 승인과는 다른 승인이다.
