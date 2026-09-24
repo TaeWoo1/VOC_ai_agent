@@ -102,6 +102,49 @@ Map of how these connect, and which document owns each part: `docs/architecture.
 - Never print secrets. Stage exact files — never `git add .`; never stage `.env`, `.profile/`,
   `.status/`, `.connections/`, `downloads/`, credentials, or real seller data.
 
+### Commit messages
+
+**The subject line says what changed.** This repository is public: the subject is the one line a
+reader sees in the file list, the blame view and the commit log, and it has to identify the change
+without the body.
+
+```
+<type>(<scope>): <what changed>
+```
+
+`type` — `feat` · `fix` · `docs` · `test` · `refactor` · `chore`.
+`scope` — the area touched (`pilot`, `inquiry`, `backup`, `retrieval`, `agent`, `frontend`, …).
+Subject in the imperative, around 60 characters, no trailing period.
+
+**This repository is public, so write the subject in English** — an English Conventional Commit
+subject is the recommended default for every commit that lands on `main`. Korean stays welcome in
+the body, where it usually says more precisely what was measured.
+
+**Never** write a subject as a poetic line, an essay opening, or a sentence describing the situation
+that led to the change.
+
+**The body carries the reasoning; the subject never does.** Put the why, the measurements, the
+verification results, the rejected alternatives and the residual limits in the body — at whatever
+length the change deserves. None of it is lost by keeping it out of the subject; it is one line
+down, where a reader who wants it will look and a reader scanning the log will not have to.
+
+Good:
+
+```
+fix(pilot): validate dump before destructive restore
+feat(backup): add off-host PostgreSQL backup
+fix(inquiry): align publish outcome states
+docs(pilot): update deployment readiness
+```
+
+Bad:
+
+```
+스키마를 먼저 지우고 나서...
+리허설이 좋은 덤프 하나만...
+RC1을 동결이라 적어 두고도...
+```
+
 ## Canonical reading path
 
 Six stops, in order. Everything else in `docs/` is evidence or lineage reached **from** these — if a
