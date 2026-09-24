@@ -232,6 +232,14 @@ public class MockDataSeeder implements ApplicationRunner {
                 "사진이랑 색이 조금 달라요. 실물이 더 누런 느낌입니다.",
                 "포장이 찌그러져서 왔어요. 제품 일부가 눌렸습니다."
         };
+        // Each lane counts its OWN rows. The body index was `i % length`, which shares its arithmetic
+        // with the `i % 4` that picks the lane: every negative row satisfies `i % 4 == 0`, so every
+        // negative row took negative[0] and the other three sentences were unreachable — eleven
+        // 확인 필요 rows reading one identical sentence, on the screen this fixture exists to show.
+        // The same collision left positive[0] unused. A per-lane counter shares no arithmetic with
+        // the selector, so a sentence added to either array is a sentence that appears.
+        int negativeSeen = 0;
+        int positiveSeen = 0;
         List<Review> list = new ArrayList<>();
         for (int i = 0; i < 44; i++) {
             Product p = productList.get(i % productList.size());
@@ -244,7 +252,9 @@ public class MockDataSeeder implements ApplicationRunner {
             r.setProductId(p.getId());
             r.setNegative(neg);
             r.setRating(neg ? (i % 2 == 0 ? 1 : 2) : (i % 2 == 0 ? 5 : 4));
-            r.setBody(neg ? negative[i % negative.length] : positive[i % positive.length]);
+            r.setBody(neg
+                    ? negative[negativeSeen++ % negative.length]
+                    : positive[positiveSeen++ % positive.length]);
             r.setReceivedAt(Instant.now().minus(Duration.ofHours(i * 7L)));
             list.add(r);
         }

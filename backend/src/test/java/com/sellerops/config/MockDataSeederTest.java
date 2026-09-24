@@ -2,6 +2,7 @@ package com.sellerops.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.common.DataOrigin;
 import com.sellerops.common.SyntheticDataVisibility;
 
 import com.sellerops.channel.ChannelRepository;
@@ -9,9 +10,11 @@ import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.organization.OrganizationRepository;
 import com.sellerops.product.ProductRepository;
+import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.user.UserRepository;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -179,5 +182,71 @@ class MockDataSeederTest {
         assertThat(organizations.count()).isEqualTo(1);
         assertThat(reviews.count()).isEqualTo(reviewsAfterFirst);
         assertThat(inquiries.count()).isEqualTo(inquiriesAfterFirst);
+    }
+
+    /**
+     * <b>Every authored sentence reaches the screen.</b> The fixture's job is to make the product
+     * legible, and a lane whose rows all read the same sentence does the opposite — a negative-review
+     * list of eleven identical lines says «manufactured» louder than any label. The defect was an
+     * index that shared its arithmetic with the lane selector, so this asserts the property the
+     * arithmetic has to keep: <b>each array is covered</b>, on both lanes.
+     *
+     * <p>It is written as coverage of the seeded bodies rather than as an expected count per
+     * sentence, because the distribution is a consequence of 44 rows and two array lengths and
+     * would have to be rewritten every time a sentence is added. What may never regress is that an
+     * authored sentence is unreachable.
+     */
+    @Test
+    void demoReviews_useEveryAuthoredSentenceOnBothLanes() {
+        SyntheticDataVisibility.overrideForTest(true);
+        try {
+            seeder(true, true).run(null);
+
+            var all = reviews.findAll();
+            assertThat(all).hasSize(44);
+            assertThat(all).allMatch(r -> r.getDataOrigin() == DataOrigin.DEMO_SEED);
+
+            var negativeBodies = all.stream().filter(Review::isNegative)
+                    .map(Review::getBody).collect(Collectors.toSet());
+            var positiveBodies = all.stream().filter(r -> !r.isNegative())
+                    .map(Review::getBody).collect(Collectors.toSet());
+
+            // Four authored sentences per lane; the seeder must reach all of them.
+            assertThat(negativeBodies).hasSize(4);
+            assertThat(positiveBodies).hasSize(4);
+            // …and the two lanes never borrow each other's sentences.
+            assertThat(negativeBodies).doesNotContainAnyElementsOf(positiveBodies);
+        } finally {
+            SyntheticDataVisibility.overrideForTest(false);
+        }
+    }
+
+    /**
+     * The shape of the fixture is what the demo walkthrough is built on, so the body fix must not
+     * move it: same row count, same negative share, same ratings. Recorded as the exact distribution
+     * because that is the thing a future edit could change without noticing.
+     *
+     * <p><b>Rating 2 is unreachable and stays that way here.</b> {@code neg} is true only when
+     * {@code i % 4 == 0}, which is always even, so the {@code i % 2 == 0 ? 1 : 2} branch can only
+     * ever yield 1. That is the same collision the bodies had — but changing it would move the
+     * rating distribution this test exists to pin, so it is named rather than fixed.
+     */
+    @Test
+    void demoReviews_keepTheirRowCountAndRatingDistribution() {
+        SyntheticDataVisibility.overrideForTest(true);
+        try {
+            seeder(true, true).run(null);
+
+            var byRating = reviews.findAll().stream()
+                    .collect(Collectors.groupingBy(Review::getRating, Collectors.counting()));
+
+            assertThat(byRating).containsOnlyKeys(1, 4, 5);
+            assertThat(byRating.get(1)).isEqualTo(11);
+            assertThat(byRating.get(4)).isEqualTo(22);
+            assertThat(byRating.get(5)).isEqualTo(11);
+            assertThat(reviews.findAll().stream().filter(Review::isNegative)).hasSize(11);
+        } finally {
+            SyntheticDataVisibility.overrideForTest(false);
+        }
     }
 }
