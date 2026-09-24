@@ -121,6 +121,37 @@ d="${PILOT_BACKUP_DIR:-/var/backups/sellerops}"
 grep -rqs 'backup.sh' /etc/cron.d /etc/crontab 2>/dev/null && ok "daily backup cron installed" \
   || note "daily backup cron is NOT installed — the pre-migration dump still runs, but nothing else does"
 
+# ── 6-A. off-host backup (blocker B5) ────────────────────────────────────────────────────────────
+# A dump that only ever exists on this host does not survive this host. Checked here because every
+# one of these is knowable before anything is built, and the alternative is learning it from a cron
+# job at 03:17 — or, worse, from the day the host is gone.
+if [[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]]; then
+  miss=()
+  for n in SELLEROPS_BACKUP_S3_BUCKET SELLEROPS_BACKUP_S3_REGION \
+           SELLEROPS_BACKUP_S3_ACCESS_KEY_ID SELLEROPS_BACKUP_S3_SECRET_ACCESS_KEY; do
+    [[ -n "${!n:-}" ]] || miss+=("$n")
+  done
+  [[ ${#miss[@]} -eq 0 ]] && ok "off-host backup: every required value is set" \
+    || bad "SELLEROPS_BACKUP_S3_ENABLED=true but these are blank: ${miss[*]}"
+  # The uploader is the AWS CLI. Its absence is a silent no-backup on a host that believes it has one.
+  command -v aws >/dev/null 2>&1 && ok "aws cli present (the off-host uploader)" \
+    || bad "SELLEROPS_BACKUP_S3_ENABLED=true but the aws cli is not installed — nothing can upload"
+  # An endpoint is optional (AWS S3 needs none) but, when given, must be a URL the signer can use.
+  if [[ -n "${SELLEROPS_BACKUP_S3_ENDPOINT:-}" ]]; then
+    case "${SELLEROPS_BACKUP_S3_ENDPOINT}" in
+      https://*) ok "off-host endpoint is HTTPS" ;;
+      http://*)  bad "SELLEROPS_BACKUP_S3_ENDPOINT is plain HTTP — the dump carries sealed credentials and seller data" ;;
+      *)         bad "SELLEROPS_BACKUP_S3_ENDPOINT must be an absolute URL" ;;
+    esac
+  fi
+  # Retention belongs to the bucket, and the credential is PutObject-only — neither is checkable from
+  # here without a read grant this deliberately does not have. Said, so it is not assumed.
+  note "off-host retention (30d) is the BUCKET's lifecycle policy, and the credential must be PutObject-only — neither is verifiable from this host by design"
+  note "the off-host copy of SELLEROPS_VAULT_MASTER_KEY is what makes a dump restorable — keep it OUTSIDE this bucket; only the restore rehearsal on a NEW host proves it"
+else
+  note "off-host backup is OFF — a dump that only exists on this host does not survive this host (blocker B5)"
+fi
+
 # ── 7. the host can actually build and run this ──────────────────────────────────────────────────
 command -v docker >/dev/null && ok "docker present" || bad "docker not installed (host-bootstrap.sh)"
 docker compose version >/dev/null 2>&1 && ok "docker compose plugin present" || bad "docker compose plugin missing (the overlay needs ≥ 2.24 for '!reset')"

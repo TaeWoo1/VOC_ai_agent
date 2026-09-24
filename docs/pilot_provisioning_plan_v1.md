@@ -1,7 +1,12 @@
 # Pilot Provisioning Plan v1 — B4 public host · B5 off-host backup
 
-**2026-09-24 · PLAN ONLY.** 인프라 생성 **0** · 코드 변경 **0** · 마켓플레이스 **0** · 모델 **0** ·
-push **0** · billable 리소스 **0**.
+**2026-09-24 · PLAN.** 인프라 생성 **0** · 마켓플레이스 **0** · 모델 **0** · push **0** ·
+billable 리소스 **0**.
+
+> **B5의 스크립트 쪽은 그 뒤 구현됐다** — `backup.sh`의 off-host 업로드 · `SELLEROPS_BACKUP_S3_*`
+> env 계약 · `deploy.sh`/`preflight.sh` 게이트. 계획은 바뀌지 않았고 §2-E·§4-D가 그 상태를 가리킨다.
+> **여전히 만들지 않은 것**: 버킷 · 자격 · 호스트 · DNS. B5가 CLOSED가 되려면 §6-B의 리허설이
+> 필요하고, 그중 B5-7은 **새 호스트**에서 돈다.
 
 `docs/pilot_readiness_v3.md`가 남긴 blocker 둘 — **B4 canonical public HTTPS host**와
 **B5 off-host backup** — 을 닫기 위해 **무엇을 만들고, 어떤 순서로, 무엇이 있어야 CLOSED인가**를
@@ -92,10 +97,11 @@ rate-limit하고, Cafe24 redirect URI의 오타는 판매자가 동의 화면 �
     health → smoke.
 12. **`deploy/pilot/smoke.sh`** 전항목 ok(= R3).
 
-### 2-E. B5 배선 (아래 §3, **코드 변경이 필요하다**)
+### 2-E. B5 배선 (아래 §3 — **스크립트는 구현됐다**, 남은 것은 리소스와 리허설)
 
 13. 버킷(R-8) · 보존 정책(R-9) · 업로드 전용 자격(R-10) 생성.
-14. 호스트에 업로드 자격을 **0600**으로 배치, `backup.sh`에 off-host 업로드 단계 추가.
+14. 호스트에 업로드 자격을 **0600**으로 배치. `backup.sh`의 off-host 업로드 단계는 **구현돼 있다**
+    (`SELLEROPS_BACKUP_S3_ENABLED=true`로 켠다).
 15. cron 설치(**현재 `host-bootstrap.sh`는 cron을 설치하지 않는다 — §2-2 S4**).
 16. **복원 리허설**(R12·R13) — 이것을 하기 전에는 B5가 CLOSED가 아니다.
 
@@ -193,10 +199,15 @@ retention은 버킷의 lifecycle이 집행하고 **스크립트가 집행하지 
 
 ### 4-D. B5가 추가로 요구하는 것 (아직 이름이 없다)
 
-off-host 업로드에 필요한 **버킷 이름 · 리전 · 업로드 자격** 세 값은 **아직 어떤 env 이름도 갖고
-있지 않다.** `backup.sh`가 그것을 읽도록 고치는 것이 B5의 코드 작업이고, 이름을 정하는 것이 그
-작업의 첫 줄이다(이 저장소가 반복해서 당한 「컨테이너가 볼 수 없는 이름」을 피하려면 `pilot.env.example`과
-같은 커밋에서 정해져야 한다).
+**이 이름들은 이제 정식 계약이다** — `SELLEROPS_BACKUP_S3_ENABLED` · `_BUCKET` · `_REGION` ·
+`_ENDPOINT` · `_ACCESS_KEY_ID` · `_SECRET_ACCESS_KEY`. `pilot.env.example`에 선언돼 있고
+`deploy.sh`·`preflight.sh`가 같은 이름을 검사한다.
+
+**컨테이너에는 일부러 넘기지 않는다.** `backup.sh`는 cron으로 **호스트에서** 돌고 업로드하는
+컨테이너는 하나도 없다 — compose에 이름을 적으면 애플리케이션 프로세스가 쓸 코드 경로도 없는
+객체 저장소 자격을 쥐게 된다. compose는 같은 `--env-file`을 읽으므로 이름을 **보기는 한다**;
+하지 말아야 할 일은 그것이 컨테이너 안으로 넘어가는 것이고, `docker-compose.yml`에 그 이유가
+적혀 있다.
 
 ---
 
@@ -299,7 +310,8 @@ R1–R15 전부 통과하면 남는 결정은 **Cafe24 Inquiry Human Approval WR
 ## 8. 이 문서가 하지 않은 것
 
 - 인프라를 만들지 않았다. **billable 리소스 0.**
-- 코드를 고치지 않았다. §2-E와 §4-D의 off-host 업로드는 **아직 구현되지 않았다.**
+- 인프라를 만들지 않았다 — 버킷·자격·호스트·DNS **0**. (§2-E의 스크립트 구현은 그 뒤 별도
+  커밋에서 착지했고, 이 문서의 계획 자체는 바뀌지 않았다.)
 - 비용을 추측하지 않았다. §5는 자리만이다.
 - 리전·계정·도메인 이름·버킷 이름을 정하지 않았다 — 전부 product-owner 입력이다.
 - `release/pilot-cafe24-v1`과 `pilot-cafe24-v1-rc1`을 건드리지 않았다.

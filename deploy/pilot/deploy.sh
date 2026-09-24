@@ -142,6 +142,23 @@ if [[ "${SELLEROPS_SELF_PILOT_ENABLED:-false}" == "true" ]]; then
     *) fail "SELLEROPS_SELF_PILOT_SCOPE must be CONNECTED_SELLERS or ALLOW_LIST on a pilot host" ;;
   esac
 fi
+# Off-host backup (blocker B5). preflight.sh checks this too, but preflight runs once and this runs on
+# every deploy — an env edited afterwards is exactly how a host ends up believing it has a backup.
+# These names never reach a container: backup.sh reads them on the host, from cron.
+if [[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]]; then
+  bmiss=()
+  for n in SELLEROPS_BACKUP_S3_BUCKET SELLEROPS_BACKUP_S3_REGION \
+           SELLEROPS_BACKUP_S3_ACCESS_KEY_ID SELLEROPS_BACKUP_S3_SECRET_ACCESS_KEY; do
+    [[ -n "${!n:-}" ]] || bmiss+=("$n")
+  done
+  [[ ${#bmiss[@]} -eq 0 ]] || fail "SELLEROPS_BACKUP_S3_ENABLED=true but these are blank: ${bmiss[*]}"
+  case "${SELLEROPS_BACKUP_S3_ENDPOINT:-https://placeholder}" in
+    https://*) ;;
+    *) fail "SELLEROPS_BACKUP_S3_ENDPOINT must be an absolute HTTPS URL when set (the dump carries sealed credentials and seller data)" ;;
+  esac
+else
+  printf 'note: off-host backup is OFF — a dump that only exists on this host does not survive this host\n'
+fi
 for flag in NAVER COUPANG CAFE24; do
   v="SELLEROPS_CONNECTOR_${flag}_ENABLED"
   if [[ "${!v:-false}" == "true" ]]; then
@@ -171,7 +188,11 @@ if [[ " $* " == *" --no-backup "* ]]; then
 elif ! "${COMPOSE[@]}" ps --format '{{.Service}} {{.State}}' 2>/dev/null | grep -q '^postgres running'; then
   printf 'skipped: postgres is not running yet (first deploy — no data to lose)\n'
 else
-  PILOT_ENV_FILE="$ENV_FILE" "$REPO/deploy/pilot/backup.sh" || fail "pre-migration backup failed — not migrating without a rollback point"
+  # `--local-only`: this dump's job is the rollback of the migration below, and that rollback runs
+  # from this host. The daily cron run is what owes an off-host copy and what fails when it cannot
+  # make one; coupling a deploy to object storage being reachable would block an urgent fix for a
+  # reason unrelated to the deploy.
+  PILOT_ENV_FILE="$ENV_FILE" "$REPO/deploy/pilot/backup.sh" --local-only || fail "pre-migration backup failed — not migrating without a rollback point"
   printf 'restore with: deploy/pilot/restore.sh <that file>   (then: git checkout %s && deploy/pilot/deploy.sh --no-pull --no-backup)\n' \
     "$(git -C "$REPO" rev-parse --short HEAD)"
 fi

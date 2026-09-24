@@ -159,6 +159,15 @@ services:
       # the inquiry shop number. Naming it here would hand the backend an explicit value on every host and
       # silently replace that inheritance with 0, so the review lane would aim at no shop while the inquiry
       # lane aimed at the right one. A deployment that genuinely needs a different shop sets it on the host.
+      #
+      # SELLEROPS_BACKUP_S3_* (ENABLED / BUCKET / REGION / ENDPOINT / ACCESS_KEY_ID / SECRET_ACCESS_KEY)
+      # are deliberately NOT passed through either, and for a stronger reason than the line above.
+      # They are read by deploy/pilot/backup.sh, which runs on the HOST from cron — no container ever
+      # uploads anything. Naming them here would hand the application process an object-storage
+      # credential it has no code path to use, which is the opposite of what a PutObject-only,
+      # host-scoped uploader is for. Compose still READS them: they live in the same --env-file and are
+      # available for interpolation; what they must not do is cross into a container. They are declared
+      # in deploy/pilot/pilot.env.example and gated by deploy/pilot/preflight.sh.
     ports:
       - "8080:8080"
     depends_on:
