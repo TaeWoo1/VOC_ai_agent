@@ -190,13 +190,26 @@ npm run serve                         # http://127.0.0.1:8787
 
 ## 2. Demo org
 
+> **Two deployments wear this name, and §2–§3 below describe the first one.**
+>
+> | | **operator's local PG** | **clean `MockDataSeeder`** |
+> |---|---|---|
+> | What it is | the maintainer's own `sellerops` database, grown by months of real collection and uploads | a fresh empty database with `SELLEROPS_SEED_ENABLED=true` + `SELLEROPS_SEED_DEMO_CONTENT=true` |
+> | Rows | mostly `REAL` | entirely `DEMO_SEED` |
+> | 문의 | present and workable | **not on screen at all** — see §7 |
+>
+> The data shape and the walkthrough table are the first column's. A clean seed is a smaller, honest
+> fixture and its walkthrough is the **review lane**; nothing below is wrong there except where §7
+> says so.
+
 - Login: `http://localhost:5173/login?demo=1` — the form is pre-filled with the demo account
   (`demo@sellerops.ai`, seeded by `MockDataSeeder`; the page itself says the data is not real sales
   data). Press 로그인; nothing to type.
 - Org "데모 제조사", operator "데모 운영자". Seller accounts on the three product channels
   (NAVER 스마트스토어 · 쿠팡 · 카페24 자사몰) plus a hidden G마켓 account the product surface never
-  shows (visible-channel gate).
-- Data shape as of **2026-08-22** (local PG): NAVER 3,880 reviews (15 확인 필요), Coupang 22 상품평
+  shows (visible-channel gate). **A clean seed attaches two** (쿠팡 · NAVER); 카페24 shows as
+  아직 연결되지 않았습니다.
+- Data shape as of **2026-08-22** (operator's local PG — not a clean seed): NAVER 3,880 reviews (15 확인 필요), Coupang 22 상품평
   (11 확인 필요), Cafe24 3 reviews; **9 unanswered inquiries**; **no order data** (주문 shows 0 for every
   range); one prior NAVER reply-work row (approved draft) and whatever the presenter marks during the
   demo.
@@ -223,7 +236,7 @@ npm run serve                         # http://127.0.0.1:8787
 | 2 | 리뷰 `/reviews/:naver?tier=NEEDS_ATTENTION` (press the NAVER share) | h1 리뷰 + workflow sentence; channel switcher; 확인 필요 순 list; tier chips 확인 필요 / 지켜보기 / 참고 / 전체; `AI 확인 필요` mark (pilot on) beside the rules chip | "Rules own the tier; AI only adds a suggestion." |
 | 3 | 리뷰 detail (press a 확인 필요 row) | 답변 절: 처리 상태 → 대응 필요 → 답변 준비 panel (rule-based draft → edit → 초안 저장 → 승인 → 복사 → **직접 답변하고 기록하기**); then the pilot feedback controls; 내 답변 작업 at the bottom updates | "SellerOps never posts. The seller pastes the approved reply in SmartStore; here we only record that it was posted, unverified." |
 | 4 | 리뷰 → 쿠팡 (switcher) | no 답변 절, `[쿠팡에서 보기]` present (needs the paired local agent — say so, do not press it in a plain demo) | "Coupang has no seller reply feature; the product does not pretend otherwise." |
-| 5 | 문의 `/inquiries` | server count header; 답변 필요 → 답변함 → 전체; channel/period filters; a row → 문의 발췌, 분류 chips, "답변 방향을 제안할 수 없습니다" for rows without a work item | See §4: proposal is not demonstrable in this org today. |
+| 5 | 문의 `/inquiries` — **skip on a clean seed (§7)** | server count header; 답변 필요 → 답변함 → 전체; channel/period filters; a row → 문의 발췌, 분류 chips, "답변 방향을 제안할 수 없습니다" for rows without a work item | See §4: proposal is not demonstrable in this org today. |
 | 6 | 채널 연결 `/connect` | three rows NAVER · 쿠팡 · 카페24 with one state word each and one verb; 정기 자료 가져오기; 리뷰 수집 실행 panel → `/connect/imports` (read-only without the agent: "로컬 에이전트가 연결되어 있지 않아 …", persisted 최근 가져오기 기록) | "A channel on screen is a channel that is actually usable." |
 | 7 | 주문 `/orders`, 설정 `/settings` | honest empty orders; settings = facts and links, no toggles | — |
 
@@ -303,8 +316,18 @@ free-form sentence outside them answers "이 요청은 아직 지원하지 않�
 
 ## 7. Known residuals (state them if asked)
 
-- 문의 demo data is dominated by Cafe24 board spam; the response-proposal workflow has no reachable
-  demo row (§4).
+- **On a clean `MockDataSeeder` deployment the 문의 lane does not appear at all.** The fixture writes
+  its inquiries as `DEMO_SEED`, and every inquiry read — the queue, the archive, the operational count
+  — states `REAL` in its own query rather than inheriting the entity filter, so `/inquiries` reads
+  「전체 문의 0 · 아직 들어온 문의가 없습니다」 on a database that holds sixteen. That is the REAL-only
+  invariant working as written (a manufactured row may never be counted as work the seller owes), not
+  a defect to route around: **the official walkthrough on a clean seed is the review lane**, which is
+  complete end to end (확인할 일 → 리뷰 Case → 판단·조치 기록). The inquiry lifecycle is proven where
+  it is real — the Cafe24 production evidence in `docs/evidence/INDEX.md` (2026-08-25 첫 답변 게시,
+  2026-09-23 `PASS (VERIFIED)`) and `docs/full_mvp_production_e2e_v1.md`. Measured 2026-09-24 on
+  `37736ff8`.
+- 문의 demo data on the operator's local PG is dominated by Cafe24 board spam; the response-proposal
+  workflow has no reachable demo row there either (§4).
 - 주문 has no data in the demo org.
 - The 리뷰 detail shows two record-only control groups (답변 처리 상태 vs. pilot 분류 피드백); the
   answer to "which one do I press" is 답변 for work, 피드백 for teaching — copy says so, but it is
