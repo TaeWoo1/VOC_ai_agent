@@ -50,13 +50,17 @@ topology는 `docs/pilot_host_provisioning_v1.md`와 `docs/pilot_runtime_foundati
 
 ### 1-1. 배포할 것이 remote에 없다 (blocker — **CLOSED** `release/pilot-cafe24-v1`, §9)
 
-`deploy/pilot/`은 **`main`에 존재하지 않는다.** compose overlay · Caddyfile · `deploy.sh` ·
+> **이 절은 감사 시점(`e1725c47`)의 관측이다.** `main`은 그 뒤 2026-09-24에 `d7d3cc97`까지
+> fast-forward됐고 `deploy/pilot/`은 지금 `main`에 **있다** — §10. 아래 문장들을 현재형으로
+> 읽지 말 것.
+
+감사 시점 기준: `deploy/pilot/`은 **`main`에 존재하지 않는다.** compose overlay · Caddyfile · `deploy.sh` ·
 `backup.sh` · `restore.sh` · `smoke.sh` · `preflight.sh` · `pilot.env.example` 전부
 `feat/review-decision-workspace-v1`에만 있다.
 
 | 사실 | 값 |
 |---|---|
-| `main` | `2491f1ab` |
+| `main` (감사 시점) | `2491f1ab` — 현재는 `d7d3cc97`, §10 |
 | 감사 대상 커밋 | `e1725c47` |
 | main 대비 | **457 커밋 앞, 0 뒤** |
 | origin 추적 | **없음** — `git ls-remote --heads origin`에 이 브랜치 없음 |
@@ -299,7 +303,9 @@ A 레코드가 가리키는 안정적 HTTPS 이름.
 동작하기 위한 **전제**다. 충족 조건 넷:
 
 1. **배포 대상이 origin에 존재한다** — 브랜치든 태그든, `git ls-remote`가 답한다.
-2. **`deploy/pilot/` 전체가 그 커밋에 있다** — 오늘 `main`에는 없다.
+2. **`deploy/pilot/` 전체가 그 커밋에 있다** — 감사 시점 `main`에는 없었고(§1-1), 2026-09-24의
+   fast-forward로 지금은 `main`에도 있다(§10). 배포 후보는 그와 무관하게 계속
+   `release/pilot-cafe24-v1`이다.
 3. **그 커밋이 fast-forward로 도달 가능하다** — 호스트 체크아웃이 rebase도 merge도 하지 않는다.
 4. **그 커밋 id가 이 문서와 evidence 행에 적힌다** — 배포된 것이 무엇인지 나중에 되물을 수 있어야 한다.
 
@@ -361,6 +367,7 @@ A 레코드가 가리키는 안정적 HTTPS 이름.
 - 마켓플레이스와 모델을 부르지 않았다. **호출 0 · WRITE 0 · DB 변경 0.**
 - push하지 않았다.
 - `main` 병합 전략을 정하지 않았다 — §5는 조건을 적고 방법(merge / release tag)은 열어 둔다.
+  (그 질문은 §10에서 답해졌다: `main`은 fast-forward하되 **배포 후보는 RC1로 동결**한다.)
 
 ---
 
@@ -475,11 +482,12 @@ env가 그 기본값을 물려받아 아무에게도 수집하지 않는다.
 | **remote branch** | **`release/pilot-cafe24-v1`** — 이것이 **deploy candidate**다 |
 | 분기 시점 커밋 | `04b4d5be` (당시 `feat/review-decision-workspace-v1` tip) |
 | **immutable RC tag** | **`pilot-cafe24-v1-rc1`** — annotated, 이 브랜치의 최종 커밋을 가리킨다 |
-| `main` 병합 | **하지 않았다.** `main`은 `2491f1ab` 그대로 |
+| `main` 병합 | **그 시점에는 하지 않았다** — `main`은 `2491f1ab` 그대로였다. **같은 날 뒤에 fast-forward됨 → §10** |
 | force push · history rewrite | **없음.** 둘 다 새 ref이고 기존 ref는 하나도 움직이지 않았다 |
 
-**`main`에 merge하지 않은 것은 결정이다**(product-owner, 2026-09-24). 파일럿은 자기 브랜치에서
-출발하고, `main` 병합은 rehearsal과 첫 판매자 이후의 별도 질문으로 남는다. 그래서 호스트는
+**RC1을 만드는 시점에 `main`을 건드리지 않은 것은 결정이었다**(product-owner, 2026-09-24):
+release candidate는 `main`의 상태와 **독립적으로** 고정돼야 한다. 그 독립성은 지금도 유지된다 —
+같은 날 `main`이 fast-forward됐지만(§10) RC1은 움직이지 않았다. 호스트는 여전히
 `main`이 아니라 **이 브랜치**를 체크아웃한다.
 
 ### 9-2. 절차와 그 안전성
@@ -500,5 +508,58 @@ B1이 닫혔다고 **배포 준비가 끝난 것이 아니다.** 남은 것은 *
 않았다** — RC1은 「배포할 수 있는 것이 이름을 갖게 됐다」는 뜻이지 「배포해서 동작하는 것을 봤다」는
 뜻이 아니다. R1~R15 중 어느 것도 실행되지 않았고, 그중 R7·R10·R11·R12는 이 저장소에서 **한 번도**
 실행된 적이 없다.
+
+---
+
+## 10. `main` fast-forward와 브랜치 정리 (2026-09-24)
+
+§9가 RC1을 만든 뒤, 같은 날 저장소 정리가 있었다. **코드 변경 0 · 인프라 0 · 마켓플레이스 0 ·
+모델 0 · 배포 후보 변경 0.**
+
+### 10-1. 지금의 ref 사실
+
+| ref | 커밋 | |
+|---|---|---|
+| `main` (local = origin) | **`d7d3cc97`** | 2026-09-24 **순수 fast-forward**로 이동 |
+| `feat/review-decision-workspace-v1` (local = origin) | `d7d3cc97` | 불변 |
+| `release/pilot-cafe24-v1` (local = origin) | **`7a0b6749`** | **불변** |
+| tag `pilot-cafe24-v1-rc1` | `ba8025dd` → **`7a0b6749`** | **불변** |
+
+`main`에만 있던 커밋은 **0**이었고 merge-base가 `main` tip 자체였으므로 병합은 **fast-forward
+하나**로 끝났다 — merge commit 0 · rebase 0 · force push 0. 463 커밋이 `main`에 도달했다.
+
+### 10-2. RC1은 동결된 과거 배포 후보다
+
+`main`이 `d7d3cc97`로 갔으므로 `main`은 이제 **`7a0b6749`의 후손**이다. 그것은
+**RC1이 갱신됐다는 뜻이 아니다.**
+
+- **배포 후보는 여전히 `release/pilot-cafe24-v1` / `pilot-cafe24-v1-rc1` = `7a0b6749`** 하나다.
+- RC1이 가리키는 트리는 **동결**이다. `main`이 앞서 나간다고 따라오지 않는다.
+- 그래서 §9-3의 문장이 그대로 유효하다 — RC1은 「배포할 수 있는 것이 이름을 갖게 됐다」이지
+  「배포해서 동작하는 것을 봤다」가 아니다.
+
+**RC1에 없는 것이 하나 있다**: B5 off-host backup 구현(`d7d3cc97`)은 `7a0b6749` **이후**의
+커밋이므로 RC1 트리에 **없다**. 즉 B5 리허설을 RC1으로 수행할 수는 없다. 배포 후보를 그
+구현까지 포함하도록 옮길지는 **product-owner 결정**이고, 옮긴다면 RC1을 움직이는 것이 아니라
+**새 RC 태그를 발급**한다.
+
+### 10-3. 브랜치 정리
+
+`d7d3cc97`의 조상이라 고유 커밋이 **0개**인 ref만 삭제했다. 삭제 직전 ancestry를 전수 재검사했고
+한 건도 탈락하지 않았다. force 삭제 **0 · force push 0**.
+
+| | 이전 | 이후 |
+|---|---|---|
+| local branch | 107 | **16** |
+| origin branch | 227 | **13** |
+| origin tag | 1 | **1** (변화 없음) |
+
+고유 커밋을 가진 **10개는 삭제하지 않았다**(origin 기준) — `feat/product-assembly-ia-v1` ·
+`feat/review-triage-calibration-v1` · `feat/pilot-ready-local-agent-runtime` ·
+`spike/cafe24-board6-reply-api-v1` · `feat/cafe24-inquiry-guided-reply-v1-backend` 등.
+그중 넷은 **현재 트리에 파일이 존재하지 않는 코드**를 들고 있어, 지우면 저장소에서 사라진다.
+worktree가 점유 중인 브랜치 셋도 건드리지 않았다.
+
+---
 
 **현재 상태: `code ready for provisioning; deployment prerequisites remain`.**
