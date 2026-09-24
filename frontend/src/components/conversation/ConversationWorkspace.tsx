@@ -139,7 +139,16 @@ export function ConversationWorkspace({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-workspace">
-      <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-4" : "px-4 py-8 md:px-8"}`}>
+      {/* `pb-16` is the dock's fade, doubled, and the two numbers belong together: the dock hangs a
+          32px gradient (`-top-8 h-8`) over the last strip of this scroller, so a scroller whose bottom
+          padding is 32px ends with its final line of content exactly at the gradient's edge. Measured
+          on the demo Home at 1440×900: the briefing runs 837px in a 736px box, and the last row —
+          「최근 7일 부정 리뷰 6건」, the one thing on that screen a seller can press — came to rest
+          inside the fade. Padding equal to the fade leaves the content nothing to clear it by; twice
+          the fade does. This does NOT make the briefing fit (it cannot at 1366 or 1152, where it runs
+          233px and 281px long); it makes the overflow ordinary scrolled content instead of something
+          the shell appears to have cut off. */}
+      <div className={`min-h-0 flex-1 overflow-y-auto ${compact ? "px-4 py-4" : "px-4 pb-16 pt-8 md:px-8"}`}>
         {/* Reviewnary Visual System v1 §5 — before the first message the morning screen is ONE
             composition: the briefing and the box under it. Anchored to the top it left ~470px of
             empty paper between what the seller reads and where they answer, which is the shape of a
