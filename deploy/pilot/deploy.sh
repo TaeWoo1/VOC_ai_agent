@@ -142,6 +142,26 @@ if [[ "${SELLEROPS_SELF_PILOT_ENABLED:-false}" == "true" ]]; then
     *) fail "SELLEROPS_SELF_PILOT_SCOPE must be CONNECTED_SELLERS or ALLOW_LIST on a pilot host" ;;
   esac
 fi
+# 「고객 운영 관리」 is the same shape one feature over, and it fails worse because the seller presses the
+# button themselves. RESPONSIBILITY_RUNTIME_ORG_IDS is what makes the job VISIBLE and startable for an
+# organisation — with it blank the Home never offers it — while
+# SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED is the bean that materializes each 2-hour window and works
+# it. With only the first, activation succeeds, the badge reads 「자동 확인 중」, the first run row is
+# written PENDING and is never claimed by anything: no check, no case, no failure, and 「다음 확인」
+# frozen at a time that has already passed. Measured on a local stack (2026-09-25) in exactly this
+# combination — responsibility ACTIVE, one run row PENDING with started_at NULL, forever.
+#
+# Checked here for the reason the pair above is: the combination is a DEPLOYMENT mistake, not a code
+# one. Both application.yml defaults stay fail-closed and an ordinary development boot — including a
+# local manual demo that opens the rollout by hand — is byte-identical to before.
+#
+# The rollout's MEMBERSHIP rule is not restated here. This tests only that the name carries something,
+# which is ResponsibilityRollout's own documented contract («blank means nobody, never everybody»);
+# which UUIDs it names and whether they parse stays there and still refuses the boot.
+if [[ -n "$(printf '%s' "${RESPONSIBILITY_RUNTIME_ORG_IDS:-}" | tr -d '[:space:],')" \
+   && "${SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED:-false}" != "true" ]]; then
+  fail "RESPONSIBILITY_RUNTIME_ORG_IDS names an organisation but SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED is not true — 고객 운영 관리 becomes visible and startable for that seller while no window is ever worked; set the scheduler true, or clear the rollout list"
+fi
 # Off-host backup (blocker B5). preflight.sh checks this too, but preflight runs once and this runs on
 # every deploy — an env edited afterwards is exactly how a host ends up believing it has a backup.
 # These names never reach a container: backup.sh reads them on the host, from cron.
