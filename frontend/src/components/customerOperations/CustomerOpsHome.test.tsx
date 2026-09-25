@@ -202,7 +202,7 @@ describe("CustomerOpsHome", () => {
   it("opens on what the seller can act on — then what was checked, never called processed", async () => {
     const { container } = draw();
     const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("자동 확인 · 24시간");
+    expect(card).toHaveTextContent("최근 24시간 자동 확인");
     expect(card).toHaveTextContent("47건");
     expect(card).toHaveTextContent("정리 31");
     expect(card).toHaveTextContent("관찰 4");
@@ -422,6 +422,104 @@ describe("CustomerOpsHome", () => {
     expect(coHomeApplies(co({ status: null, eligible: false }))).toBe(false);
     expect(coHomeApplies(co({ status: null, eligible: true }))).toBe(true);
     expect(coHomeApplies(co())).toBe(true);
+  });
+});
+
+/**
+ * <b>The activation card has to answer three questions before a seller presses it</b> — what am I starting, what
+ * will it do on its own, and will it talk to my customer. It answered none: the card printed `COPY.off`, the same
+ * state word as the badge above it, over a button that said 「시작」.
+ *
+ * <p>The state word and the feature name are deliberately different things here. 「고객 운영 관리」 is the name every
+ * surface uses (`RESPONSIBILITY_NAME`, unchanged); 「자동 확인」 is what the job DOES, and it belongs to the badge and
+ * the button. A card whose title is the badge's word is a card that says the state twice and the name never.
+ */
+describe("activation card — what is being started, not the state again", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+    api.getInquiryQueueStrict.mockResolvedValue(queue());
+  });
+
+  const off = () => co({ status: null, lastCheckedAt: null, lastRunStatus: null, nextCheckAt: null });
+
+  it("names the feature, states the cadence the server sent, and promises nothing is sent without approval", async () => {
+    draw(off());
+    const card = await screen.findByRole("region", { name: "자동 확인 꺼짐" });
+
+    // The name — the canonical one, not a second spelling invented for this card.
+    expect(within(card).getByText("고객 운영 관리")).toBeInTheDocument();
+    // The cadence is the SERVER's number (`cadenceMinutes: 120` → 「2시간마다」); the sentence never spells it.
+    expect(card).toHaveTextContent("2시간마다 연결된 채널의 리뷰와 문의를 확인해, 판단이 필요한 일만 정리합니다.");
+    expect(card).toHaveTextContent("답변이나 외부 조치는 승인 전 자동 실행하지 않습니다.");
+    expect(within(card).getByRole("button", { name: "자동 확인 시작" })).toBeEnabled();
+  });
+
+  it("does not print the badge's state word as the card's title", async () => {
+    draw(off());
+    const card = await screen.findByRole("region", { name: "자동 확인 꺼짐" });
+    // The badge outside the card carries the state; the card's own heading line is the name.
+    expect(within(card).queryByText("자동 확인 꺼짐")).toBeNull();
+  });
+
+  it("a 12-hour cadence says 12시간마다 — the sentence reads the view, never a constant", async () => {
+    draw(co({ status: null, lastCheckedAt: null, nextCheckAt: null, cadenceMinutes: 720 }));
+    const card = await screen.findByRole("region", { name: "자동 확인 꺼짐" });
+    expect(card).toHaveTextContent("12시간마다 연결된 채널의");
+  });
+
+  it("paused keeps its own word and offers 재개 — the card still names the feature", async () => {
+    draw(co({ status: "PAUSED" }));
+    const card = await screen.findByRole("region", { name: "일시정지됨" });
+    expect(within(card).getByText("고객 운영 관리")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "재개" })).toBeInTheDocument();
+  });
+
+  it("no eligible source: the next step is connecting a channel, not starting a job that cannot read anything", async () => {
+    draw(co({ status: null, eligible: false, lastCheckedAt: null, nextCheckAt: null }));
+    const card = await screen.findByRole("region", { name: "자동 확인 꺼짐" });
+    expect(within(card).queryByRole("button", { name: "자동 확인 시작" })).toBeNull();
+    expect(within(card).getByRole("link", { name: "채널 연결" })).toBeInTheDocument();
+  });
+
+  it("pressing it activates — one call, and the page is told to re-read", async () => {
+    api.activateCustomerOperations.mockResolvedValue({});
+    const { onChanged } = draw(off());
+    await userEvent.click(await screen.findByRole("button", { name: "자동 확인 시작" }));
+    await waitFor(() => expect(api.activateCustomerOperations).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("badge: 자동 확인 중 while ACTIVE", async () => {
+    draw();
+    expect(await screen.findByRole("link", { name: /자동 확인 중/ })).toBeInTheDocument();
+  });
+});
+
+/**
+ * <b>「중」 was a claim the screen could not support.</b> `lastCheckedAt` is the last FINISHED run's `finishedAt`,
+ * so its absence means only that no check has completed — the view carries no status for an unfinished run, and the
+ * screen therefore cannot tell a queued window from a running one. Measured on a local stack (2026-09-25) the one
+ * run row sat at `PENDING`, `started_at` NULL, with no scheduler to pick it up: the cell said work was in progress
+ * over a window that had never started. 「전」 is a fact about our own records and is true in every one of those states.
+ */
+describe("first check — before, not in progress", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+    api.getInquiryQueueStrict.mockResolvedValue(queue());
+  });
+
+  it("says 첫 확인 전 while no check has finished, and never claims one is running", async () => {
+    draw(co({ lastCheckedAt: null, lastRunStatus: null }));
+    const card = await screen.findByTestId("today-summary");
+    expect(card).toHaveTextContent("첫 확인 전");
+    expect(card).not.toHaveTextContent("첫 확인 중");
+  });
+
+  it("once a check has finished the cell is the tally, not the phrase", async () => {
+    draw();
+    const card = await screen.findByTestId("today-summary");
+    expect(card).toHaveTextContent("47건");
+    expect(card).not.toHaveTextContent("첫 확인");
   });
 });
 

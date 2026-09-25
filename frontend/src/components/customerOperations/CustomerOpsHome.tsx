@@ -10,8 +10,8 @@ import { ReviewCaseView } from "../../pages/app/ReviewReplyTask";
 import { PreparedWorkList } from "../home/PreparedWorkList";
 import { api } from "../../lib/apiClient";
 import { problemLine } from "../../lib/operationsHome";
-import { dataTypeKo, kstClock } from "../../lib/customerOperations";
-import { COPY, DRAFT_UNSENT, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
+import { RESPONSIBILITY_NAME, cadenceLabel, dataTypeKo, kstClock } from "../../lib/customerOperations";
+import { COPY, DRAFT_UNSENT, autoCheckWhat, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import type { HomePreparedItem, InquiryQueueResponse, OperationsHome, ReviewIssueView, ReviewWorkView } from "../../lib/types";
@@ -140,7 +140,17 @@ export function CustomerOpsHome({
           aria-label={pill.label}
           className="flex flex-wrap items-center gap-3 rounded-[16px] bg-surface px-6 py-5 shadow-[0_0_0_1px_#E4E7EC]"
         >
-          <p className="text-base font-bold text-ink">{co.status === "PAUSED" ? COPY.paused : COPY.off}</p>
+          {/* <b>Before it is running, the card names what the seller is about to start — not the state again.</b>
+              It used to print `COPY.off`, the same string as the badge two lines above, so the whole card was one
+              state word and a bare 「시작」: a seller could not tell what would be started, how often it would look,
+              or whether it would answer a customer on their behalf. The three lines are the job's own contract —
+              the name every surface uses, the cadence the server sent, and the boundary the approval path enforces.
+              Nothing about the layout moves: this is the same one-row section with its text in a block. */}
+          <div className="min-w-[16rem] flex-1 space-y-1">
+            <p className="text-base font-bold text-ink">{RESPONSIBILITY_NAME}</p>
+            <p className="break-keep text-sm leading-relaxed text-muted">{autoCheckWhat(cadenceLabel(co.cadenceMinutes))}</p>
+            <p className="break-keep text-sm leading-relaxed text-muted">{COPY.autoCheckFence}</p>
+          </div>
           {error ? (
             <p role="alert" className="text-sm text-bad">
               {error}

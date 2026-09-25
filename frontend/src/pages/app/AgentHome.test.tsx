@@ -510,7 +510,7 @@ describe("Customer Operations v3.1 — the job's Home", () => {
     renderHome();
 
     const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("자동 확인 · 24시간");
+    expect(card).toHaveTextContent("최근 24시간 자동 확인");
     expect(card).toHaveTextContent("9건");
     // 홈 → 오늘 (UI/UX v2 Phase 1, product-owner decision).
     expect(screen.getByRole("heading", { level: 1, name: "오늘" })).toBeInTheDocument();

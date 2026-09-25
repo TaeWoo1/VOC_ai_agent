@@ -56,23 +56,37 @@ export function draftSendWord(delivery: { category: string } | null | undefined)
 
 export const COPY = {
   homeTitle: "오늘",
-  checkedLabel: "자동 확인 · 24시간",
+  // The tally's WINDOW, not the cadence. The cadence is 2 hours and stands in the header; this cell counts the
+  // last 24 hours, and 「자동 확인 · 24시간」 put the two numbers side by side with nothing saying which was which.
+  checkedLabel: "최근 24시간 자동 확인",
   mineLabel: "내가 확인할 일",
   listTitle: "확인할 일",
   listOrder: "오래된 순",
   none: "없음",
-  firstCheck: "첫 확인 중",
+  // <b>No check has FINISHED yet</b> — `lastCheckedAt` is the last finished run's `finishedAt`, and this cell is
+  // what stands in for the count until there is one. It said 「첫 확인 중」, which asserts work in progress: the
+  // view carries no status for an unfinished run, so the screen cannot tell a queued window from a running one and
+  // must say only what is true of both. 「전」 is a fact about our records; 「중」 was a claim about the runtime.
+  firstCheck: "첫 확인 전",
   lastCheckFailed: "마지막 확인 실패",
   reconnect: "재연결",
   // 「관찰 중」 and 「보기」 lived here for the one-line repeated-problem signal. That line now draws the problems
   // themselves, and their lifecycle word comes from the extractor (`lifecycleLabelKo`) rather than from here —
   // a second copy of that word in this table is the one that goes stale when the extractor's vocabulary moves.
-  running: "운영 중",
+  //
+  // <b>The badge carries the STATE; the card carries the NAME.</b> The feature is 「고객 운영 관리」 in every
+  // surface that names it (`RESPONSIBILITY_NAME`) and that name is unchanged — 「자동 확인」 is what the job DOES,
+  // so it belongs to the state words and the button, never to the feature. Before this, `off` was rendered as both
+  // the badge and the card's title, so the card said the state twice and never said what the seller was starting.
+  running: "자동 확인 중",
   paused: "일시정지됨",
-  off: "고객 운영 관리 꺼짐",
-  start: "시작",
+  off: "자동 확인 꺼짐",
+  start: "자동 확인 시작",
   resume: "재개",
   composer: "질문이나 지시를 입력하세요",
+  // What stays with the seller, in one sentence. It promises nothing new: `DUTIES_SELLER`'s first item
+  // (「고객에게 실제 메시지 전송」) is the same contract, and the approval boundary is what actually enforces it.
+  autoCheckFence: "답변이나 외부 조치는 승인 전 자동 실행하지 않습니다.",
   // Case
   caseChecked: "자동 확인",
   original: "원문 보기",
@@ -131,6 +145,17 @@ export const COPY = {
   noContent: "내용 없음",
   stopUsing: "사용 중지",
 } as const;
+
+/**
+ * What the job does, before it is started — the cadence stated by the caller, never spelled here.
+ *
+ * <p><b>The cadence is the server's fact.</b> It arrives as `cadenceMinutes` and `cadenceLabel` already turns it
+ * into 「2시간마다」; writing 「2시간마다」 into this sentence would make a second copy of a number this file does
+ * not own, which is the drift this module's header exists to prevent.
+ */
+export function autoCheckWhat(cadence: string): string {
+  return `${cadence} 연결된 채널의 리뷰와 문의를 확인해, 판단이 필요한 일만 정리합니다.`;
+}
 
 /* ─────────────────────────── reason tags ─────────────────────────── */
 
