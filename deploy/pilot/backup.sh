@@ -10,11 +10,15 @@
 # making a deploy depend on object storage being reachable would block an urgent fix for a reason
 # that has nothing to do with the deploy. The DAILY cron run is the one that owes both halves, and it
 # is the one whose exit status says so.
-# Install:  deploy/pilot/install-backup-job.sh     (writes /etc/cron.d/sellerops-backup, 0644)
-#           The hand-written one-liner this comment used to carry is NOT equivalent any more: the
-#           installed file also sets PATH (AWS CLI v2 lives in /usr/local/bin, which cron's default
-#           PATH does not contain) and CRON_TZ/TZ=Asia/Seoul — without which `17 3 * * *` runs in the
-#           host's zone, UTC on the recommended image, i.e. 12:17 in Seoul.
+# Install:  deploy/pilot/install-backup-job.sh
+#           It writes a systemd service + timer (sellerops-backup.{service,timer}) and enables them.
+#           NOT a cron line: the schedule must be 03:17 **Asia/Seoul** on a host whose own timezone
+#           this repository does not set, and Ubuntu 24.04's default cron cannot be relied on for
+#           per-job timezone scheduling — it parses, it runs, and it runs at the wrong hour. systemd
+#           puts the zone in the calendar (`OnCalendar=*-*-* 03:17:00 Asia/Seoul`) and validates it
+#           before install. The unit also carries PATH (AWS CLI v2's shim is in /usr/local/bin, which
+#           a service's minimal environment does not have) and TZ=Asia/Seoul, which is what makes the
+#           `date` below name the dump for the hour it actually ran at.
 #
 # The dump contains sealed credentials (vault ciphertext) and seller data: the directory is 0700 root.
 # It contains NO env secret — the vault master key and JWT secret live only in /etc/sellerops/pilot.env,

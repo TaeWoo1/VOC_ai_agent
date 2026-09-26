@@ -122,10 +122,15 @@ script here. Container deletion ≠ DB deletion.
 
 ## 11. Backup / restore
 
-`deploy/pilot/backup.sh` — daily `pg_dump -Fc` via cron (`/etc/cron.d/sellerops-backup`, **03:17 KST**
-— the cron file pins `CRON_TZ`/`TZ` to `Asia/Seoul`; the HOST's zone is not set by this repository and
-is UTC on this image, so the schedule names its own zone rather than inheriting one) into
-`/var/backups/sellerops` (0700), 14-day retention. The dump holds sealed credentials and seller data, **no
+`deploy/pilot/backup.sh` — daily `pg_dump -Fc` on a **systemd timer** (`sellerops-backup.timer`,
+`OnCalendar=*-*-* 03:17:00 Asia/Seoul`, `Persistent=true`; installed by
+`deploy/pilot/install-backup-job.sh`) into
+`/var/backups/sellerops` (0700), 14-day retention. **The zone is on the job, not on the host**: this
+repository never sets the host's timezone (it is UTC on this image), so the schedule names Asia/Seoul
+itself — a bare `17 3 * * *` would have fired at 12:17 in Seoul. Cron is not used: Ubuntu 24.04's
+default cron cannot be relied on for per-job timezone scheduling, and its failure mode is a job that
+runs at the wrong hour rather than one that fails. Next firing:
+`systemctl list-timers sellerops-backup.timer`. The dump holds sealed credentials and seller data, **no
 env secret** — the vault master key lives only in `pilot.env`, which is the operator's to keep alongside
 (a restore with a different key opens nothing, by design). Off-host copy (S3) is billable and deferred
 (§20). `deploy/pilot/restore.sh <dump>` stops writers, recreates the schema, `pg_restore`s, restarts,

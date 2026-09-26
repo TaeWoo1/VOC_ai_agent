@@ -118,12 +118,49 @@ fi
 d="${PILOT_BACKUP_DIR:-/var/backups/sellerops}"
 [[ -d "$d" ]] && ok "backup directory $d exists" || bad "backup directory $d does not exist (host-bootstrap.sh creates it) — deploy.sh takes the pre-migration dump there"
 [[ -w "$d" ]] 2>/dev/null && ok "backup directory is writable" || note "backup directory not writable as this user (deploy.sh runs as root)"
-# BLOCKER, not a note (blocker B5, item B5-1). Without this file the ONLY dump this host ever takes
+# BLOCKER, not a note (blocker B5, item B5-1). Without a schedule the ONLY dump this host ever takes
 # is deploy.sh's pre-migration one — a dump per deploy, on a host that may not be deployed for weeks,
 # and never copied off the host because `--local-only` is exactly what that dump is. «Backups exist»
 # and «a backup ran today» are different claims, and only the second one is worth anything in March.
-grep -rqs 'backup.sh' /etc/cron.d /etc/crontab 2>/dev/null && ok "daily backup cron installed" \
-  || bad "daily backup cron is NOT installed — run deploy/pilot/install-backup-job.sh; until then the only dump this host takes is the pre-migration one, and it is --local-only by design"
+#
+# The schedule is a systemd timer, not cron (2026-09-26): Ubuntu 24.04's default cron cannot be relied
+# on for per-job timezone scheduling, and this host's own zone is not set by this repository. What is
+# checked here is the whole contract — the units exist, the timer is enabled, systemd can load it, and
+# its calendar is the 03:17 Asia/Seoul one. A timer that exists but is disabled, or one whose calendar
+# has drifted to the host's zone, fires at the wrong hour and looks installed either way.
+# The unit directory is a seam for deploy/pilot/backup-guard.test.sh, exactly as PILOT_ENV_FILE and
+# PILOT_BACKUP_DIR already are. The default is the canonical one; an operator on a pilot host never
+# sets it.
+UNIT_DIR="${PILOT_SYSTEMD_DIR:-/etc/systemd/system}"
+SVC="$UNIT_DIR/sellerops-backup.service"
+TMR="$UNIT_DIR/sellerops-backup.timer"
+LEGACY_CRON="${PILOT_CRON_DIR:-/etc/cron.d}/sellerops-backup"
+CAL='*-*-* 03:17:00 Asia/Seoul'
+if command -v systemctl >/dev/null 2>&1; then
+  [[ -f "$SVC" && -f "$TMR" ]] && ok "backup units installed" \
+    || bad "sellerops-backup.service/.timer are NOT installed — run deploy/pilot/install-backup-job.sh; until then the only dump this host takes is the pre-migration one, and it is --local-only by design"
+  [[ "$(systemctl is-enabled sellerops-backup.timer 2>/dev/null)" == "enabled" ]] \
+    && ok "backup timer is enabled" \
+    || bad "sellerops-backup.timer is not enabled — an installed unit that nothing starts is not a schedule"
+  [[ "$(systemctl show sellerops-backup.timer -p LoadState --value 2>/dev/null)" == "loaded" ]] \
+    && ok "systemd can load the backup timer" \
+    || bad "systemd cannot load sellerops-backup.timer (LoadState is not 'loaded') — check systemctl status sellerops-backup.timer"
+  # Read from the unit rather than from `systemctl show -p TimersCalendar`, whose rendering of the zone
+  # differs across versions: the contract is the string this repository writes.
+  grep -qsF "OnCalendar=$CAL" "$TMR" && ok "timer calendar is 03:17 Asia/Seoul (zone named in the unit)" \
+    || bad "sellerops-backup.timer does not carry OnCalendar=$CAL — without the zone it fires in the host's own timezone (UTC on this image, i.e. 12:17 in Seoul)"
+  grep -qsF "Persistent=true" "$TMR" && ok "timer is Persistent (a run missed while the host was off is made up)" \
+    || bad "sellerops-backup.timer is not Persistent=true — a night the host was off is silently skipped"
+  grep -qsF "Environment=TZ=Asia/Seoul" "$SVC" && ok "backup service runs with TZ=Asia/Seoul (the dump filename)" \
+    || bad "sellerops-backup.service does not set TZ=Asia/Seoul — the dump's name would disagree with the hour it ran at"
+  # The earlier cron file and the timer would both fire: two nightly dumps, one of them at the wrong hour.
+  [[ -e "$LEGACY_CRON" ]] \
+    && bad "$LEGACY_CRON still exists beside the timer — TWO nightly dumps of the same database; remove that one file" \
+    || ok "no legacy backup cron file beside the timer"
+  note "next firing is observable with: systemctl list-timers sellerops-backup.timer (this script does not start the job — a timer that fires is not proof that an upload succeeds)"
+else
+  bad "systemctl not found — the pilot host contract is Ubuntu 24.04 with systemd, and the backup schedule is a systemd timer"
+fi
 
 # ── 6-A. off-host backup (blocker B5) ────────────────────────────────────────────────────────────
 # A dump that only ever exists on this host does not survive this host. Checked here because every

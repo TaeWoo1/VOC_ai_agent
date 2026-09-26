@@ -102,11 +102,19 @@ rate-limit하고, Cafe24 redirect URI의 오타는 판매자가 동의 화면 �
 13. 버킷(R-8) · 보존 정책(R-9) · 업로드 전용 자격(R-10) 생성.
 14. 호스트에 업로드 자격을 **0600**으로 배치. `backup.sh`의 off-host 업로드 단계는 **구현돼 있다**
     (`SELLEROPS_BACKUP_S3_ENABLED=true`로 켠다).
-15. **`deploy/pilot/install-backup-job.sh`** — `/etc/cron.d/sellerops-backup`(0644)을 설치한다.
-    §2-2 S4(「cron 줄은 `backup.sh` 헤더 주석에만 있다」)는 **이 스크립트로 닫혔다**.
-    스케줄은 **03:17 KST**이고 zone은 **job에만** 박힌다(`CRON_TZ`/`TZ=Asia/Seoul`) — 이 저장소는
-    호스트 timezone을 설정하지 않고 권장 이미지는 UTC라, zone을 적지 않은 `17 3 * * *`은 서울 기준
-    **12:17**에 돌았을 것이다. OS 전체 시간대는 바꾸지 않는다.
+15. **`deploy/pilot/install-backup-job.sh`** — `sellerops-backup.service`/`.timer`(각 0644)를
+    설치하고 timer를 enable한다. §2-2 S4(「cron 줄은 `backup.sh` 헤더 주석에만 있다」)는
+    **이 스크립트로 닫혔다**. 스케줄은 **03:17 KST**이고 zone은 **job에만** 박힌다
+    (`OnCalendar=*-*-* 03:17:00 Asia/Seoul` + service의 `TZ=Asia/Seoul`) — 이 저장소는 호스트
+    timezone을 설정하지 않고 권장 이미지는 UTC라, zone을 적지 않은 `17 3 * * *`은 서울 기준
+    **12:17**에 돌았을 것이다. **cron이 아니라 systemd timer인 이유**: Ubuntu 24.04 기본 cron은
+    per-job timezone scheduling을 신뢰할 수 없고, 그 실패는 「안 돈다」가 아니라 **「틀린 시각에
+    돈다」**라 관측하기 전까지 정상과 구별되지 않는다. systemd는 zone을 calendar 안에 담고
+    `systemd-analyze calendar`로 설치 **전에** 검증되며, `Persistent=true`가 호스트가 꺼져 있어
+    놓친 실행을 다음 부팅에 한 번 채운다. OS 전체 시간대는 바꾸지 않는다.
+    다음 실행 시각 확인: `systemctl list-timers sellerops-backup.timer`.
+    **이전 버전이 설치한 `/etc/cron.d/sellerops-backup`이 남아 있으면** 설치는 **거부된다**(중복
+    스케줄). 그 파일 하나는 운영자가 직접 지운다 — 이 스크립트에 삭제 경로는 없다.
 16. **복원 리허설**(R12·R13) — 이것을 하기 전에는 B5가 CLOSED가 아니다.
 
 **순서가 바뀐 것이 아니라 강제된다(2026-09-26).** 13~15는 이제 **10~12보다 먼저** 끝나 있어야 한다 —

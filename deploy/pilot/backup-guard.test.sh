@@ -37,6 +37,28 @@ printf '#!/usr/bin/env bash\nexit 1\n'            > "$WORK/stub/dig"
 printf '#!/usr/bin/env bash\nexit 1\n'            > "$WORK/stub/curl"
 printf '#!/usr/bin/env bash\nexit 1\n'            > "$WORK/stub/getent"
 printf '#!/usr/bin/env bash\necho aws-cli/2.0.0\n' > "$WORK/awsbin/aws"
+# systemd, faked just enough to be observed. The stub RECORDS its arguments, because «the installer
+# enables the timer» is a claim about a call this test cannot otherwise see, and answers the two
+# queries preflight asks. FAKE_TIMER_* let a case say «installed but disabled» without a real host.
+cat > "$WORK/stub/systemctl" <<'SYSCTL'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${SYSTEMCTL_LOG:-/dev/null}"
+case "$*" in
+  "is-enabled sellerops-backup.timer")
+    if [[ "${FAKE_TIMER_ENABLED:-1}" == 1 ]]; then echo enabled; exit 0; else echo disabled; exit 1; fi ;;
+  "show sellerops-backup.timer -p LoadState --value")
+    if [[ "${FAKE_TIMER_LOADED:-1}" == 1 ]]; then echo loaded; else echo not-found; fi; exit 0 ;;
+esac
+exit 0
+SYSCTL
+# Accepts the calendar this repository writes and rejects anything else, which is what a systemd too
+# old for a timezone suffix would do.
+cat > "$WORK/stub/systemd-analyze" <<'ANALYZE'
+#!/usr/bin/env bash
+[[ "$1" == calendar ]] || exit 0
+[[ "$2" == "*-*-* 03:17:00 Asia/Seoul" ]] || exit 1
+echo "Next elapse: Sat 2026-09-26 03:17:00 KST"
+ANALYZE
 chmod +x "$WORK"/stub/* "$WORK"/awsbin/*
 NOAWS="$WORK/stub:$WORK/pure"
 WITHAWS="$WORK/awsbin:$NOAWS"
@@ -108,55 +130,78 @@ has "$SECRET" "$out" && no "no secret value is ever printed" "the secret appeare
 echo
 echo "B. preflight.sh — the same facts, scored as failures"
 
-mkdir -p "$WORK/backups"
-out="$(PILOT_BACKUP_DIR="$WORK/backups" preflight "$WITHAWS" "$WORK/off.env")"
+mkdir -p "$WORK/backups" "$WORK/units-empty" "$WORK/cron"
+out="$(PILOT_BACKUP_DIR="$WORK/backups" PILOT_SYSTEMD_DIR="$WORK/units-empty" PILOT_CRON_DIR="$WORK/cron" preflight "$WITHAWS" "$WORK/off.env")"
 has 'FAIL  SELLEROPS_BACKUP_S3_ENABLED is not true' "$out" && ok "S3 off → bad (was a note)" || no "S3 off → bad (was a note)" "not scored as a failure"
-out="$(PILOT_BACKUP_DIR="$WORK/backups" preflight "$NOAWS" "$WORK/on.env")"
+out="$(PILOT_BACKUP_DIR="$WORK/backups" PILOT_SYSTEMD_DIR="$WORK/units-empty" PILOT_CRON_DIR="$WORK/cron" preflight "$NOAWS" "$WORK/on.env")"
 has 'FAIL  the aws cli is not installed' "$out" && ok "aws missing → bad" || no "aws missing → bad" "not scored as a failure"
-out="$(PILOT_BACKUP_DIR="$WORK/backups" preflight "$WITHAWS" "$WORK/on.env")"
+out="$(PILOT_BACKUP_DIR="$WORK/backups" PILOT_SYSTEMD_DIR="$WORK/units-empty" PILOT_CRON_DIR="$WORK/cron" preflight "$WITHAWS" "$WORK/on.env")"
 has 'aws cli present' "$out" && ok "aws present → ok" || no "aws present → ok" "not scored as a pass"
 has 'FAIL  SELLEROPS_BACKUP_S3_ENABLED' "$out" && no "S3 on → no S3 failure line" "fired anyway" || ok "S3 on → no S3 failure line"
-# The cron file is what makes the nightly run exist; this host has none, and that is a failure now.
-has 'FAIL  daily backup cron is NOT installed' "$out" && ok "no cron → bad (was a note)" || no "no cron → bad (was a note)" "not scored as a failure"
+# The schedule is what makes the nightly run exist; this host has no units, and that is a failure.
+has 'FAIL  sellerops-backup.service/.timer are NOT installed' "$out" && ok "no timer units → bad" || no "no timer units → bad" "not scored as a failure"
 has "$SECRET" "$out" && no "preflight prints no secret value" "the secret appeared" || ok "preflight prints no secret value"
 
 echo
 echo "C. install-backup-job.sh — the schedule, and nothing else"
 
-ENVF="$WORK/cronenv/pilot.env"; mkdir -p "$WORK/cronenv" "$WORK/cron" "$WORK/bdir"
+ENVF="$WORK/cronenv/pilot.env"; mkdir -p "$WORK/cronenv" "$WORK/units" "$WORK/bdir" "$WORK/legacy"
 mkenv "$ENVF" "${S3_ON[@]}"
-CRONF="$WORK/cron/sellerops-backup"
+SVC="$WORK/units/sellerops-backup.service"
+TMR="$WORK/units/sellerops-backup.timer"
+SYSLOG="$WORK/systemctl.log"
 install_job() { # install_job <PATH> [args...]
   local p="$1"; shift
-  PATH="$p" PILOT_ENV_FILE="$ENVF" PILOT_CRON_DIR="$WORK/cron" PILOT_BACKUP_DIR="$WORK/bdir" \
+  PATH="$p" PILOT_ENV_FILE="$ENVF" PILOT_SYSTEMD_DIR="$WORK/units" PILOT_CRON_DIR="$WORK/legacy" \
+    PILOT_BACKUP_DIR="$WORK/bdir" SYSTEMCTL_LOG="$SYSLOG" \
     "$HERE/install-backup-job.sh" "$@" 2>&1
 }
 
+: > "$SYSLOG"
 out="$(install_job "$WITHAWS")"
-[[ -f "$CRONF" ]] && ok "installs $CRONF" || no "installs $CRONF" "$out"
-mode="$(stat -c '%a' "$CRONF" 2>/dev/null || stat -f '%Lp' "$CRONF" 2>/dev/null)"
-[[ "$mode" == "644" ]] && ok "mode 0644 (cron ignores anything else in cron.d)" || no "mode 0644" "is $mode"
-body="$(cat "$CRONF" 2>/dev/null)"
-has "PATH=/usr/local/bin:/usr/bin:/bin" "$body" && ok "carries the PATH line (AWS CLI v2 lives in /usr/local/bin)" || no "carries the PATH line" "cron's default PATH would find no aws"
-has "$REPO/deploy/pilot/backup.sh" "$body" && ok "command is the repository's canonical backup.sh" || no "command is the repository's canonical backup.sh" "$body"
-has "PILOT_ENV_FILE=$ENVF" "$body" && ok "names the pilot env file outside the checkout" || no "names the pilot env file" "$body"
-has ">> /var/log/sellerops-backup.log 2>&1" "$body" && ok "keeps backup.sh's documented log contract" || no "keeps the log contract" "$body"
-# The timezone contract, literally. `17 3 * * *` on its own is a time in whatever zone the host booted
-# with — UTC on the recommended image, i.e. 12:17 in Seoul — and this repository has no host-timezone
-# contract to appeal to (audited 2026-09-26). CRON_TZ decides WHEN; TZ makes backup.sh's own `date`,
-# which becomes the dump filename and the object key, agree with the hour it ran at.
-has "CRON_TZ=Asia/Seoul" "$body" && ok "pins the SCHEDULE to Asia/Seoul (CRON_TZ)" || no "pins the schedule to Asia/Seoul" "$body"
-has "TZ=Asia/Seoul" "$body" && ok "pins the JOB's own clock to Asia/Seoul (TZ) — the dump filename" || no "pins the job's clock to Asia/Seoul" "$body"
-has "17 3 * * * root" "$body" && ok "schedule is 03:17, now in a named zone" || no "schedule is 03:17" "$body"
-has "$SECRET" "$body$out" && no "no secret value in the cron file or the output" "the secret appeared" || ok "no secret value in the cron file or the output"
+[[ -f "$SVC" && -f "$TMR" ]] && ok "installs both units" || no "installs both units" "$out"
+for f in "$SVC" "$TMR"; do
+  mode="$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null)"
+  [[ "$mode" == "644" ]] && ok "$(basename "$f") is mode 0644" || no "$(basename "$f") is mode 0644" "is $mode"
+done
+svc="$(cat "$SVC" 2>/dev/null)"; tmr="$(cat "$TMR" 2>/dev/null)"
 
+# The whole reason this is a timer and not a cron file: the zone is IN the calendar, so the hour does
+# not depend on what the host booted with. Ubuntu 24.04's default cron cannot be relied on for this.
+has 'OnCalendar=*-*-* 03:17:00 Asia/Seoul' "$tmr" && ok "timer fires at 03:17 Asia/Seoul, zone named in the unit" || no "timer OnCalendar is the KST contract" "$tmr"
+has 'Persistent=true' "$tmr" && ok "Persistent=true — a night the host was off is made up, not skipped" || no "Persistent=true" "$tmr"
+has 'WantedBy=timers.target' "$tmr" && ok "timer is installable into timers.target" || no "timer is installable" "$tmr"
+# TZ decides what backup.sh's own `date` prints, and that string becomes the dump filename and the
+# object key. Without it a 03:17 KST run names its file 1817 of the previous day on a UTC host.
+has 'Environment=TZ=Asia/Seoul' "$svc" && ok "service clock is Asia/Seoul (the dump filename)" || no "service TZ" "$svc"
+has 'Environment=PATH=/usr/local/bin:/usr/bin:/bin' "$svc" && ok "service PATH carries /usr/local/bin (AWS CLI v2's shim)" || no "service PATH" "$svc"
+has "Environment=PILOT_ENV_FILE=$ENVF" "$svc" && ok "service names the env FILE, outside the checkout" || no "service names the env file" "$svc"
+has "ExecStart=$REPO/deploy/pilot/backup.sh" "$svc" && ok "ExecStart is the repository's canonical backup.sh" || no "ExecStart is canonical backup.sh" "$svc"
+has "WorkingDirectory=$REPO" "$svc" && ok "runs in the checkout (docker compose derives its project name from it)" || no "WorkingDirectory is the checkout" "$svc"
+has "append:/var/log/sellerops-backup.log" "$svc" && ok "keeps backup.sh's documented log path" || no "keeps the log contract" "$svc"
+has "$SECRET" "$svc$tmr$out" && no "no secret value in the units or the output" "the secret appeared" || ok "no secret value in the units or the output"
+# «Installed» is not «scheduled»: a unit nothing enables never fires.
+has 'daemon-reload' "$(cat "$SYSLOG")" && ok "runs systemctl daemon-reload" || no "runs systemctl daemon-reload" "$(cat "$SYSLOG")"
+has 'enable --now sellerops-backup.timer' "$(cat "$SYSLOG")" && ok "runs systemctl enable --now on the timer" || no "runs systemctl enable --now" "$(cat "$SYSLOG")"
+has 'parses on this host' "$out" && ok "validates the calendar with systemd-analyze before installing" || no "validates the calendar before installing" "$out"
+
+: > "$SYSLOG"
 out="$(install_job "$WITHAWS")"
 has 'unchanged' "$out" && ok "second run is idempotent (says unchanged)" || no "second run is idempotent" "$out"
-[[ "$(cat "$CRONF")" == "$body" ]] && ok "second run leaves the file byte-identical" || no "second run leaves the file byte-identical" "content moved"
+[[ "$(cat "$SVC")" == "$svc" && "$(cat "$TMR")" == "$tmr" ]] && ok "second run leaves both units byte-identical" || no "second run leaves both units byte-identical" "content moved"
+has 'enable --now sellerops-backup.timer' "$(cat "$SYSLOG")" && ok "second run still enables (an installed-but-disabled timer is the state this ends)" || no "second run still enables" "$(cat "$SYSLOG")"
+
+# A host that ran the cron version of this script would otherwise get TWO nightly dumps of the same
+# database — and the cron one at the wrong hour, which is why it is being replaced.
+printf 'x\n' > "$WORK/legacy/sellerops-backup"
+out="$(install_job "$WITHAWS")"; rc=$?
+[[ $rc -ne 0 ]] && has 'still exists' "$out" && ok "legacy cron file present → refuses to add a second schedule" || no "legacy cron file present → refuses" "rc=$rc $out"
+[[ -f "$WORK/legacy/sellerops-backup" ]] && ok "and does not delete it — that is the operator's one command" || no "and does not delete it" "the script removed a file"
+rm -f "$WORK/legacy/sellerops-backup"
 
 # There is no uninstall. An unknown flag is read as a repo path and refused, and the schedule survives.
 out="$(install_job "$WITHAWS" --uninstall)"; rc=$?
-[[ $rc -ne 0 ]] && [[ -f "$CRONF" ]] && ok "--uninstall is not a feature and removes nothing" || no "--uninstall is not a feature and removes nothing" "rc=$rc file=$( [[ -f $CRONF ]] && echo kept || echo GONE)"
+[[ $rc -ne 0 ]] && [[ -f "$TMR" ]] && ok "--uninstall is not a feature and removes nothing" || no "--uninstall is not a feature and removes nothing" "rc=$rc"
 
 out="$(install_job "$NOAWS")"
 has 'aws cli is not installed' "$out" && ok "aws missing → refuses to install a job that cannot upload" || no "aws missing → refuses" "$out"
@@ -167,34 +212,38 @@ has 'not a directory' "$out" && ok "bad repo path → refused" || no "bad repo p
 out="$(install_job "$WITHAWS" "$WORK")"
 has 'not found' "$out" && ok "a directory that is not this checkout → refused" || no "a directory that is not this checkout → refused" "$out"
 
-missing="$WORK/nope.env"
-out="$(PATH="$WITHAWS" PILOT_ENV_FILE="$missing" PILOT_CRON_DIR="$WORK/cron" PILOT_BACKUP_DIR="$WORK/bdir" "$HERE/install-backup-job.sh" 2>&1)"
+base=(PATH="$WITHAWS" PILOT_SYSTEMD_DIR="$WORK/units" PILOT_CRON_DIR="$WORK/legacy" PILOT_BACKUP_DIR="$WORK/bdir")
+out="$(env "${base[@]}" PILOT_ENV_FILE="$WORK/nope.env" "$HERE/install-backup-job.sh" 2>&1)"
 has 'not found' "$out" && ok "missing env file → refused" || no "missing env file → refused" "$out"
 
 inside="$REPO/.pilot-env-inside-checkout.tmp"; mkenv "$inside" "${S3_ON[@]}"
-out="$(PATH="$WITHAWS" PILOT_ENV_FILE="$inside" PILOT_CRON_DIR="$WORK/cron" PILOT_BACKUP_DIR="$WORK/bdir" "$HERE/install-backup-job.sh" 2>&1)"
-rm -f "$inside"
+out="$(env "${base[@]}" PILOT_ENV_FILE="$inside" "$HERE/install-backup-job.sh" 2>&1)"; rm -f "$inside"
 has 'inside the repository' "$out" && ok "env inside the checkout → refused (one git add away)" || no "env inside the checkout → refused" "$out"
 
 loose="$WORK/cronenv/loose.env"; mkenv "$loose" "${S3_ON[@]}"; chmod 644 "$loose"
-out="$(PATH="$WITHAWS" PILOT_ENV_FILE="$loose" PILOT_CRON_DIR="$WORK/cron" PILOT_BACKUP_DIR="$WORK/bdir" "$HERE/install-backup-job.sh" 2>&1)"
+out="$(env "${base[@]}" PILOT_ENV_FILE="$loose" "$HERE/install-backup-job.sh" 2>&1)"
 has 'must be mode 0600' "$out" && ok "world-readable env → refused" || no "world-readable env → refused" "$out"
 
-# In a crontab an unescaped % becomes a newline: everything after it stops being the command.
-pcdir="$WORK/pct%dir"; mkdir -p "$pcdir"; pcenv="$pcdir/pilot.env"; mkenv "$pcenv" "${S3_ON[@]}"
-out="$(PATH="$WITHAWS" PILOT_ENV_FILE="$pcenv" PILOT_CRON_DIR="$WORK/cron" PILOT_BACKUP_DIR="$WORK/bdir" "$HERE/install-backup-job.sh" 2>&1)"
-has "contains '%'" "$out" && ok "a % in a path → refused (cron would turn it into a newline)" || no "a % in a path → refused" "$out"
+out="$(env "${base[@]}" PILOT_ENV_FILE="$ENVF" PILOT_SYSTEMD_DIR="$WORK/no-such-unit-dir" "$HERE/install-backup-job.sh" 2>&1)"
+has 'does not exist' "$out" && ok "no unit directory → refused" || no "no unit directory → refused" "$out"
 
-out="$(PATH="$WITHAWS" PILOT_ENV_FILE="$ENVF" PILOT_CRON_DIR="$WORK/no-such-cron-dir" PILOT_BACKUP_DIR="$WORK/bdir" "$HERE/install-backup-job.sh" 2>&1)"
-has 'does not exist' "$out" && ok "no cron directory → refused" || no "no cron directory → refused" "$out"
-
-out="$(PATH="$WITHAWS" PILOT_ENV_FILE="$ENVF" PILOT_CRON_DIR="$WORK/cron" PILOT_BACKUP_DIR="$WORK/no-such-backup-dir" "$HERE/install-backup-job.sh" 2>&1)"
+out="$(env "${base[@]}" PILOT_ENV_FILE="$ENVF" PILOT_BACKUP_DIR="$WORK/no-such-backup-dir" "$HERE/install-backup-job.sh" 2>&1)"
 has 'backup directory' "$out" && ok "no backup directory → refused" || no "no backup directory → refused" "$out"
+
+out="$(PATH="$WORK/awsbin:$WORK/pure" PILOT_ENV_FILE="$ENVF" PILOT_SYSTEMD_DIR="$WORK/units" PILOT_CRON_DIR="$WORK/legacy" PILOT_BACKUP_DIR="$WORK/bdir" "$HERE/install-backup-job.sh" 2>&1)"
+has 'systemctl not found' "$out" && ok "no systemd → refused (the pilot host contract is Ubuntu 24.04)" || no "no systemd → refused" "$out"
 
 # The claim this script is careful NOT to make.
 grep -q -- '--local-only' "$HERE/install-backup-job.sh" && \
   { grep -q 'would exit 0 here without' "$HERE/install-backup-job.sh" && ok "never runs backup.sh to claim a verified off-host copy" || no "never runs backup.sh to claim a verified off-host copy" "--local-only appears outside the explanation"; } \
   || no "never runs backup.sh to claim a verified off-host copy" "the explanation went missing"
+# And the mechanism it is no longer allowed to USE. CRON_TZ still appears in this file — in the
+# paragraph explaining why it was withdrawn — so the assertion is about code, not about the word: no
+# line that is not a comment may mention it. A guard that fires on its own explanation is a guard
+# somebody deletes.
+[[ -z "$(grep -n 'CRON_TZ' "$HERE/install-backup-job.sh" | grep -v '^[0-9]*:#')" ]] \
+  && ok "CRON_TZ survives only as the note explaining why it was withdrawn" \
+  || no "CRON_TZ survives only as a note" "a non-comment line still schedules with CRON_TZ"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

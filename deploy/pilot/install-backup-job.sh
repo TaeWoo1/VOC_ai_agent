@@ -1,39 +1,50 @@
 #!/usr/bin/env bash
-# Daily backup cron — Pilot Provisioning Plan v1 §2-E step 15, blocker B5 item B5-1.
+# Daily backup schedule — Pilot Provisioning Plan v1 §2-E step 15, blocker B5 item B5-1.
 #
 #   deploy/pilot/install-backup-job.sh                       # repo = this checkout
 #   deploy/pilot/install-backup-job.sh /opt/sellerops/repo   # repo = an explicit path
 #   PILOT_ENV_FILE=/etc/sellerops/pilot.env deploy/pilot/install-backup-job.sh
 #
-# Writes exactly one file, /etc/cron.d/sellerops-backup, whose command is this repository's own
-# backup.sh. Nothing else on the host is touched, no cloud resource is created, and no value from the
-# env file is read, printed or copied — the cron line names the FILE, and backup.sh sources it at
-# 03:17 as root, which is the only place those secrets ever need to be.
+# Installs two unit files — sellerops-backup.service and sellerops-backup.timer — and enables the
+# timer. Nothing else on the host is touched, no cloud resource is created, and no value from the env
+# file is read, printed or copied: the unit names the FILE, and backup.sh sources it as root at 03:17,
+# which is the only place those secrets ever need to be.
 #
-# WHY A SCRIPT AND NOT A README LINE. The line in backup.sh's header has been correct and uninstalled
-# for as long as it has existed (`pilot_provisioning_plan_v1.md` §2-2 S4). Three things about it are
-# easy to get subtly wrong by hand, and each one fails silently at 03:17 rather than loudly now:
+# ── WHY systemd AND NOT cron (2026-09-26, external verification) ─────────────────────────────────
+# The first version of this script wrote /etc/cron.d/sellerops-backup with `CRON_TZ=Asia/Seoul`.
+# That is withdrawn: **per-job timezone scheduling cannot be relied on in Ubuntu 24.04's default
+# cron.** The failure mode is the bad kind — the file parses, the job runs, and it runs at the wrong
+# hour, which is indistinguishable from working until someone compares a dump's name with the clock.
 #
-#   * PATH. cron's default is /usr/bin:/bin. AWS CLI v2 installs its shim in **/usr/local/bin**, so a
-#     hand-written cron line finds no `aws`, and every nightly run ends at `reason=aws-cli-not-installed`
-#     with a local dump written and no off-host copy — which is the exact state B5 exists to forbid.
-#   * The TIMEZONE. `17 3 * * *` is a time in whatever zone cron thinks is local, and nothing in this
-#     repository sets the host's zone: host-bootstrap.sh does not touch it, no provisioning document
-#     defines it, and an Ubuntu cloud image defaults to UTC. So the bare schedule would have run at
-#     **12:17 in Seoul** — the middle of a Korean seller's working day — while five comments across
-#     deploy/pilot/ describe it as «03:17» and rest their whole argument on nobody being awake for it.
-#     The zone is pinned per job below; see the CRON_TZ block.
-#   * The env file. backup.sh defaults to /etc/sellerops/pilot.env, but a host whose env lives
-#     elsewhere needs PILOT_ENV_FILE ON THE CRON LINE; inherited shell state does not exist in cron.
-#   * `%`. In a crontab, an unescaped % is turned into a newline and everything after it becomes stdin.
-#     A repo path or env path containing one produces a cron entry that is not the command anyone read.
+# systemd's timer has the zone in the calendar expression itself: systemd.time(7) documents that a
+# calendar specification may carry a timezone in IANA form, and that this applies to `OnCalendar=` in
+# timer units. **The version that introduced it is deliberately not asserted here** — a first draft of
+# this comment claimed «since v252», and checking v252's own NEWS showed no such entry, which is the
+# same shape of unverified confidence that put the cron version of this file on the host. So nothing
+# downstream rests on a version claim: `systemd-analyze calendar` resolves the expression on THIS host
+# before anything is installed, and a host that cannot parse it stops the install. The requirement was
+# never «use cron» — it was «run at 03:17 in Seoul on a host whose own zone this repository does not
+# set», and this is the mechanism that can state that in one line and prove it parses.
 #
-# WHAT THIS SCRIPT DOES NOT DO, deliberately:
+# `Persistent=true` adds what cron never had: a run missed because the host was off fires once at the
+# next boot, rather than being silently skipped on exactly the days a host had trouble.
 #
-#   * It never removes anything. There is no --uninstall, and no code path in this file deletes the
-#     cron file, the dumps or a remote object. A script that knows how to remove a backup schedule is
-#     a script that can remove one; `rm /etc/cron.d/sellerops-backup` is an operator's decision and
-#     reads like one.
+# ── WHAT IS EASY TO GET WRONG BY HAND, and why this is a script ──────────────────────────────────
+#   * PATH. A systemd service starts with a minimal environment. AWS CLI v2 installs its shim in
+#     **/usr/local/bin**, so without the PATH below every nightly run ends at
+#     `reason=aws-cli-not-installed` with a local dump written and no off-host copy — the exact state
+#     B5 exists to forbid.
+#   * The env file. backup.sh defaults to /etc/sellerops/pilot.env; a host whose env lives elsewhere
+#     needs PILOT_ENV_FILE **in the unit**, because a unit inherits nothing from a login shell.
+#   * TZ. The calendar decides WHEN; `TZ=Asia/Seoul` in the service decides what `date +%Y%m%d-%H%M`
+#     inside backup.sh prints — and that string becomes the dump's filename and the object key. With
+#     only the first, a 03:17 KST run names its file 1817 of the previous day on a UTC host, and
+#     «which day is this backup from» has two answers.
+#
+# ── WHAT THIS SCRIPT DOES NOT DO, deliberately ───────────────────────────────────────────────────
+#   * It never removes anything. There is no --uninstall, and no code path here deletes a unit, a
+#     cron file, a dump or a remote object — including the legacy cron file this script's own earlier
+#     version wrote. That one is REFUSED rather than removed: see the duplicate-schedule check below.
 #   * It does not claim the off-host copy works. `backup.sh --local-only` would exit 0 here without
 #     touching object storage, and calling that a verified off-host backup is precisely the failure
 #     B5 is about. The first real proof is ONE manual `deploy/pilot/backup.sh` run once the bucket and
@@ -46,112 +57,136 @@ SELF_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_IN="${1:-$SELF_REPO}"
 ENV_FILE="${PILOT_ENV_FILE:-/etc/sellerops/pilot.env}"
 BACKUP_DIR="${PILOT_BACKUP_DIR:-/var/backups/sellerops}"
-# The cron directory is a seam for this script's own tests and for a distro that puts it elsewhere.
-# The FILE name inside it is not a knob: one schedule, one name, so a second run replaces the first
-# rather than adding a second nightly dump nobody remembers installing.
-CRON_DIR="${PILOT_CRON_DIR:-/etc/cron.d}"
-CRON_FILE="$CRON_DIR/sellerops-backup"
-# Fixed on purpose: backup.sh's header documents this exact redirection, restore/runbook text quotes
-# it, and a per-host log path is one more thing that can disagree with the document it came from.
+# Seams for this script's own tests and for a host that puts units elsewhere. The unit NAMES are not
+# knobs: one schedule, one name, so a second run replaces the first rather than adding a second
+# nightly dump nobody remembers installing.
+UNIT_DIR="${PILOT_SYSTEMD_DIR:-/etc/systemd/system}"
+LEGACY_CRON="${PILOT_CRON_DIR:-/etc/cron.d}/sellerops-backup"
+SERVICE="$UNIT_DIR/sellerops-backup.service"
+TIMER="$UNIT_DIR/sellerops-backup.timer"
+# Fixed on purpose: backup.sh's header documents this exact log path and the runbook quotes it.
 LOG="/var/log/sellerops-backup.log"
-SCHEDULE="17 3 * * *"
-# Not a knob for the same reason SCHEDULE is not one: the hour above only means «the middle of the
-# night» in this zone, and the two are one decision. See the CRON_TZ block below for the audit.
-CRON_TIMEZONE="Asia/Seoul"
+ON_CALENDAR="*-*-* 03:17:00 Asia/Seoul"
+TIMEZONE="Asia/Seoul"
 
 [[ -d "$REPO_IN" ]] || fail "repo path is not a directory: $REPO_IN"
 REPO="$(cd "$REPO_IN" && pwd)"
 BACKUP="$REPO/deploy/pilot/backup.sh"
 [[ -f "$BACKUP" ]] || fail "$BACKUP not found — is $REPO this repository's checkout?"
-[[ -x "$BACKUP" ]] || fail "$BACKUP is not executable (chmod +x) — cron would log a permission error every night"
+[[ -x "$BACKUP" ]] || fail "$BACKUP is not executable (chmod +x) — the unit would fail to start every night"
 
-[[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found (copy deploy/pilot/pilot.env.example, mode 0600) — cron cannot source a file that is not there"
+[[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found (copy deploy/pilot/pilot.env.example, mode 0600) — the unit cannot source a file that is not there"
 # The same rule deploy.sh enforces, for the same reason: a pilot secret must never be one `git add`
-# away, and a cron line pointing INTO the checkout would survive a `git clean` only by luck.
+# away, and a unit pointing INTO the checkout would survive a `git clean` only by luck.
 case "$ENV_FILE" in "$REPO"/*) fail "$ENV_FILE is inside the repository — keep the pilot env outside the checkout";; esac
 perm="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
-[[ "$perm" == "600" || "$perm" == "400" ]] || fail "$ENV_FILE must be mode 0600 (is $perm) — it holds the S3 credential this cron job will use"
-
-# Neither path may contain a character that changes what cron executes. Checked rather than escaped:
-# an escaped path would still be legal and still be surprising, and there is no reason for a pilot
-# host's repo or env file to live at a path with a percent sign or a space in it.
-for p in "$REPO" "$ENV_FILE"; do
-  case "$p" in
-    *%*)              fail "path contains '%', which cron turns into a newline: $p" ;;
-    *[[:space:]]*)    fail "path contains whitespace, which cron reads as a field separator: $p" ;;
-  esac
-done
+[[ "$perm" == "600" || "$perm" == "400" ]] || fail "$ENV_FILE must be mode 0600 (is $perm) — it holds the S3 credential this job will use"
 
 command -v aws >/dev/null 2>&1 || fail "the aws cli is not installed — the nightly run would write a local dump and fail the off-host upload (deploy/pilot/host-bootstrap.sh installs AWS CLI v2)"
 [[ -d "$BACKUP_DIR" ]] || fail "backup directory $BACKUP_DIR does not exist (deploy/pilot/host-bootstrap.sh creates it 0700)"
-[[ -d "$(dirname "$LOG")" ]] || fail "$(dirname "$LOG") does not exist — cron cannot append the backup log"
-[[ -d "$CRON_DIR" ]] || fail "$CRON_DIR does not exist — is cron installed on this host?"
-[[ -w "$CRON_DIR" ]] || fail "$CRON_DIR is not writable (run as root)"
+[[ -d "$(dirname "$LOG")" ]] || fail "$(dirname "$LOG") does not exist — the unit cannot append the backup log"
+command -v systemctl >/dev/null 2>&1 || fail "systemctl not found — the pilot host contract is Ubuntu 24.04 with systemd (docs/pilot_host_provisioning_v1.md §3)"
+[[ -d "$UNIT_DIR" ]] || fail "$UNIT_DIR does not exist"
+[[ -w "$UNIT_DIR" ]] || fail "$UNIT_DIR is not writable (run as root)"
 
-# The PATH line is the load-bearing part of this file; see the header. /usr/local/bin first because
-# that is where AWS CLI v2's shim lives, then the two directories cron would have given us anyway
-# (docker, pg_dump's client wrapper and the coreutils backup.sh uses are in /usr/bin).
-#
-# ── The timezone, pinned PER JOB and nowhere else ────────────────────────────────────────────────
-# Audited 2026-09-26: this repository has NO host-timezone contract. `host-bootstrap.sh` never calls
-# timedatectl and installs no tzdata policy, and no provisioning document states a zone — so the only
-# answer to «when does 17 3 * * * run» was «whatever the image happened to boot with», which for the
-# recommended Ubuntu EC2 host is UTC, i.e. 12:17 in Seoul.
-#
-# What the repository DOES have a contract about is the day itself: `Asia/Seoul`, in 41 backend files
-# (`ResponsibilityWindows.ZONE`, the KST day keys the Home reads) and stated in
-# `pilot_launch_readiness_v1.md` — «The date is Asia/Seoul and the server decides it». That contract is
-# application-level and deliberately independent of the host clock (every one of those call sites names
-# the zone explicitly), which is why a UTC host runs the product correctly and why this schedule was
-# free to disagree with it unnoticed.
-#
-# So the job is pinned, and only the job: `timedatectl set-timezone` would move the whole host — its
-# logs, its `date`, every container that inherits /etc/localtime — to make one cron line land at the
-# right hour, which is a large change bought for a small reason.
-#
-# BOTH names are set on purpose. `CRON_TZ` is what Vixie-derived cron (Ubuntu's `cron` package, which
-# host-bootstrap.sh targets) reads to decide WHEN to run; `TZ` is exported into the job's own
-# environment, so `backup.sh`'s `date +%Y%m%d-%H%M` — which becomes the dump's filename and therefore
-# the object key — agrees with the hour it ran at. With only the first, a 03:17 KST run would name its
-# file 1817 of the previous day, and «which day is this backup from» would have two answers.
-#
-# Asia/Seoul has no daylight saving (`ResponsibilityWindows` relies on the same fact), so 03:17 is
-# 03:17 every day of the year — there is no skipped or doubled run to reason about.
-tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
-cat > "$tmp" <<CRON
+# ── duplicate schedule: refuse, never remove ─────────────────────────────────────────────────────
+# An earlier version of this script installed /etc/cron.d/sellerops-backup. Leaving it in place while
+# enabling the timer gives the host TWO nightly dumps of the same database — and the cron one runs at
+# the wrong hour, which is why it is being replaced. Deleting it automatically is the other way to be
+# wrong: this file has no delete path by design, that path would have to special-case «a file we
+# recognise» from «a file an operator wrote», and a script that can remove a backup schedule is a
+# script that can remove a backup schedule. So it stops here and names the one command to run.
+if [[ -e "$LEGACY_CRON" ]]; then fail "$LEGACY_CRON still exists — installing the timer beside it would schedule TWO nightly dumps of the same database. Remove that ONE file yourself (rm $LEGACY_CRON) and run this again; this script does not delete anything."
+fi
+
+# ── the calendar expression is validated before it is installed ──────────────────────────────────
+# `systemd-analyze calendar` resolves the expression, zone included, and prints the next elapse. This
+# is the check that replaces knowing a version number: a systemd too old for a timezone suffix says so
+# HERE, rather than accepting a timer that never fires at the hour it claims.
+if command -v systemd-analyze >/dev/null 2>&1; then
+  systemd-analyze calendar "$ON_CALENDAR" >/dev/null 2>&1 \
+    || fail "this host's systemd cannot parse '$ON_CALENDAR' — its version does not support a timezone in a calendar expression, and a schedule that silently falls back to the host's own zone is the defect this replaced"
+  printf 'calendar: %s parses on this host\n' "$ON_CALENDAR"
+else
+  printf 'calendar: systemd-analyze not available — %s is installed unvalidated\n' "$ON_CALENDAR"
+fi
+
+for p in "$REPO" "$ENV_FILE"; do
+  case "$p" in *[[:space:]]*) fail "path contains whitespace, which a unit's Environment= line reads as a separator: $p" ;; esac
+done
+
+svc_tmp="$(mktemp)"; tmr_tmp="$(mktemp)"; trap 'rm -f "$svc_tmp" "$tmr_tmp"' EXIT
+# WorkingDirectory is the repo because `docker compose -f <abs>` derives its PROJECT NAME from the
+# project directory, and a unit started from / could resolve a different project than the stack
+# deploy.sh brought up — `exec -T postgres` would then fail against a project that has no containers.
+# backup.sh itself needs no particular cwd (it resolves everything from BASH_SOURCE), so this pins a
+# behaviour of docker compose rather than one of ours.
+cat > "$svc_tmp" <<UNIT
 # reviewnary pilot — daily logical backup + off-host copy (blocker B5).
 # Managed by deploy/pilot/install-backup-job.sh. Edit that script and re-run it, not this file.
 # Contains no secret: it names the env FILE, and backup.sh sources it as root at run time.
-SHELL=/bin/bash
-PATH=/usr/local/bin:/usr/bin:/bin
-CRON_TZ=$CRON_TIMEZONE
-TZ=$CRON_TIMEZONE
-$SCHEDULE root PILOT_ENV_FILE=$ENV_FILE $BACKUP >> $LOG 2>&1
-CRON
+[Unit]
+Description=Reviewnary PostgreSQL off-host backup
 
-if [[ -f "$CRON_FILE" ]] && cmp -s "$tmp" "$CRON_FILE"; then
-  printf 'unchanged: %s\n' "$CRON_FILE"
-else
-  # 0644 because cron refuses a file in /etc/cron.d that is group- or world-writable, and 0600 would
-  # hide it from nothing — there is no secret in it to hide.
-  install -m 0644 "$tmp" "$CRON_FILE"
-  if [[ $EUID -eq 0 ]]; then chown root:root "$CRON_FILE"; fi
-  printf 'installed: %s\n' "$CRON_FILE"
-fi
-rm -f "$tmp"; trap - EXIT
+[Service]
+Type=oneshot
+Environment=TZ=$TIMEZONE
+Environment=PILOT_ENV_FILE=$ENV_FILE
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=$REPO
+ExecStart=$BACKUP
+StandardOutput=append:$LOG
+StandardError=append:$LOG
+UNIT
 
-mode="$(stat -c '%a' "$CRON_FILE" 2>/dev/null || stat -f '%Lp' "$CRON_FILE")"
-[[ "$mode" == "644" ]] || fail "$CRON_FILE is mode $mode — cron ignores a cron.d file that is not 0644"
-grep -qF "PATH=/usr/local/bin:/usr/bin:/bin" "$CRON_FILE" || fail "$CRON_FILE lost its PATH line — cron would not find the aws cli"
-grep -qF "CRON_TZ=$CRON_TIMEZONE" "$CRON_FILE" || fail "$CRON_FILE lost its CRON_TZ line — the schedule would run in the host's zone (UTC on the recommended image), i.e. midday in Seoul"
-grep -qF "TZ=$CRON_TIMEZONE" "$CRON_FILE" || fail "$CRON_FILE lost its TZ line — the dump's filename would disagree with the hour it ran at"
-grep -qF " root PILOT_ENV_FILE=$ENV_FILE $BACKUP " "$CRON_FILE" || fail "$CRON_FILE does not name the expected command"
+cat > "$tmr_tmp" <<UNIT
+# reviewnary pilot — 03:17 Asia/Seoul, whatever this host's own timezone is.
+# Managed by deploy/pilot/install-backup-job.sh. Edit that script and re-run it, not this file.
+[Unit]
+Description=Reviewnary PostgreSQL off-host backup timer
 
-printf '\ncron file (mode %s) — it names paths only, so it is printed in full:\n' "$mode"
-sed 's/^/  /' "$CRON_FILE"
-printf '\nschedule: %s %s — cron decides the hour from CRON_TZ; that it HONOURS it is a property of the
-      host\x27s cron (Ubuntu\x27s vixie-derived package does) and is only observable on the first night.\n' \
-  "$SCHEDULE" "$CRON_TIMEZONE"
+[Timer]
+OnCalendar=$ON_CALENDAR
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+changed=0
+for pair in "$svc_tmp:$SERVICE" "$tmr_tmp:$TIMER"; do
+  src="${pair%%:*}"; dst="${pair#*:}"
+  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
+    printf 'unchanged: %s\n' "$dst"
+  else
+    # install(1) writes to a temporary name and renames, so a reader never sees a half-written unit.
+    install -m 0644 "$src" "$dst"
+    if [[ $EUID -eq 0 ]]; then chown root:root "$dst"; fi
+    printf 'installed: %s\n' "$dst"
+    changed=1
+  fi
+done
+rm -f "$svc_tmp" "$tmr_tmp"; trap - EXIT
+
+for f in "$SERVICE" "$TIMER"; do
+  mode="$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f")"
+  [[ "$mode" == "644" ]] || fail "$f is mode $mode — a unit file must be world-readable and not writable by anyone else"
+done
+grep -qF "OnCalendar=$ON_CALENDAR" "$TIMER" || fail "$TIMER lost its OnCalendar line"
+grep -qF "Persistent=true" "$TIMER"          || fail "$TIMER lost Persistent=true — a run missed while the host was off would be skipped silently"
+grep -qF "Environment=TZ=$TIMEZONE" "$SERVICE" || fail "$SERVICE lost TZ — the dump's filename would disagree with the hour it ran at"
+grep -qF "Environment=PATH=/usr/local/bin:" "$SERVICE" || fail "$SERVICE lost its PATH — the unit would not find the aws cli"
+grep -qF "ExecStart=$BACKUP" "$SERVICE"      || fail "$SERVICE does not start the expected script"
+
+# Both are idempotent, so they run whether or not a file moved: a host whose units were already
+# correct but whose timer was never enabled is exactly the state this is here to end.
+systemctl daemon-reload
+systemctl enable --now sellerops-backup.timer
+
+printf '\nunits (mode 0644) — they name paths only, so they are printed in full:\n'
+sed 's/^/  /' "$SERVICE"; printf '\n'; sed 's/^/  /' "$TIMER"
+printf '\nschedule: %s. Observe the next firing with:  systemctl list-timers sellerops-backup.timer\n' "$ON_CALENDAR"
+[[ "$changed" -eq 1 ]] || printf 'nothing moved: the units were already exactly this.\n'
 printf '\nnext: nothing here proves an upload succeeds. Run deploy/pilot/backup.sh ONCE by hand after the
       bucket and the PutObject-only credential exist, and read its last line: `offhost=uploaded` with
       an etag is B5-2. Two consecutive nights of objects is B5-1. This script installed the schedule.\n'
