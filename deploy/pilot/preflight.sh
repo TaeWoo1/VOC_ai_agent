@@ -118,14 +118,19 @@ fi
 d="${PILOT_BACKUP_DIR:-/var/backups/sellerops}"
 [[ -d "$d" ]] && ok "backup directory $d exists" || bad "backup directory $d does not exist (host-bootstrap.sh creates it) — deploy.sh takes the pre-migration dump there"
 [[ -w "$d" ]] 2>/dev/null && ok "backup directory is writable" || note "backup directory not writable as this user (deploy.sh runs as root)"
+# BLOCKER, not a note (blocker B5, item B5-1). Without this file the ONLY dump this host ever takes
+# is deploy.sh's pre-migration one — a dump per deploy, on a host that may not be deployed for weeks,
+# and never copied off the host because `--local-only` is exactly what that dump is. «Backups exist»
+# and «a backup ran today» are different claims, and only the second one is worth anything in March.
 grep -rqs 'backup.sh' /etc/cron.d /etc/crontab 2>/dev/null && ok "daily backup cron installed" \
-  || note "daily backup cron is NOT installed — the pre-migration dump still runs, but nothing else does"
+  || bad "daily backup cron is NOT installed — run deploy/pilot/install-backup-job.sh; until then the only dump this host takes is the pre-migration one, and it is --local-only by design"
 
 # ── 6-A. off-host backup (blocker B5) ────────────────────────────────────────────────────────────
 # A dump that only ever exists on this host does not survive this host. Checked here because every
 # one of these is knowable before anything is built, and the alternative is learning it from a cron
 # job at 03:17 — or, worse, from the day the host is gone.
 if [[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]]; then
+  ok "off-host backup is ON"
   miss=()
   for n in SELLEROPS_BACKUP_S3_BUCKET SELLEROPS_BACKUP_S3_REGION \
            SELLEROPS_BACKUP_S3_ACCESS_KEY_ID SELLEROPS_BACKUP_S3_SECRET_ACCESS_KEY; do
@@ -133,9 +138,6 @@ if [[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]]; then
   done
   [[ ${#miss[@]} -eq 0 ]] && ok "off-host backup: every required value is set" \
     || bad "SELLEROPS_BACKUP_S3_ENABLED=true but these are blank: ${miss[*]}"
-  # The uploader is the AWS CLI. Its absence is a silent no-backup on a host that believes it has one.
-  command -v aws >/dev/null 2>&1 && ok "aws cli present (the off-host uploader)" \
-    || bad "SELLEROPS_BACKUP_S3_ENABLED=true but the aws cli is not installed — nothing can upload"
   # An endpoint is optional (AWS S3 needs none) but, when given, must be a URL the signer can use.
   if [[ -n "${SELLEROPS_BACKUP_S3_ENDPOINT:-}" ]]; then
     case "${SELLEROPS_BACKUP_S3_ENDPOINT}" in
@@ -144,13 +146,23 @@ if [[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]]; then
       *)         bad "SELLEROPS_BACKUP_S3_ENDPOINT must be an absolute URL" ;;
     esac
   fi
-  # Retention belongs to the bucket, and the credential is PutObject-only — neither is checkable from
-  # here without a read grant this deliberately does not have. Said, so it is not assumed.
-  note "off-host retention (30d) is the BUCKET's lifecycle policy, and the credential must be PutObject-only — neither is verifiable from this host by design"
-  note "the off-host copy of SELLEROPS_VAULT_MASTER_KEY is what makes a dump restorable — keep it OUTSIDE this bucket; only the restore rehearsal on a NEW host proves it"
 else
-  note "off-host backup is OFF — a dump that only exists on this host does not survive this host (blocker B5)"
+  # Was a note. deploy.sh now refuses this host outright, so a preflight that merely mentions it would
+  # be telling the operator they are ready for a deploy that is about to stop.
+  bad "SELLEROPS_BACKUP_S3_ENABLED is not true — a dump that only exists on this host does not survive this host (blocker B5); deploy.sh refuses to deploy in this state"
 fi
+# The uploader is the AWS CLI, and it is checked whichever way the flag went: an off-host copy this
+# host cannot perform is not an off-host copy, and turning the flag off does not make the CLI less
+# required — it only moves the moment the absence is discovered to the night it matters.
+command -v aws >/dev/null 2>&1 && ok "aws cli present (the off-host uploader)" \
+  || bad "the aws cli is not installed — nothing on this host can upload a dump (deploy/pilot/host-bootstrap.sh installs AWS CLI v2)"
+# Retention belongs to the bucket, and the credential is PutObject-only — neither is checkable from
+# here without a read grant this deliberately does not have. Said, so it is not assumed.
+note "off-host retention (30d) is the BUCKET's lifecycle policy, and the credential must be PutObject-only — neither is verifiable from this host by design"
+note "the off-host copy of SELLEROPS_VAULT_MASTER_KEY is what makes a dump restorable — keep it OUTSIDE this bucket; only the restore rehearsal on a NEW host proves it"
+# What this section does NOT prove: that an upload actually succeeds. That needs one real PutObject
+# against the real bucket with the real credential, and it is a separate package (B5-2) — every check
+# above is an env value or a binary on PATH, which is exactly as far as a read-only preflight reaches.
 
 # ── 7. the host can actually build and run this ──────────────────────────────────────────────────
 command -v docker >/dev/null && ok "docker present" || bad "docker not installed (host-bootstrap.sh)"

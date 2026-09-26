@@ -28,12 +28,20 @@ mkdir -p "$WORK/bin"
 # 300 seconds for a backend that does not exist. Refusing is both faster and more honest — this test
 # has no opinion about anything after step 2.
 printf '#!/usr/bin/env bash\nexit 1\n' > "$WORK/bin/docker"; chmod +x "$WORK/bin/docker"
+# The off-host backup uploader (blocker B5). deploy.sh refuses a pilot host that cannot perform the
+# upload, so a fixture without it would stop at that guard and never reach the pair under test here.
+# A stub rather than the host's own aws: whether this machine happens to have the AWS CLI installed is
+# not allowed to decide what this test measures.
+printf '#!/usr/bin/env bash\necho aws-cli/2.0.0\n' > "$WORK/bin/aws"; chmod +x "$WORK/bin/aws"
 export PATH="$WORK/bin:$PATH"
 
 GUARD='RESPONSIBILITY_RUNTIME_ORG_IDS names an organisation'
 ORG='87f57576-7ce7-460d-b93a-579382819fc1'
 
 # A pilot env that passes every OTHER check in step 2, so the only thing a case varies is the pair.
+# The four off-host backup names are part of «every other check» since B5 became fail-closed: they are
+# the shipped pilot posture, not a variation. deploy/pilot/backup-guard.test.sh owns what happens when
+# they are absent; nothing about the assertions below changed.
 run() {  # run <rollout-value> <scheduler-value>
   local env_file="$WORK/pilot.env"
   cat > "$env_file" <<ENV
@@ -42,6 +50,11 @@ PILOT_ACME_EMAIL=ops@example.com
 POSTGRES_PASSWORD=not-a-real-password
 SELLEROPS_JWT_SECRET=0123456789abcdef0123456789abcdef0123
 SELLEROPS_AGENT_ACCESS_SCOPE=CONNECTED_SELLERS
+SELLEROPS_BACKUP_S3_ENABLED=true
+SELLEROPS_BACKUP_S3_BUCKET=reviewnary-pilot-backups
+SELLEROPS_BACKUP_S3_REGION=ap-northeast-2
+SELLEROPS_BACKUP_S3_ACCESS_KEY_ID=AKIAEXAMPLEEXAMPLE
+SELLEROPS_BACKUP_S3_SECRET_ACCESS_KEY=not-a-real-secret
 RESPONSIBILITY_RUNTIME_ORG_IDS="$1"
 SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED=$2
 ENV

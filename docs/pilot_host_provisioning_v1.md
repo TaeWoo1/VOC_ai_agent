@@ -122,7 +122,9 @@ script here. Container deletion ≠ DB deletion.
 
 ## 11. Backup / restore
 
-`deploy/pilot/backup.sh` — daily `pg_dump -Fc` via cron (`/etc/cron.d/sellerops-backup`, 03:17) into
+`deploy/pilot/backup.sh` — daily `pg_dump -Fc` via cron (`/etc/cron.d/sellerops-backup`, **03:17 KST**
+— the cron file pins `CRON_TZ`/`TZ` to `Asia/Seoul`; the HOST's zone is not set by this repository and
+is UTC on this image, so the schedule names its own zone rather than inheriting one) into
 `/var/backups/sellerops` (0700), 14-day retention. The dump holds sealed credentials and seller data, **no
 env secret** — the vault master key lives only in `pilot.env`, which is the operator's to keep alongside
 (a restore with a different key opens nothing, by design). Off-host copy (S3) is billable and deferred

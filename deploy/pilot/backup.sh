@@ -10,8 +10,11 @@
 # making a deploy depend on object storage being reachable would block an urgent fix for a reason
 # that has nothing to do with the deploy. The DAILY cron run is the one that owes both halves, and it
 # is the one whose exit status says so.
-# Install:  echo '17 3 * * * root /opt/sellerops/repo/deploy/pilot/backup.sh >> /var/log/sellerops-backup.log 2>&1' \
-#           > /etc/cron.d/sellerops-backup
+# Install:  deploy/pilot/install-backup-job.sh     (writes /etc/cron.d/sellerops-backup, 0644)
+#           The hand-written one-liner this comment used to carry is NOT equivalent any more: the
+#           installed file also sets PATH (AWS CLI v2 lives in /usr/local/bin, which cron's default
+#           PATH does not contain) and CRON_TZ/TZ=Asia/Seoul — without which `17 3 * * *` runs in the
+#           host's zone, UTC on the recommended image, i.e. 12:17 in Seoul.
 #
 # The dump contains sealed credentials (vault ciphertext) and seller data: the directory is 0700 root.
 # It contains NO env secret — the vault master key and JWT secret live only in /etc/sellerops/pilot.env,

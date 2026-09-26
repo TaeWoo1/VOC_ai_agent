@@ -102,8 +102,20 @@ rate-limit하고, Cafe24 redirect URI의 오타는 판매자가 동의 화면 �
 13. 버킷(R-8) · 보존 정책(R-9) · 업로드 전용 자격(R-10) 생성.
 14. 호스트에 업로드 자격을 **0600**으로 배치. `backup.sh`의 off-host 업로드 단계는 **구현돼 있다**
     (`SELLEROPS_BACKUP_S3_ENABLED=true`로 켠다).
-15. cron 설치(**현재 `host-bootstrap.sh`는 cron을 설치하지 않는다 — §2-2 S4**).
+15. **`deploy/pilot/install-backup-job.sh`** — `/etc/cron.d/sellerops-backup`(0644)을 설치한다.
+    §2-2 S4(「cron 줄은 `backup.sh` 헤더 주석에만 있다」)는 **이 스크립트로 닫혔다**.
+    스케줄은 **03:17 KST**이고 zone은 **job에만** 박힌다(`CRON_TZ`/`TZ=Asia/Seoul`) — 이 저장소는
+    호스트 timezone을 설정하지 않고 권장 이미지는 UTC라, zone을 적지 않은 `17 3 * * *`은 서울 기준
+    **12:17**에 돌았을 것이다. OS 전체 시간대는 바꾸지 않는다.
 16. **복원 리허설**(R12·R13) — 이것을 하기 전에는 B5가 CLOSED가 아니다.
+
+**순서가 바뀐 것이 아니라 강제된다(2026-09-26).** 13~15는 이제 **10~12보다 먼저** 끝나 있어야 한다 —
+`deploy.sh`가 `SELLEROPS_BACKUP_S3_ENABLED=true`·네 값·`aws` 셋 다 없으면 **배포를 거부**하고,
+`preflight.sh`는 같은 셋과 cron 파일 부재를 **note가 아니라 FAIL**로 센다. 이전에는 note였고, note는
+호스트가 「백업이 있다」고 믿게 되는 경로 그 자체였다. 로컬 덤프는 어느 쪽이든 찍히므로 이 거부가 막는
+것은 「백업 여부」가 아니라 **복구할 수 없는 판매자 데이터를 쌓기 시작하는 것**이다.
+`host-bootstrap.sh`는 AWS CLI **v2**를 설치한다(`apt install awscli`는 v1이고 `backup.sh`가 부르는
+`aws s3api put-object`의 그 제품이 아니다).
 
 ---
 
@@ -298,12 +310,52 @@ B5-9는 그 제어 흐름이 실제 postgres와 실제 덤프에 대해서도 �
 |---|---|---|
 | **A. 배포 자체** | R1 deploy · R2 Flyway · R3 smoke · R4 데모/합성 0 | 실패하면 여기서 멈춘다. 뒤 단계가 전부 이것 위에 선다 |
 | **B. 첫 사용자** | R5 signup + 연결 전 홈 | **연결 전에** 확인한다 — 한 번 연결하면 이 화면은 이 org에서 다시 관측할 수 없다 |
+| **B′. org를 이름으로 등록** | org UUID 확인 → rollout/capability allow-list 기입 → scheduler·model capability 설정 → **재기동 1회** | **아래 §7-0.** 이 단계가 빠져 있었고, 그것이 감사가 찾은 모순이다 |
 | **C. 연결과 수집** | R6 Cafe24 OAuth → **R7 첫 수집 도착(시계로 측정)** → R8 Inquiry READ + `GROUNDED` draft → R9 전송 도달 불가 확인 | R7이 **B3 수정의 라이브 증명**이다. R9는 「WRITE는 꺼져 있다」를 화면에서 확인한다 |
 | **D. 복구** | R10 컨테이너 재시작 → R11 호스트 재부팅 → **R12 백업/복원 · R13 off-host 사본** | 실제 데이터가 생긴 **뒤에** 돌아야 의미가 있다. 빈 DB 복원은 아무것도 증명하지 않는다 |
 | **E. 시간이 필요한 것** | R14 로그 유계(24시간) · R15 ERROR 0 | R14는 **S3(로그 로테이션)이 닫힌 뒤에만** 통과할 수 있다 |
 
+### 7-0. clean-org runbook — canonical 순서 (2026-09-26 정정)
+
+**앞선 표에는 모순이 있었다.** A→B→C는 R8(`GROUNDED` draft)과 「자동 확인 시작」을 C에 놓는데, 그 둘이
+의존하는 값들은 **org UUID를 이름으로 요구**한다 — `SELLEROPS_KNOWLEDGE_*_ORG_IDS`(세 retrieval
+capability는 `*` 금지, 공란 금지) · `SELLEROPS_AGENT_*_ORG_IDS` · `RESPONSIBILITY_RUNTIME_ORG_IDS`.
+그런데 **그 UUID는 R5(signup)가 끝나야 존재한다.** 즉 배포 시점의 env로는 원리적으로 채울 수 없고,
+채워 넣은 값은 **재기동해야 읽힌다**. 순서를 적지 않은 문서는 운영자에게 이것을 현장에서 발견하게 한다.
+
+canonical 순서는 다음과 같다. **재기동은 두 번뿐이고, 두 번 다 이유가 있다.**
+
+| # | 단계 | 왜 여기인가 |
+|---|---|---|
+| 1 | signup / login / org 생성 | 연결 전 홈(R5)은 **이 org에서 지금만** 관측 가능하다 |
+| 2 | **org UUID 확인** | 아래 전부의 입력. 화면 또는 DB에서 읽는다 |
+| 3 | **rollout / capability allow-list 기입** | `*` 금지·공란 금지가 `deploy.sh`와 백엔드 boot validator 양쪽에 있다 |
+| 4 | scheduler + 필요한 model capability 설정 | self-pilot·collect 두 짝, responsibility scheduler, 켜는 capability마다 키 |
+| 5 | **stack restart (1회차)** | 3·4는 env이고 env는 재기동으로만 읽힌다 |
+| 6 | **Cafe24 OAuth** | 3·5 뒤에 두는 것이 canonical — 아래 주석 |
+| 7 | automatic collect 도착 | R7. 연결 후 ≤5분 + ≤60초 ⇒ **≈6분**, 시계로 잰다 |
+| 8 | Inquiry 생성 | 실제 고객 문의 1건이 수집돼 work item이 된다 |
+| 9 | 자동 확인 시작 | 3에서 rollout에 이름이 올라가 있어야 버튼이 존재한다 |
+| 10 | Goal / Knowledge / draft / approval | R8. 모델 호출은 이 경로에만 |
+| 11 | Home 확인 | 숫자·상태가 9·10과 일치하는지 |
+| 12 | **별도 WRITE decision** | 여기까지가 READ 파일럿이다. 아래는 다른 결정이다 |
+| 13 | WRITE env + 판매자 재동의 | `…PUBLISH_EXECUTION_ENABLED` · 승인 ID · `CLIENT_IP` · `SHOP_NO` + `mall.write_community` 재동의 |
+| 14 | **stack restart (2회차)** | 13이 env이기 때문. WRITE를 켜지 않으면 이 재기동도 없다 |
+| 15 | publish | 자기 **단일 사용 승인**을 따로 받는다 |
+| 16 | exact read-back | 2xx가 아니라 exact READ 1회로 본문 해시 == 승인 초안 |
+| 17 | convergence | 다음 수집에서 채널 상태와 우리 상태가 일치하는지 |
+
+**Cafe24 OAuth(6)는 allow-list(3) 앞뒤 어느 쪽에도 놓을 수 있다** — 연결 자체는 org UUID를 이름으로
+요구하지 않는다. 그럼에도 **첫 파일럿 runbook은 allow-list를 먼저**로 적는다: 뒤에 놓으면 3·4를 채우고
+재기동하는 순간이 연결 이후로 밀려 **재기동이 한 번 더** 생기고, 그 재기동은 방금 연결한 판매자의 첫
+수집 창과 겹친다. 한 번 줄이는 쪽이 canonical이고, 다른 순서가 **틀린 것은 아니다**.
+
+12~17은 `pilot_readiness_v3.md` §6-2가 이미 소유한 결정이다 — 이 표는 그것을 **순서 위에 얹기만** 한다.
+
 ### 7-A. 순서가 이렇게 되는 이유
 
+- **B′가 A와 C 사이인 이유는 §7-0**이다 — org UUID는 R5의 산출물이고, 그것을 이름으로 요구하는
+  값들은 재기동으로만 읽힌다.
 - **R5는 연결 전에만 관측 가능**하다. 앞선 패키지들이 「연결 전 첫 화면은 이 org에서 관찰 불가」로
   두 번 보고했던 것이 정확히 이 순서 문제다.
 - **R7은 시계로 잰다** — 「스케줄이 생겼다」가 아니라 **데이터가 도착했다**를 본다. 연결 후

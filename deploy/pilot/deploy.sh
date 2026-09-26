@@ -162,23 +162,42 @@ if [[ -n "$(printf '%s' "${RESPONSIBILITY_RUNTIME_ORG_IDS:-}" | tr -d '[:space:]
    && "${SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED:-false}" != "true" ]]; then
   fail "RESPONSIBILITY_RUNTIME_ORG_IDS names an organisation but SELLEROPS_RESPONSIBILITY_SCHEDULER_ENABLED is not true — 고객 운영 관리 becomes visible and startable for that seller while no window is ever worked; set the scheduler true, or clear the rollout list"
 fi
-# Off-host backup (blocker B5). preflight.sh checks this too, but preflight runs once and this runs on
-# every deploy — an env edited afterwards is exactly how a host ends up believing it has a backup.
-# These names never reach a container: backup.sh reads them on the host, from cron.
-if [[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]]; then
-  bmiss=()
-  for n in SELLEROPS_BACKUP_S3_BUCKET SELLEROPS_BACKUP_S3_REGION \
-           SELLEROPS_BACKUP_S3_ACCESS_KEY_ID SELLEROPS_BACKUP_S3_SECRET_ACCESS_KEY; do
-    [[ -n "${!n:-}" ]] || bmiss+=("$n")
-  done
-  [[ ${#bmiss[@]} -eq 0 ]] || fail "SELLEROPS_BACKUP_S3_ENABLED=true but these are blank: ${bmiss[*]}"
-  case "${SELLEROPS_BACKUP_S3_ENDPOINT:-https://placeholder}" in
-    https://*) ;;
-    *) fail "SELLEROPS_BACKUP_S3_ENDPOINT must be an absolute HTTPS URL when set (the dump carries sealed credentials and seller data)" ;;
-  esac
-else
-  printf 'note: off-host backup is OFF — a dump that only exists on this host does not survive this host\n'
-fi
+# ── Off-host backup (blocker B5) — a PRECONDITION of a pilot deploy, not a recommendation ────────
+#
+# This used to print a note and carry on. A note is what a host prints on its way to believing it has
+# a backup: the dump is written to /var/backups/sellerops, the deploy reports success, and the only
+# copy of every seller's data shares a failure domain with the thing the copy exists to survive.
+# B5 is the blocker that says so, and a blocker a deploy can walk past is a preference.
+#
+# The choice this refuses is not «backup on or off» — the local dump happens either way. It is
+# «deploy a host that will accumulate seller data it cannot recover». That is not a per-deploy
+# judgement call, so it is not offered as one.
+#
+# Checked HERE rather than in the backend, because none of these names ever reaches a container:
+# backup.sh reads them on the host, from cron. And checked on EVERY deploy rather than once, because
+# an env edited after preflight is exactly how a host ends up believing it has a backup.
+#
+# Nothing below can affect a development or CI path: this script is pilot-only by construction and has
+# already refused a development host name (line ~54) and an env file inside the checkout (line ~53).
+# No value is printed — only which NAMES are blank.
+[[ "${SELLEROPS_BACKUP_S3_ENABLED:-false}" == "true" ]] || fail \
+  "SELLEROPS_BACKUP_S3_ENABLED is not true — a pilot host may not be deployed without an off-host copy of its dumps (blocker B5). The local dump alone does not survive this host. Set it true with the four names below, or do not deploy a host that will hold seller data it cannot recover."
+bmiss=()
+for n in SELLEROPS_BACKUP_S3_BUCKET SELLEROPS_BACKUP_S3_REGION \
+         SELLEROPS_BACKUP_S3_ACCESS_KEY_ID SELLEROPS_BACKUP_S3_SECRET_ACCESS_KEY; do
+  [[ -n "${!n:-}" ]] || bmiss+=("$n")
+done
+[[ ${#bmiss[@]} -eq 0 ]] || fail "SELLEROPS_BACKUP_S3_ENABLED=true but these are blank: ${bmiss[*]}"
+case "${SELLEROPS_BACKUP_S3_ENDPOINT:-https://placeholder}" in
+  https://*) ;;
+  *) fail "SELLEROPS_BACKUP_S3_ENDPOINT must be an absolute HTTPS URL when set (the dump carries sealed credentials and seller data)" ;;
+esac
+# The uploader itself, in the same block and for the same reason. Its absence is the flag being off
+# one layer down and one day later: cron runs, the dump is written, the upload step exits 1 at 03:17,
+# and the only reader of that log is the operator who already went to bed believing in B5.
+command -v aws >/dev/null 2>&1 || fail \
+  "SELLEROPS_BACKUP_S3_ENABLED=true but the aws cli is not installed — nothing on this host can perform the upload (deploy/pilot/host-bootstrap.sh installs AWS CLI v2)"
+printf 'off-host backup: enabled, four names set, uploader present\n'
 for flag in NAVER COUPANG CAFE24; do
   v="SELLEROPS_CONNECTOR_${flag}_ENABLED"
   if [[ "${!v:-false}" == "true" ]]; then

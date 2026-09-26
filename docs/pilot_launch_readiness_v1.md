@@ -140,7 +140,10 @@ restores. Two things it is honest about: the vault master key must be the one th
 credentials in the dump — a different key opens nothing, by fingerprint — and the dump deliberately
 contains **no env secret**, so the key file is the operator's to keep.
 
-Daily backups are the same script on cron (`17 3 * * *`), 0700, 14 days.
+Daily backups are the same script on cron (`17 3 * * *` with `CRON_TZ=Asia/Seoul` — **03:17 KST**,
+installed by `deploy/pilot/install-backup-job.sh`), 0700, 14 days. The zone is on the job, not on the
+host: nothing in this repository sets the host's timezone, and the same document's own rule — the day
+being counted is the seller's, in Asia/Seoul — is what the schedule is being made to agree with.
 
 
 ---
