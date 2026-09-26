@@ -142,7 +142,16 @@ export function CaseLayout({
     <VariantContext.Provider value={variant}>
       <DepthContext.Provider value={pane ? depth : "full"}>
       {pane ? (
-        <article aria-label={label} className="space-y-4" data-case-variant="pane" data-pane-depth={depth}>
+        <article
+          aria-label={label}
+          // A preview separates its groups with air and nothing else, so the air has to be enough to do the job
+          // a rule used to do. Measured at 20px the gap between 고객 원문 and 확인 필요 (41px) and the gap between
+          // 확인 필요 and 근거 (44px) were the same distance, so the reader had no grouping at all; at 28px the
+          // between-group air is four times the within-group air and the three questions read as three.
+          className={depth === "preview" ? "space-y-7" : "space-y-4"}
+          data-case-variant="pane"
+          data-pane-depth={depth}
+        >
           {nav}
           {header}
           {summary}
@@ -227,6 +236,21 @@ export function CaseBlock({
       {children}
     </section>
   );
+}
+
+/**
+ * <b>The quietest possible name for a group of facts.</b>
+ *
+ * <p>Studied against Linear's Peek preview: the card has <b>no headings and no rules</b> — an identifier, a
+ * title, metadata flowing as chips, a paragraph, a footnote. A 440px preview that answers three questions does
+ * need to say which is which, but a bold heading over a hairline is the weight a page section earns, not a
+ * group of two lines. Twelve pixels, muted, no rule, and the group below it separated by air.
+ *
+ * <p>The region keeps its real accessible name from the `Section` that wraps it, so nothing is lost to a screen
+ * reader by the heading not being drawn.
+ */
+export function Eyebrow({ children }: { children: ReactNode }) {
+  return <p className="text-[12px] font-medium leading-none text-muted">{children}</p>;
 }
 
 /** The customer's own words — the largest body text on any case, on either variant. */

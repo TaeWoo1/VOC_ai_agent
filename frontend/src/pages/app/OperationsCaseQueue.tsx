@@ -171,6 +171,15 @@ export function OperationsCaseQueue({ now }: { now?: Date }) {
         </p>
       ) : null}
 
+      {/* What 리뷰 counts in this list. It used to stand as a paragraph under the Home's five-row brief, where
+          neither reference puts an explanatory sentence; the rule is about the whole queue, so it stands on the
+          screen that owns the whole queue — beside the chips that count it. Nothing about the rule changed. */}
+      {work && allRows.some((r) => r.subject === "REVIEW") ? (
+        <p className="break-keep text-sm text-muted">
+          리뷰는 확인 필요 중 아직 판단하지 않은 것과, 답변하기로 정했지만 아직 승인하지 않은 것을 셉니다.
+        </p>
+      ) : null}
+
       {work && allRows.length > 0 ? (
         <div className="flex flex-wrap items-center gap-0.5 self-start rounded-lg bg-canvas p-0.5" role="group" aria-label="확인할 일 보기">
           {WORK_FILTERS.map((f) => (

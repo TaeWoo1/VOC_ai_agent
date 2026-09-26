@@ -19,6 +19,7 @@ import {
   sourceHealthLine,
   statusWord,
 } from "../../lib/customerOperations";
+import { COPY, DRAFT_UNSENT } from "../../lib/copy/customerOps";
 import type {
   CustomerOperationsHome,
   CustomerOperationsSourceHealth,
@@ -127,6 +128,24 @@ export function CustomerOperations({ now }: { now?: Date }) {
                 }
               />
             </dl>
+
+            {/* <b>최근 24시간 — moved here from the Home status line</b> (product-owner decision, 2026-09-26).
+                It used to be the tail of a one-line status under the Home title, where on a working org it added
+                「N건 · 정리 N · 관찰 N · 초안 N (미발송) · 처리 확인 중 N」 to a line that already carried six other
+                facts. The Home keeps the job's conclusion; the tallies of what the job DID belong on the screen the
+                job belongs to. Nothing is recomputed — these are the same `home.handled` fields the Home read, and
+                the 초안 figure is plain text here because its old link pointed at this page. */}
+            {home ? (
+              <div className="space-y-1 border-t border-line pt-4">
+                <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted">
+                  <span>{COPY.checkedLabel}</span>
+                  <span className="font-semibold tabular-nums text-ink">{checkedValue(home)}</span>
+                </p>
+                {home.lastCheckedAt ? (
+                  <p className="break-keep text-sm text-muted">{handledParts(home).join(" · ")}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="grid gap-5 sm:grid-cols-3">
               <Duty title="확인 대상" items={scopeLabels(view.sourcesInScope)} />
@@ -259,6 +278,27 @@ function runStatusKo(run: ResponsibilityRunView): string {
     default:
       return "";
   }
+}
+
+/**
+ * What the 24-hour window actually says. Three answers, not one: it has never checked, it checked and the server
+ * sent how many it read, or it checked and did not send that denominator — 「확인 완료」 is not 「0건」.
+ */
+function checkedValue(home: CustomerOperationsHome): string {
+  if (!home.lastCheckedAt) return COPY.firstCheck;
+  return home.handled.checked != null ? `${home.handled.checked.toLocaleString("ko-KR")}건` : "확인 완료";
+}
+
+/** 「정리 N · 관찰 N · 초안 N (미발송)」, and 처리 확인 중 only when there is something being read back. */
+function handledParts(home: CustomerOperationsHome): string[] {
+  const h = home.handled;
+  const parts = [
+    `정리 ${h.autoResolved.toLocaleString("ko-KR")}`,
+    `관찰 ${h.monitoring.toLocaleString("ko-KR")}`,
+    `초안 ${h.draftsPrepared.toLocaleString("ko-KR")} (${DRAFT_UNSENT})`,
+  ];
+  if (h.verifying > 0) parts.push(`처리 확인 중 ${h.verifying.toLocaleString("ko-KR")}`);
+  return parts;
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

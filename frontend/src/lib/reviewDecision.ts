@@ -1,3 +1,4 @@
+import { kstDate } from "./format";
 import type { ReviewDecisionLogEntry, ReviewTriageTier, TriageDisposition } from "./types";
 import { TRIAGE_TIER_LABEL } from "./reviewTriage";
 import { TRIAGE_OPTIONS } from "./vocItems";
@@ -113,9 +114,68 @@ export function decisionLogSentence(entry: ReviewDecisionLogEntry): string | nul
 }
 
 /**
+ * <b>The clauses that qualify the evidence</b>, said once wherever the evidence is drawn.
+ *
+ * <p>Both readings need them and they are the same claim in both: the full case prints them under their own
+ * blocks, the preview collects them into the one footnote under 근거. A second copy of either would be the copy
+ * that stops matching.
+ */
+export const EVIDENCE_NOTE = {
+  /** Why 「기록된 반복 문제 없음」 is not 「반복된 적 없음」, and what would change it. */
+  repeatCriterion: "같은 문제를 말한 리뷰가 쌓이면 반복 문제로 모입니다 — 위의 자동 분류와는 다른 기준입니다.",
+  /** What the counts count: what is FILED, not what a draft used. */
+  countsAreFiled: "여기 있는 숫자는 등록된 자료의 수입니다.",
+} as const;
+
+/**
+ * <b>현재 판단 — where this review stands, as one or two state tokens</b> (reference-based hierarchy v2).
+ *
+ * <p>It was 「처리 방법을 아직 정하지 않았습니다. 기록된 판단도 아직 없습니다.」 — 37 characters of prose at the
+ * same weight as the customer's sentence, for two absences. Linear's Peek says the equivalent as 「● In Review ·
+ * No priority」 and nothing more. So does this: the decision that stands, and how far the trail behind it goes.
+ *
+ * <p><b>The newest entry's own sentence moves to the full case</b>, where {@link DecisionLog} prints the whole
+ * trail newest-first. What this keeps of it is what a preview is asked: is there a record, when was the last
+ * one, and how many more. Nothing summarises the record away — the case the one CTA opens holds all of it.
+ *
+ * <p><b>A log that could not be read says nothing about the log.</b> Then this reports the decision alone,
+ * exactly as {@link DecisionLog} renders nothing rather than an empty state it cannot vouch for.
+ */
+export function previewJudgmentTokens(
+  decision: TriageDisposition | null,
+  entries: ReviewDecisionLogEntry[],
+  failed: boolean,
+): string {
+  const chosen = decision ? DECISION_ACTION_WORD[decision] : "처리 방법 미정";
+  if (failed) return chosen;
+  const dated = entries
+    .map((entry) => ({ at: entry.at, sentence: decisionLogSentence(entry) }))
+    .filter((row): row is { at: string; sentence: string } => row.sentence !== null);
+  if (dated.length === 0) return `${chosen} · 판단 기록 없음`;
+  const [newest, ...rest] = dated;
+  return `${chosen} · 최근 기록 ${kstDate(newest.at)}${rest.length > 0 ? ` 외 ${rest.length}건` : ""}`;
+}
+
+/**
  * The one sentence the whole workspace rests on, said once at the bottom.
  *
  * A seller who has just recorded four things is entitled to know that none of them left the building.
  */
 export const DECISION_LOG_DISCLOSURE =
   "여기 기록한 판단과 조치는 reviewnary 안에만 남습니다. 마켓플레이스에는 아무것도 전송되지 않습니다.";
+
+/**
+ * <b>The preview's one safety line</b> — the claim the whole workspace rests on, and only that.
+ *
+ * <p>This was 114 characters carrying four claims: that reviewnary does not write on this channel, that the
+ * seller acts, that the record stays inside, and that nothing is sent. The first two are facts about the channel
+ * and they are rendered in the full case in two places already ({@link DecisionActionStep} and the 「왜 초안이
+ * 없는가」 block); a preview has no draft area whose absence they would explain. The last two are the same
+ * boundary from two sides, and the operative one — the one a seller checks before recording anything — is that
+ * nothing leaves. Said once, at 12px, under everything.
+ *
+ * <p><b>This is narrower than the sentence it replaces</b>, and deliberately so rather than by omission:
+ * 「reviewnary 안에만 남습니다」 also rules out destinations other than the marketplace. The full case keeps
+ * {@link DECISION_LOG_DISCLOSURE} whole.
+ */
+export const PREVIEW_SAFETY_LINE = "마켓플레이스로는 아무것도 전송되지 않습니다.";

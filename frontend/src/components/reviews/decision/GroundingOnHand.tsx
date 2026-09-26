@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Section } from "../../ui/Section";
 import { usePaneDepth } from "../../workspace/CaseLayout";
 import { Facts } from "../../ui/ObjectRow";
+import { EVIDENCE_NOTE } from "../../../lib/reviewDecision";
 import type { ReviewDecisionContext } from "../../../lib/types";
 
 /**
@@ -41,22 +42,27 @@ export function GroundingOnHand({
    * needed. It is the ordinary state of a seller who connected the browser and no product API.
    */
   const unlinked = context.productId == null && context.productName != null;
+  // Only the page reading prints the product name: the preview's header already does.
+  const productName =
+    context.productId && context.productName ? (
+      <Link to={`/products/${context.productId}`} className="break-keep font-medium text-ink hover:underline">
+        {context.productName}
+      </Link>
+    ) : context.productName ? (
+      <span className="break-keep font-medium text-ink">{context.productName}</span>
+    ) : (
+      <span className="break-keep text-muted">상품 미지정</span>
+    );
+  /**
+   * <b>The preview no longer draws this.</b> Its four figures are cells of `EvidencePreview`'s grid — the shape
+   * that answers 「what is registered」 without a paragraph — and the titles, the unlinked explanation, the
+   * open-ask follow-up and the 「what these count」 note are this reading's, one click away on the full case.
+   */
   return (
     <Section title={titled ? "이 상품에 대해 우리가 아는 것" : undefined} ariaLabel="이 상품에 대해 우리가 아는 것">
       <div className={preview ? "space-y-2" : "space-y-2 rounded-2xl border border-line bg-surface p-4"}>
         <Facts className="text-sm text-muted">
-          {context.productId && context.productName ? (
-            <Link to={`/products/${context.productId}`} className="break-keep font-medium text-ink hover:underline">
-              {context.productName}
-            </Link>
-          ) : context.productName ? (
-            // The channel's own label, and deliberately NOT a link: there is no product screen to open.
-            // «상품 미지정» would be wrong twice — the channel did name it, and that phrase is this
-            // product's word for the shared bucket that unresolved rows must never be folded into.
-            <span className="break-keep font-medium text-ink">{context.productName}</span>
-          ) : (
-            <span className="break-keep text-muted">상품 미지정</span>
-          )}
+          {productName}
           {/* Null is not zero: a review bound to no product has no product to count for, and printing
               0건 would answer a question nobody could ask. */}
           {productSignal ? <span className="tabular-nums">리뷰 {productSignal.reviews}건</span> : null}
@@ -105,8 +111,7 @@ export function GroundingOnHand({
             pointer the 처리 방법 note had. The first sentence is the one that matters (these are counts of
             what is FILED, not of what a draft used), so the preview keeps it and drops the direction. */}
         <p className="break-keep text-sm leading-relaxed text-muted">
-          여기 있는 것은 등록된 자료의 수입니다.
-          {preview ? null : " 초안이 실제로 무엇을 근거로 썼는지는 아래 초안에 인용으로 나옵니다."}
+          {EVIDENCE_NOTE.countsAreFiled} 초안이 실제로 무엇을 근거로 썼는지는 아래 초안에 인용으로 나옵니다.
         </p>
       </div>
     </Section>

@@ -95,7 +95,7 @@ export function ConversationWorkspace({
       {/* The dock (Chat Motion v1): the box sits 20px off the viewport edge on a solid ground, and the
           transcript slides UNDER a short fade above it — a deliberate edge, not a box floating in the
           scroll. One fade, one place; it is the only gradient in the shell. */}
-      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : quietDock ? "bg-surface px-4 pb-4 pt-0 md:px-8" : "bg-surface px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
+      <div className={`relative shrink-0 ${compact ? "border-t border-line bg-surface px-4 py-3" : quietDock ? "border-t border-line bg-surface px-4 pb-4 pt-3 md:px-8" : "bg-surface px-4 pb-5 pt-1 md:px-8"}`} data-testid="composer-dock">
         {!compact ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-surface to-transparent" /> : null}
         <div className={compact ? "" : `mx-auto w-full ${quietDock ? "max-w-[1160px]" : "max-w-thread"}`}>
           {conversation.plannerOff ? (

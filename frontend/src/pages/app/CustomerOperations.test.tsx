@@ -85,6 +85,53 @@ function renderPage() {
   );
 }
 
+/**
+ * <b>The four facts the Home stopped saying</b> (product-owner decision, 2026-09-26).
+ *
+ * <p>The Home's status line carried seven of them and, on an org that had checked once, eleven; it answers
+ * 「자동 확인이 돌고 있나」 and the Home needs that question's conclusion, not its parameters. These pin the other
+ * end of that move: the screen that owns the job renders every one of them, so nothing was deleted by being
+ * taken off the first screen. `CustomerOpsHome.test.tsx` asserts the same four are absent there.
+ */
+describe("고객 운영 관리 page — the facts the Home handed over", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+  });
+
+  it("renders 확인 주기, 다음 확인 and the 24-hour tally", async () => {
+    api.getCustomerOperations.mockResolvedValue(view({ status: "ACTIVE", nextRunAt: "2026-09-16T07:00:00Z" }));
+    api.getCustomerOperationsHome.mockResolvedValue(home());
+    renderPage();
+    expect(await screen.findByText("2시간마다")).toBeInTheDocument();
+    expect(screen.getByText("오늘 16:00")).toBeInTheDocument();
+    // The tally, in the same words the Home used — the label, the denominator, and what became of them.
+    const checked = await screen.findByText("최근 24시간 자동 확인");
+    expect(checked.parentElement).toHaveTextContent("확인 완료");
+    expect(screen.getByText("정리 2 · 관찰 1 · 초안 1 (미발송)")).toBeInTheDocument();
+  });
+
+  it("names the denominator when the server sends one, and counts 처리 확인 중 only when there is any", async () => {
+    api.getCustomerOperations.mockResolvedValue(view({ status: "ACTIVE" }));
+    api.getCustomerOperationsHome.mockResolvedValue(
+      home({ handled: { ...home().handled, checked: 47, autoResolved: 31, monitoring: 4, draftsPrepared: 9, verifying: 3 } }),
+    );
+    renderPage();
+    const checked = await screen.findByText("최근 24시간 자동 확인");
+    expect(checked.parentElement).toHaveTextContent("47건");
+    expect(screen.getByText("정리 31 · 관찰 4 · 초안 9 (미발송) · 처리 확인 중 3")).toBeInTheDocument();
+  });
+
+  it("says 첫 확인 전 before anything has finished, and draws no tally it cannot vouch for", async () => {
+    api.getCustomerOperations.mockResolvedValue(view({ status: "ACTIVE" }));
+    api.getCustomerOperationsHome.mockResolvedValue(home({ lastCheckedAt: null, lastRunStatus: null }));
+    renderPage();
+    const checked = await screen.findByText("최근 24시간 자동 확인");
+    expect(checked.parentElement).toHaveTextContent("첫 확인 전");
+    expect(screen.queryByText(/정리 \d/)).toBeNull();
+    expect(await screen.findByText("아직 없음")).toBeInTheDocument();
+  });
+});
+
 describe("고객 운영 관리 page", () => {
   beforeEach(() => {
     Object.values(api).forEach((fn) => fn.mockReset());

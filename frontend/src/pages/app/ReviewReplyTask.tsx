@@ -12,6 +12,7 @@ import { TriageTierChip } from "../../components/reviews/TriageTierChip";
 import { ReviewProblemCard } from "../../components/reviews/decision/ReviewProblemCard";
 import { RepeatedSignal } from "../../components/reviews/decision/RepeatedSignal";
 import { GroundingOnHand } from "../../components/reviews/decision/GroundingOnHand";
+import { EvidencePreview } from "../../components/reviews/decision/EvidencePreview";
 import { DecisionActionStep } from "../../components/reviews/decision/DecisionActionStep";
 import { DecisionLog } from "../../components/reviews/decision/DecisionLog";
 import { api } from "../../lib/apiClient";
@@ -20,8 +21,8 @@ import { reviewWord } from "../../lib/channelVocabulary";
 import { plainText } from "../../lib/plainText";
 import { COPY, sourceLabel } from "../../lib/copy/customerOps";
 import { Disclosure } from "../../components/ui/Disclosure";
-import { CaseBlock, CaseLayout, DecisionCard, type CaseVariant, type PaneDepth } from "../../components/workspace/CaseLayout";
-import { DECISION_ACTION_NOTE, DECISION_ACTION_WORD } from "../../lib/reviewDecision";
+import { CaseBlock, CaseLayout, DecisionCard, Eyebrow, type CaseVariant, type PaneDepth } from "../../components/workspace/CaseLayout";
+import { PREVIEW_SAFETY_LINE, previewJudgmentTokens } from "../../lib/reviewDecision";
 import type {
   ChannelReviewDetailView,
   ReviewDecisionContext,
@@ -333,12 +334,23 @@ export function ReviewCaseView({
         // something sat at y=960 while a classification control sat at y=405. Nothing is removed and
         // nothing is summarised away — the facts are one press from where they always were, and the page
         // variant, which has a second column for them, is unchanged.
-        pane ? (
+        // <b>The preview does not fold the one thing it exists to answer.</b> The fold was written for the full
+        // pane, where it buys the decision forms their place on the first screen; this reading has no forms, and
+        // the fold condition was simply never moved off `pane` when the preview depth arrived. Measured at
+        // 1440×900 the panel opened with 「왜 올라왔나요 ›」 closed over ~40px of content while 215 characters of
+        // system explanation stood open below it, and 처리 방법 — the question the seller came with — began at
+        // y=557 of 900.
+        paneEvidenceFolded ? (
           <Disclosure label="왜 올라왔나요" summaryClassName="-ml-2">
             <div className="pt-2">
               <ReviewProblemCard detail={detail} word={word} showBody={false} />
             </div>
           </Disclosure>
+        ) : preview ? (
+          // <b>No heading over the answer to the panel's own question.</b> A preview that opens on the
+          // customer's sentence and then says 「확인 필요 · 1점」 and one line about it has already said 「왜
+          // 확인해야 하는가」; a bold title and a rule over two lines is the weight of a page section.
+          <ReviewProblemCard detail={detail} word={word} showBody={false} />
         ) : (
           <CaseBlock title="왜 올라왔나요" tone="plain" flat>
             <ReviewProblemCard detail={detail} word={word} showBody={false} />
@@ -349,7 +361,13 @@ export function ReviewCaseView({
         preview ? (
           <>
             <ChannelAnsweredState state={replyWork?.channelReplyState ?? null} />
-            <DecisionSoFar decision={decision} replySupported={replyWork !== null} reason={detail.replyUnavailableReason} />
+            <section aria-label="현재 판단" className="space-y-1.5">
+              <Eyebrow>현재 판단</Eyebrow>
+              <p className="break-keep text-sm leading-relaxed text-ink">
+                {previewJudgmentTokens(decision, log ?? [], logFailed || log === null)}
+              </p>
+            </section>
+            <p className="break-keep pt-2 text-[12px] leading-relaxed text-muted">{PREVIEW_SAFETY_LINE}</p>
           </>
         ) : (
         <>
@@ -494,6 +512,12 @@ export function ReviewCaseView({
               </Disclosure>
             ) : null}
           </>
+        ) : preview ? (
+          // <b>근거 — five figures and the way to them.</b> One component draws the whole group, because the
+          // numbers it lines up come from two reads (issue memory and the knowledge library) and a grid composed
+          // by two components is a grid whose columns can disagree. A failed context read renders nothing at
+          // all: a panel that could not see the evidence has nothing to say about it.
+          context ? <EvidencePreview context={context} /> : null
         ) : (
           <>
             <RepeatedSignal problems={context?.repeatedProblems ?? []} failed={contextFailed || context === null} />
@@ -501,46 +525,9 @@ export function ReviewCaseView({
           </>
         )
       }
-      more={<DecisionLog entries={log ?? []} failed={logFailed || log === null} />}
+      // 기록 stands inside 지금 판단할 것 in a preview, so there is no trailing block for it here.
+      more={preview ? undefined : <DecisionLog entries={log ?? []} failed={logFailed || log === null} />}
     />
-  );
-}
-
-/**
- * <b>추천 — what stands, in a preview that does not offer the forms</b> (Home v3.1).
- *
- * <p>Two facts and no third: the `TriageDisposition` that is recorded right now (or that none is), and
- * whether a draft can be prepared for this review at all — the same three reasons
- * {@link DECISION_ACTION_NOTE} already distinguishes, in the same words, so the preview and the case
- * cannot describe one review's reply lane differently.
- *
- * <p><b>It reads and never writes.</b> The controls that change either fact live on the full case, one
- * press away through the pane's docked action.
- */
-function DecisionSoFar({
-  decision,
-  replySupported,
-  reason,
-}: {
-  decision: TriageDisposition | null;
-  replySupported: boolean;
-  reason: "CHANNEL_HAS_NO_REPLY_FLOW" | "NO_SELLER_ACCOUNT" | null;
-}) {
-  return (
-    <div className="space-y-1.5 border-t border-line pt-4">
-      <h3 className="text-sm font-bold text-muted">처리 방법</h3>
-      <p className="break-keep text-[15px] font-semibold leading-relaxed text-ink">
-        {decision ? `「${DECISION_ACTION_WORD[decision]}」로 정해 두셨습니다.` : "아직 처리 방법을 정하지 않았습니다."}
-      </p>
-      {/* Only when there is no reply lane. `withReply` promises 「아래에서 …준비하고 승인할 수 있습니다」 and in a
-          preview there is no 아래 — the way to it is the docked action under this block, which says so itself.
-          The other two are statements about the channel and this seller's setup, true wherever they are read. */}
-      {replySupported ? null : (
-        <p className="break-keep text-sm leading-relaxed text-muted">
-          {reason === "NO_SELLER_ACCOUNT" ? DECISION_ACTION_NOTE.withoutAccount : DECISION_ACTION_NOTE.withoutReply}
-        </p>
-      )}
-    </div>
   );
 }
 

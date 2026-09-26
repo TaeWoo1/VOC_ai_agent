@@ -101,7 +101,15 @@ export function Composer({
         // paper ground a flat outlined box disappeared into the transcript; the shadow is what makes
         // this read as the live surface a seller returns to, and it is the only place elevation is
         // spent (`shadow-composer`).
-        className={`flex items-end gap-2 border border-line bg-surface transition focus-within:border-brand-700 ${quiet ? "" : "shadow-composer"} ${attachedTop ? "rounded-b-xl rounded-t-none border-t-0" : "rounded-xl"} ${compact ? "px-3 py-2" : "px-4 py-3"} ${disabled ? "opacity-60" : ""}`}
+        // <b>Quiet is now quiet.</b> On the 오늘 surface the list is the subject and the box was still a bordered,
+        // rounded, elevated rectangle under it. A filled field with no border and no shadow still reads as an
+        // input — it is the shape of every search field — and it stops competing with the rows. The elevated
+        // reading stays wherever the conversation IS the surface, which is what `shadow-composer` was for.
+        className={`flex items-end gap-2 transition ${
+          quiet
+            ? "rounded-xl bg-canvas focus-within:ring-2 focus-within:ring-brand-700"
+            : `border border-line bg-surface shadow-composer focus-within:border-brand-700 ${attachedTop ? "rounded-b-xl rounded-t-none border-t-0" : "rounded-xl"}`
+        } ${compact ? "px-3 py-2" : "px-4 py-3"} ${disabled ? "opacity-60" : ""}`}
         data-state={canStop ? "running" : disabled ? "disabled" : "idle"}
       >
         <label htmlFor={inputId} className="sr-only">

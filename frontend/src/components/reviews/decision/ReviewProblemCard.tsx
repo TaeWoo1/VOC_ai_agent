@@ -1,4 +1,5 @@
 import { Chip } from "../../ui/Chip";
+import { usePaneDepth } from "../../workspace/CaseLayout";
 import { Disclosure } from "../../ui/Disclosure";
 import { AiMarkChip, TriageTierChip } from "../TriageTierChip";
 import { TRIAGE_TAG_DISCLOSURE } from "../../../lib/reviewTriage";
@@ -37,12 +38,27 @@ export function ReviewProblemCard({
   showBody?: boolean;
 }) {
   const body = detail.body ? plainText(detail.body) : "";
+  // <b>In a preview the state and the reason are one line, and the reason has no rule beside it.</b> The left
+  // border was a card's edge in a 440px column that is already a card; Linear's Peek answers 「what state is
+  // this in」 with a coloured mark and a word flowing beside the rest, and nothing is drawn around it.
+  const preview = usePaneDepth() === "preview";
   return (
-    <section aria-label="고객이 남긴 내용" className="space-y-3">
+    <section aria-label="고객이 남긴 내용" className={preview ? "space-y-1.5" : "space-y-3"}>
       <div className="flex flex-wrap items-center gap-2">
         <TriageTierChip tier={detail.triage.tier} />
         {detail.aiMark ? <AiMarkChip /> : null}
         {detail.isNew ? <Chip tone="accent">새 {word}</Chip> : null}
+        {/* <b>State and criterion on one line.</b> Linear's Peek answers 「what state is this in」 with a mark,
+            a word and whatever qualifies it, flowing — 「● In Review · No priority」. `triage.reason` is what the
+            rules cited (here: 「1점」) and it is the whole of the why; nothing richer is invented for it. */}
+        {preview && detail.triage.reason ? (
+          <>
+            <span aria-hidden="true" className="text-sm text-muted">
+              ·
+            </span>
+            <span className="break-keep text-sm text-muted">{detail.triage.reason}</span>
+          </>
+        ) : null}
       </div>
 
       {/* The customer's own words. `lg` — larger than the page's prose, because this is the object the
@@ -61,12 +77,17 @@ export function ReviewProblemCard({
 
       {/* Why it is here. The tier was decided by the rating and whether there is text, and by nothing
           else; the reason cites what else the row carries. */}
-      <div className="space-y-1 border-l-2 border-line pl-3">
-        <p className="break-keep text-sm text-muted">{detail.triage.reason}</p>
-        {detail.triage.recommendedAction ? (
-          <p className="break-keep text-sm leading-relaxed text-ink">{detail.triage.recommendedAction}</p>
-        ) : null}
-      </div>
+      {/* <b>The recommended action is the full case's.</b> In a preview it stood at the same weight as the
+          customer's sentence and the judgment line, and it answers 「what should I do」 — the question the one CTA
+          exists to open, not the one 「should I open this」 needs. The page below renders it unchanged. */}
+      {preview ? null : (
+        <div className="space-y-1 border-l-2 border-line pl-3">
+          <p className="break-keep text-sm text-muted">{detail.triage.reason}</p>
+          {detail.triage.recommendedAction ? (
+            <p className="break-keep text-sm leading-relaxed text-ink">{detail.triage.recommendedAction}</p>
+          ) : null}
+        </div>
+      )}
 
       {detail.triage.tags.length > 0 ? (
         <Disclosure label="자동 분류" note={detail.triage.tags.join(" · ")}>

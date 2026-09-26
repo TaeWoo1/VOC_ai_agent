@@ -57,8 +57,8 @@ export function WorkItemPane({ row, now, depth = "full" }: { row: HomeWorkRow; n
         // rule — it is the rule reading correctly. What a preview leaves out are the JUDGMENT forms, and this row
         // has none: the response panel is the reply lane itself, and the row carries only a truncated first line,
         // so a preview of it would be a title with an ellipsis and a button. Rendered once at 440px it was exactly
-        // that — an empty pane where the work used to be. See {@link paneCarriesOwnAction}, which is how the dock
-        // knows not to put a second solid beside this one.
+        // that — an empty pane where the work used to be. The docked link beside it is navigation and is drawn
+        // as such, so this panel's own controls are the only pressable weight in the column.
         row.workItemId ? (
           <InquiryResponsePanel workItemId={row.workItemId} />
         ) : (
@@ -76,12 +76,4 @@ export function workItemFullScreen(row: HomeWorkRow): string {
   if (row.kind === "CASE") return `/customer-operations/cases/${row.subjectId}`;
   if (row.kind === "REVIEW") return `/reviews/reply/${row.subjectId}?from=work`;
   return `/inquiries/${row.subjectId}`;
-}
-
-/**
- * Whether this row's pane offers something to press of its own — so the docked action is the way out
- * rather than the thing to do, and the pane still has exactly one solid.
- */
-export function paneCarriesOwnAction(row: HomeWorkRow): boolean {
-  return row.kind === "INQUIRY" && row.workItemId !== null;
 }

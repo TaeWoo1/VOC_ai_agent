@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ReviewReplyTask, ReviewReplyTaskLegacyEntry } from "./ReviewReplyTask";
+import { ReviewCaseView, ReviewReplyTask, ReviewReplyTaskLegacyEntry } from "./ReviewReplyTask";
 import type {
   ChannelReviewDetailView,
   ReviewDecisionContext,
@@ -803,5 +803,216 @@ describe("리뷰 처리 — 작업에서 제외", () => {
     const notice = await screen.findByTestId("reply-work-dismissed-notice");
     expect(notice).toHaveTextContent("저장한 초안과 기록은 그대로 있습니다");
     expect(notice).not.toHaveTextContent("완료");
+  });
+});
+
+
+/**
+ * <b>Review preview, reference-based v1</b> — the pane on 오늘 is a Peek, not a settings rail.
+ *
+ * <p>Held against Linear's Peek preview and Zendesk's ticket context panel at 1440×900, the pane was the second
+ * of the two: a label column with values down it, a bold heading over a rule for each group, and 「아직 …없습니다」
+ * four times at the weight of the customer's own sentence. Linear's card has <b>no headings, no rules and no
+ * labels</b> — an identifier, a title, metadata flowing, a paragraph, a footnote.
+ *
+ * <p>Nothing here is a new fact, a new recommendation or a new control. The full case is untouched and keeps
+ * every sentence and every block this reading merges.
+ */
+/** The labels of whatever this render put behind a fold. */
+function folds(container: HTMLElement): string[] {
+  return [...container.querySelectorAll("summary")].map((s) => (s.textContent ?? "").trim());
+}
+
+function renderPreview(depth: "preview" | "full" = "preview") {
+  return render(
+    <MemoryRouter>
+      <ReviewCaseView reviewId={REVIEW} variant="pane" depth={depth} />
+    </MemoryRouter>,
+  );
+}
+
+describe("리뷰 미리보기 — 고객 원문 → 왜 → 근거 → 판단 → 한 가지 행동", () => {
+  it("answers 「왜 확인해야 하는가」 with a state and a sentence, behind no fold and under no heading", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    const { container } = renderPreview();
+
+    // The tier, the reason and what to do — on screen, with no press.
+    await waitFor(() => expect(screen.getByText("같은 분류가 늘어나는지 지켜보세요.")).toBeTruthy());
+    expect(folds(container)).not.toContain("왜 올라왔나요");
+    // …and with no heading over them: the question is the panel's, not a section's.
+    expect(screen.queryByText("왜 올라왔나요")).toBeNull();
+  });
+
+  it("keeps the fold in the FULL pane, where it buys the decision forms their place", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    const { container } = renderPreview("full");
+
+    await waitFor(() => expect(screen.getByText("왜 올라왔나요")).toBeTruthy());
+    expect(folds(container)).toContain("왜 올라왔나요");
+  });
+
+  it("draws no bold section heading, no rule and no label column", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    const { container } = renderPreview();
+
+    await waitFor(() => expect(screen.getByText("근거")).toBeTruthy());
+    // Two eyebrows name the two groups that need naming; nothing is drawn as a heading.
+    const visibleHeadings = [...container.querySelectorAll("h1,h2,h3")].filter(
+      (h) => !h.className.includes("sr-only"),
+    );
+    // The only thing drawn as a heading is the customer's own sentence.
+    expect(visibleHeadings.map((h) => h.textContent?.trim())).toEqual(["괜찮긴한데 자꾸 떨어져요"]);
+    // No rules between the groups: the air is the separation.
+    expect(container.querySelectorAll("[class*='border-t'],[class*='border-b']")).toHaveLength(0);
+    // The old label column is gone with them.
+    expect(screen.queryByText("처리 방법")).toBeNull();
+    expect(screen.queryByText("기록")).toBeNull();
+    expect(screen.queryByText("반복 신호")).toBeNull();
+  });
+
+  it("says where the review stands as state tokens — the decision and how far the trail goes", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    getReviewDecisionLog.mockResolvedValue([
+      { kind: "ACTION_CHOSEN", at: "2026-09-02T01:00:00Z", from: null, to: "RESPONSE_NEEDED" },
+      { kind: "REPLY_APPROVAL", at: "2026-09-01T01:00:00Z", from: null, to: "APPROVED" },
+    ] as never);
+    renderPreview();
+
+    const judgment = await screen.findByLabelText("현재 판단");
+    // Both facts, as tokens: what is decided, when the newest record was, and that the trail is longer
+    // (reference-based hierarchy v2, 2026-09-26). The entry's own SENTENCE is the full case's — `DecisionLog`
+    // prints the whole trail there — and this preview's one action is what opens it.
+    await waitFor(() => expect(judgment).toHaveTextContent("대응 필요"));
+    expect(judgment).toHaveTextContent("최근 기록 2026-09-02");
+    expect(judgment).toHaveTextContent("외 1건");
+    // The prose it replaced, in either direction.
+    expect(judgment).not.toHaveTextContent("정해 두셨습니다");
+    expect(judgment).not.toHaveTextContent("가장 최근 기록은");
+  });
+
+  it("says nothing about the record when the record could not be read", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    getReviewDecisionLog.mockRejectedValue(new Error("down"));
+    renderPreview();
+
+    const judgment = await screen.findByLabelText("현재 판단");
+    // The decision alone. A log that could not be read is not an empty log, so the preview claims neither.
+    await waitFor(() => expect(judgment).toHaveTextContent("대응 필요"));
+    expect(judgment).not.toHaveTextContent("판단 기록 없음");
+    expect(judgment).not.toHaveTextContent("최근 기록");
+  });
+
+  /**
+   * <b>One line, and it is the one a seller checks before recording anything</b> (product-owner decision,
+   * 2026-09-26). The channel-capability half — that reviewnary does not write here and the seller acts — is a
+   * fact about the channel whose place is beside the draft area it explains, and the full case renders it in two
+   * places. A preview has no draft area.
+   */
+  it("says the boundary once, at the foot, in one line", async () => {
+    getReviewWorkspace.mockResolvedValue(
+      detail({ replyWork: null, replyUnavailableReason: "CHANNEL_HAS_NO_REPLY_FLOW" }),
+    );
+    getReviewReplyPrep.mockResolvedValue(prep());
+    renderPreview();
+
+    await waitFor(() => expect(screen.getByLabelText("현재 판단")).toBeTruthy());
+    const note = screen.getByText("마켓플레이스로는 아무것도 전송되지 않습니다.");
+    expect(note).toBeTruthy();
+    // Said once — not the pair it used to print one block apart, and not twice over.
+    expect(screen.getAllByText(/마켓플레이스/)).toHaveLength(1);
+    expect(screen.queryByText(/마켓플레이스에는 아무것도 전송되지 않습니다/)).toBeNull();
+    expect(screen.queryByText(/여기에는 무엇으로 정했는지만 기록됩니다/)).toBeNull();
+  });
+
+  /**
+   * <b>Five figures and the way to them</b> (reference-based hierarchy v2, 2026-09-26). The flowing line this
+   * replaces put four counts, an absence sentence and a 76-character footnote at 15px/400 — the same weight as
+   * the customer's sentence — so one band of type carried eight kinds of information. The figure is the heavy
+   * thing now and its noun is the small one, which is Linear Peek's shape and the opposite of Zendesk's rail
+   * (label column left, values right).
+   */
+  it("states the evidence as figures, each with the noun it counts", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    renderPreview();
+
+    const evidence = await screen.findByLabelText("근거");
+    const cell = (label: string) => within(evidence).getByText(label).parentElement;
+    expect(cell("리뷰")).toHaveTextContent("12");
+    expect(cell("부정 리뷰")).toHaveTextContent("3");
+    expect(cell("상품 지식")).toHaveTextContent("0");
+    expect(cell("회사 운영 기준")).toHaveTextContent("0");
+    // <b>「기록」 carries what a sentence used to</b>: the claim is about this repository's records, never about
+    // the world, and that is exactly why the label is not 「반복 문제」.
+    expect(cell("반복 문제 기록")).toHaveTextContent("0");
+    // The figure is heavier than the noun beside it — that is the whole of the redesign, so it is asserted.
+    const figure = within(evidence).getByText("12");
+    expect(figure.className).toContain("font-bold");
+    expect(within(evidence).getByText("리뷰").className).toContain("text-muted");
+    // The links leave the panel and nothing above them does, so they stand in a row of their own.
+    expect(within(evidence).getByRole("link", { name: /답변 기준 보기/ })).toHaveAttribute("href", "/knowledge");
+    // The product name is not said twice: the panel header already prints it.
+    expect(within(evidence).queryByText("합성 전선몰딩")).toBeNull();
+    // <b>The explanations moved, they were not dropped.</b> The full case renders every one of them; this is
+    // the assertion that they are no longer between one fact and the next.
+    expect(evidence).not.toHaveTextContent("같은 문제를 말한 리뷰가 쌓이면");
+    expect(evidence).not.toHaveTextContent("여기 있는 숫자는 등록된 자료의 수입니다.");
+  });
+
+  it("counts open asks only when there are any, and says a missing figure is not a zero", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    getReviewDecisionContext.mockResolvedValue(
+      context({ productId: null, productSignal: null, knowledge: { productSources: 2, orgSources: 1, productTitles: [], openAsks: 4 } }),
+    );
+    renderPreview();
+
+    const evidence = await screen.findByLabelText("근거");
+    expect(within(evidence).getByText("답 없는 확인 필요").parentElement).toHaveTextContent("4");
+    // A review whose product this catalogue does not hold has no figure to print — and a 0 would answer a
+    // question nobody asked. The dash keeps the row's baseline and the full case explains why it is there.
+    expect(within(evidence).getByText("상품 미연결").parentElement).toHaveTextContent("—");
+    expect(within(evidence).queryByText("리뷰")).toBeNull();
+    // No product, so no way to its screen — a link that cannot be honest is not drawn.
+    expect(within(evidence).queryByRole("link", { name: /상품 화면 열기/ })).toBeNull();
+  });
+
+  it("counts the repeated problems it DID find — the rows and the quotes are the full case's", async () => {
+    getReviewWorkspace.mockResolvedValue(detail());
+    getReviewReplyPrep.mockResolvedValue(prep());
+    getReviewDecisionContext.mockResolvedValue(
+      context({
+        repeatedProblems: [
+          {
+            issueId: "iss-1",
+            title: "접착 탈락",
+            severity: "HIGH",
+            lifecycleState: "OBSERVING",
+            evidenceCount: 18,
+            firstEvidenceOn: "2026-07-01",
+            lastEvidenceOn: "2026-08-28",
+            dismissed: false,
+            similar: [
+              { reviewId: "rev-2", occurredOn: "2026-08-20", rating: 1, quote: "이틀만에 떨어졌어요", productName: "합성 전선몰딩", sameProduct: true },
+            ],
+          },
+        ],
+      }),
+    );
+    renderPreview();
+
+    const evidence = await screen.findByLabelText("근거");
+    expect(within(evidence).getByText("반복 문제 기록").parentElement).toHaveTextContent("1");
+    // <b>A repeated problem does not make the preview longer.</b> Its title, its org-wide evidence count and the
+    // customer sentences that back it are what the full case is for; here the answer to 「is there any」 is a
+    // digit, and it is in the same place whether the digit is 0 or 3.
+    expect(within(evidence).queryByRole("link", { name: /접착 탈락/ })).toBeNull();
+    expect(within(evidence).queryByText("근거 18건")).toBeNull();
+    expect(within(evidence).queryByText("「이틀만에 떨어졌어요」")).toBeNull();
   });
 });

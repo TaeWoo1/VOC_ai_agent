@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/apiClient", () => ({ api, getToken: () => null }));
 
-import { CustomerOpsHome, coHomeApplies } from "./CustomerOpsHome";
+import { CustomerOpsHome, HOME_ROWS, coHomeApplies } from "./CustomerOpsHome";
 import { mergeHomeWork } from "../../lib/homeWork";
 import { waitLabel } from "../../lib/copy/customerOps";
 
@@ -199,31 +199,33 @@ describe("CustomerOpsHome", () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue());
   });
 
-  it("opens on what the seller can act on — then what was checked, never called processed", async () => {
+  it("opens on the list, with what was checked on one quiet line above it", async () => {
     const { container } = draw();
-    const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("최근 24시간 자동 확인");
-    expect(card).toHaveTextContent("47건");
-    expect(card).toHaveTextContent("정리 31");
-    expect(card).toHaveTextContent("관찰 4");
-    expect(card).toHaveTextContent("초안 9 (미발송)");
-    expect(card).not.toHaveTextContent("처리");
-    // Home v3: the top is the TWO counts the seller can act on. 반복 문제 is a pattern, not a customer
-    // waiting, and stands in its own section below the work — where it keeps its own count and its own
-    // link. What Reviewnary checked is the quiet line under the two, never a count of the seller's work.
-    await waitFor(() => expect(card).toHaveTextContent("확인할 일"));
-    await waitFor(() => expect(card).toHaveTextContent("4건"));
-    expect(within(card).getByRole("link", { name: /확인할 일/ })).toHaveAttribute("href", "/customer-operations/cases");
-    expect(within(card).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "/#실행-대기");
-    expect(within(card).queryByRole("link", { name: /반복 문제/ })).toBeNull();
-    // …and it is not hidden: the section below still names it and still links to the list.
+    // <b>The counter band is gone</b> (reference-based hierarchy v1): neither Linear's Triage list nor
+    // Intercom's Inbox puts a summary card over a work list. Every fact it carried is on the status line.
+    const status = await screen.findByTestId("today-status");
+    // <b>Three facts, and no fourth</b> (product-owner decision, 2026-09-26). Which today it is, whether the job
+    // is running, and what the seller already decided and has not finished. Everything else this line used to
+    // carry is a parameter of the job or a tally of what it did, and both live on the screen that owns the job —
+    // asserted there, in `CustomerOperations.test.tsx`, so neither can be lost by being moved.
+    expect(status).toHaveTextContent("자동 확인 중");
+    expect(status).not.toHaveTextContent("최근 24시간 자동 확인");
+    expect(status).not.toHaveTextContent("47건");
+    expect(status).not.toHaveTextContent("정리 31");
+    expect(status).not.toHaveTextContent("초안 9");
+    expect(status).not.toHaveTextContent("다음 확인");
+    expect(status).not.toHaveTextContent("주기");
+    // 실행 대기 stays a fact and a pointer — never a cell beside the work, and never a pill.
+    expect(within(status).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "#실행-대기");
+    // A dot and a word, not a filled capsule: nothing on this line has both a pill radius and pill padding.
+    expect(status.querySelectorAll("[class*='rounded-full'][class*='px-']")).toHaveLength(0);
+    // 반복 문제 is a pattern, not a customer waiting: not up here, and not hidden either.
+    expect(within(status).queryByRole("link", { name: /반복 문제/ })).toBeNull();
     expect(screen.getByRole("link", { name: /반복 문제 전체 보기/ })).toHaveAttribute("href", "/memory");
-    // The breakdown of 확인할 일 stands on the heading of the list it breaks down — said once, where the
-    // rows are, instead of wrapping to a second line inside the card.
-    expect(card).not.toHaveTextContent(/교환·환불 1/);
-    expect(screen.getByRole("heading", { name: "확인할 일" }).parentElement).toHaveTextContent(
-      /교환·환불 1 ?·정보 부족 1 ?·답변 필요 1 ?·리뷰 1/,
-    );
+    // The count lives on the heading of the thing it counts, with the order and the breakdown beside it.
+    const heading = await screen.findByRole("heading", { name: /확인할 일/ });
+    await waitFor(() => expect(heading).toHaveTextContent("4"));
+    expect(heading.parentElement).toHaveTextContent(/교환·환불 1 ?·정보 부족 1 ?·답변 필요 1 ?·리뷰 1/);
     await expectNoAxeViolations(container);
   });
 
@@ -234,8 +236,10 @@ describe("CustomerOpsHome", () => {
     const [first, second] = within(list).getAllByRole("link");
     // A review carries the way back to the work list it was opened from.
     expect(first).toHaveAttribute("href", "/reviews/reply/r-1?from=work");
+    // Mixed reasons: every row keeps the word that tells it from its neighbours, and its own source.
     expect(first).toHaveTextContent("리뷰");
-    expect(first).toHaveTextContent("네이버 리뷰 ★1");
+    expect(first).toHaveTextContent("네이버 리뷰");
+    expect(first).toHaveTextContent("★1");
     expect(second).toHaveAttribute("href", "/customer-operations/cases/c-2");
     expect(second).toHaveTextContent("정보 부족");
     expect(second).toHaveTextContent("9oz 뚜껑 판매 여부 필요");
@@ -257,46 +261,52 @@ describe("CustomerOpsHome", () => {
         ],
       }),
     );
-    const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("쿠팡 문의 연결 만료 · 어제 22:00부터 집계 제외");
-    expect(within(card).getByRole("link", { name: "재연결" })).toHaveAttribute("href", "/connect/coupang");
-    expect(card).toHaveTextContent("네이버 문의 일부만 확인 · 응답 지연");
+    const gaps = await screen.findByLabelText("집계에서 빠진 곳");
+    expect(gaps).toHaveTextContent("쿠팡 문의 연결 만료 · 어제 22:00부터 집계 제외");
+    expect(within(gaps).getByRole("link", { name: "재연결" })).toHaveAttribute("href", "/connect/coupang");
+    expect(gaps).toHaveTextContent("네이버 문의 일부만 확인 · 응답 지연");
   });
 
   it("a list read that failed counts what loaded and says the count is partial — never 「N+」", async () => {
     api.getInquiryQueueStrict.mockRejectedValue(new Error("down"));
     draw();
-    const card = await screen.findByTestId("today-summary");
-    await waitFor(() => expect(card).toHaveTextContent("문의 목록 읽기 실패 · 부분 집계"));
+    const gaps = await screen.findByLabelText("집계에서 빠진 곳");
+    await waitFor(() => expect(gaps).toHaveTextContent("문의 목록 읽기 실패 · 부분 집계"));
+    expect(gaps).not.toHaveTextContent("리뷰 목록 읽기 실패");
     // c-1, c-2 and the review — what loaded, with no 「+」.
-    expect(card).toHaveTextContent("3건");
-    expect(card).not.toHaveTextContent("3+");
-    expect(card).not.toHaveTextContent("리뷰 목록 읽기 실패");
+    const heading = screen.getByRole("heading", { name: /확인할 일/ });
+    expect(heading).toHaveTextContent("3");
+    expect(heading).not.toHaveTextContent("3+");
   });
 
   it("「N+」 only when a read reports more than it returned", async () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue({ totalElements: 80 }));
     draw();
-    const card = await screen.findByTestId("today-summary");
-    await waitFor(() => expect(card).toHaveTextContent("4+건"));
-    expect(card).not.toHaveTextContent("부분 집계");
+    const heading = await screen.findByRole("heading", { name: /확인할 일/ });
+    await waitFor(() => expect(heading).toHaveTextContent("4+"));
+    expect(screen.queryByLabelText("집계에서 빠진 곳")).toBeNull();
   });
 
-  it("a failed latest run keeps the 24-hour tally and names the check it does not include", async () => {
+  it("a failed latest run names the check the window does not include, and the line above stays three facts", async () => {
     draw(co({ lastRunStatus: "FAILED" }));
-    const card = await screen.findByTestId("today-summary");
-    // What earlier runs checked in the window is still checked.
-    expect(card).toHaveTextContent("47건");
-    expect(card).toHaveTextContent("정리 31");
-    expect(card).toHaveTextContent("마지막 확인 실패 (오늘 14:02) · 이번 확인분 집계 제외 · 다음 확인 오늘 16:00");
+    const status = await screen.findByTestId("today-status");
+    // The tally the failure qualifies is on `/customer-operations` now; the failure itself is work-shaped — it
+    // says a part of this morning was not read — so it stays here, and it still names what it excludes.
+    expect(status).not.toHaveTextContent("47건");
+    expect(await screen.findByLabelText("집계에서 빠진 곳")).toHaveTextContent(
+      "마지막 확인 실패 (오늘 14:02) · 이번 확인분 집계 제외 · 다음 확인 오늘 16:00",
+    );
   });
 
   it("nothing waiting is 「없음」 with the next check — and no list", async () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue({ content: [], totalElements: 0 }));
     draw(co({ decisions: { total: 0, rows: [] } }), null);
-    const card = await screen.findByTestId("today-summary");
-    await waitFor(() => expect(card).toHaveTextContent("없음"));
-    expect(card).toHaveTextContent("다음 확인 오늘 16:00");
+    // Nothing waiting is a state, and it is stated: the list's absence is not a sentence.
+    await waitFor(() => expect(screen.getByText("지금 확인할 일이 없습니다.")).toBeTruthy());
+    // When there is nothing to do, the line still says the job is running — that is the whole reason the empty
+    // list can be trusted. It no longer says when the next check is; that is a schedule parameter.
+    expect(await screen.findByTestId("today-status")).toHaveTextContent("자동 확인 중");
+    expect(await screen.findByTestId("today-status")).not.toHaveTextContent("다음 확인");
     expect(screen.queryByRole("list", { name: "확인할 일" })).toBeNull();
   });
 
@@ -307,7 +317,10 @@ describe("CustomerOpsHome", () => {
     await userEvent.click(screen.getByRole("button", { name: "재개" }));
     await waitFor(() => expect(api.resumeCustomerOperations).toHaveBeenCalled());
     expect(onChanged).toHaveBeenCalled();
-    expect(screen.queryByTestId("today-summary")).toBeNull();
+    // The status line is the date and the state; what the job did and what waits belong to a running job.
+    const status = screen.getByTestId("today-status");
+    expect(status).not.toHaveTextContent("실행 대기");
+    expect(status).not.toHaveTextContent("최근 24시간 자동 확인");
   });
 
   /*
@@ -508,18 +521,23 @@ describe("first check — before, not in progress", () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue());
   });
 
-  it("says 첫 확인 전 while no check has finished, and never claims one is running", async () => {
+  /**
+   * <b>Both readings moved off this screen whole</b> (product-owner decision, 2026-09-26) — 「첫 확인 전」 and the
+   * tally that replaces it are the same cell in two states, and `CustomerOperations.test.tsx` pins both there.
+   * What these keep is the half that is about the Home: neither state may come back to this line, and whichever
+   * one is true, the Home still says whether the job is running.
+   */
+  it("says neither 첫 확인 전 nor the tally — both belong to the screen that owns the job", async () => {
     draw(co({ lastCheckedAt: null, lastRunStatus: null }));
-    const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("첫 확인 전");
-    expect(card).not.toHaveTextContent("첫 확인 중");
-  });
-
-  it("once a check has finished the cell is the tally, not the phrase", async () => {
+    const before = await screen.findByTestId("today-status");
+    expect(before).toHaveTextContent("자동 확인 중");
+    expect(before).not.toHaveTextContent("첫 확인");
+    cleanup();
     draw();
-    const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("47건");
-    expect(card).not.toHaveTextContent("첫 확인");
+    const after = await screen.findByTestId("today-status");
+    expect(after).toHaveTextContent("자동 확인 중");
+    expect(after).not.toHaveTextContent("47건");
+    expect(after).not.toHaveTextContent("첫 확인");
   });
 });
 
@@ -531,5 +549,72 @@ describe("waitLabel", () => {
     expect(waitLabel("2026-09-16", NOW)).toBe("오늘 접수");
     expect(waitLabel("2026-09-14", NOW)).toBe("2일 대기");
     expect(waitLabel(null, NOW)).toBeNull();
+  });
+});
+
+/**
+ * <b>Reference-based hierarchy v1</b> — the Home opens on the list, not on a card about the list.
+ *
+ * <p>Measured at 1440×900 before this: a bordered band with two 571px cells, both values at 22px/800, so an
+ * obligation the seller did NOT have was drawn at the size and width of the eleven items that were. Put beside
+ * Linear's Triage list and Intercom's Inbox, neither draws a counter over a work list at all. The band is gone
+ * and every fact it held is on the one status line — which is what these pin.
+ */
+describe("오늘 — an inbox, not a dashboard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.getInquiryQueueStrict.mockResolvedValue(queue());
+  });
+
+  /** The same Home with nothing already decided and unfinished. */
+  function noAwaiting(): OperationsHome {
+    const o = ops();
+    return {
+      ...o,
+      prepared: { ...o.prepared, reviewRepliesApproved: 0, rows: o.prepared.rows.filter((r) => r.kind !== "REVIEW_REPLY") },
+    } as never;
+  }
+
+  it("draws no summary card over the list, at any count", async () => {
+    draw();
+    await screen.findByTestId("today-status");
+    // The band had this name; nothing replaced it, and nothing may.
+    expect(screen.queryByLabelText("오늘 요약")).toBeNull();
+    expect(screen.queryByTestId("today-summary")).toBeNull();
+  });
+
+  it("실행 대기 0 is a quiet fact and not a control — there is nothing to point at", async () => {
+    draw(co(), noAwaiting());
+    const status = await screen.findByTestId("today-status");
+    expect(status).toHaveTextContent("실행 대기 없음");
+    expect(within(status).queryByRole("link", { name: /실행 대기/ })).toBeNull();
+  });
+
+  it("실행 대기 > 0 stays on the same line and becomes the pointer to its own section", async () => {
+    draw();
+    const status = await screen.findByTestId("today-status");
+    expect(within(status).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "#실행-대기");
+    expect(status).toHaveTextContent("실행 대기 2");
+    // Promotion is the section existing, not a cell up here.
+    expect(screen.getByRole("heading", { name: "실행 대기" })).toBeTruthy();
+  });
+
+  it("the way to the rest of the list stands on the heading, before the rows", async () => {
+    // Enough that the list is certainly longer than it draws, whatever `HOME_ROWS` is: the assertion below is
+    // about what the link SAYS, and it must not become vacuous the next time that constant moves.
+    const extra = Array.from({ length: HOME_ROWS + 2 }, (_, i) => ({
+      workItemId: `w-${i + 4}`, inquiryId: `i-${i + 4}`, sellerAccountId: "a", channelId: "ch", channelCode: "CAFE24",
+      channelNameKo: "카페24", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED",
+      title: `추가 문의 ${i + 1}`, snippet: null, receivedAt: `2026-09-16T04:${31 + i}:00Z`, hasDraft: false,
+    }));
+    api.getInquiryQueueStrict.mockResolvedValue(queue({ content: [...queue().content, ...extra] as never }));
+    draw();
+    // <b>The link names the whole list, not the remainder</b> (product-owner decision, 2026-09-26). The heading
+    // says the total and the queue screen draws the total; 「나머지 N건」 made the reader subtract two numbers to
+    // name a set that nothing renders.
+    const more = await screen.findByRole("link", { name: /전체 \d+건 보기/ });
+    expect(more).toHaveAttribute("href", "/customer-operations/cases");
+    const firstRow = screen.getByText("뚜껑이 깨져서 왔어요");
+    expect(more.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

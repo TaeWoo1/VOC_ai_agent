@@ -509,9 +509,11 @@ describe("Customer Operations v3.1 — the job's Home", () => {
     });
     renderHome();
 
-    const card = await screen.findByTestId("today-summary");
-    expect(card).toHaveTextContent("최근 24시간 자동 확인");
-    expect(card).toHaveTextContent("9건");
+    const status = await screen.findByTestId("today-status");
+    // The 24-hour tally moved to `/customer-operations` (product-owner decision, 2026-09-26); what this screen
+    // still needs from the line is that the job is running, because that is what makes the list below readable.
+    expect(status).toHaveTextContent("자동 확인 중");
+    expect(status).not.toHaveTextContent("최근 24시간 자동 확인");
     // 홈 → 오늘 (UI/UX v2 Phase 1, product-owner decision).
     expect(screen.getByRole("heading", { level: 1, name: "오늘" })).toBeInTheDocument();
     // The case and the queue row are the same inquiry: drawn once, as the case.

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Section, ListBox } from "../../ui/Section";
 import { usePaneDepth } from "../../workspace/CaseLayout";
+import { EVIDENCE_NOTE } from "../../../lib/reviewDecision";
 import { SEVERITY_LABEL_KO } from "../../../lib/reviewIssuesView";
 import { ratingLabel } from "../../../lib/reviewRecord";
 import type { IssueSeverity, ReviewDecisionProblem } from "../../../lib/types";
@@ -38,6 +39,9 @@ export function RepeatedSignal({
   /** False when the caller's own fold already prints this name — the count travels to that summary. */
   titled?: boolean;
 }) {
+  // <b>The preview no longer draws this.</b> Its count is one cell of `EvidencePreview`'s grid, where 「반복 문제
+  // 기록」 carries the records claim in a word. This component is the full case's reading again, with the whole
+  // sentence, the criterion and the rows.
   const preview = usePaneDepth() === "preview";
   if (failed) return null;
 
@@ -45,15 +49,18 @@ export function RepeatedSignal({
     return (
       <Section title={titled ? "반복 신호" : undefined} ariaLabel="반복 신호">
         <p className="break-keep text-sm leading-relaxed text-muted">
-          이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다. 같은 문제를 말한 리뷰가 쌓이면 반복 문제로
-          모입니다 — 위의 자동 분류와는 다른 기준입니다.
+          이 리뷰는 아직 반복 문제의 근거로 기록되지 않았습니다. {EVIDENCE_NOTE.repeatCriterion}
         </p>
       </Section>
     );
   }
 
   return (
-    <Section title={titled ? "반복 신호" : undefined} ariaLabel="반복 신호" count={titled ? problems.length : undefined}>
+    <Section
+      title={titled && !preview ? "반복 신호" : undefined}
+      ariaLabel="반복 신호"
+      count={titled && !preview ? problems.length : undefined}
+    >
       {/* A preview is already inside a panel inside the page: the box around these rows is the third
           border saying one thing, and in a 440px column it also costs the padding twice over. The rows,
           the quotes and the links are unchanged. */}

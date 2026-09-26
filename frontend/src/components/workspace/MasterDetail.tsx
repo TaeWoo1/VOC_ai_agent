@@ -130,7 +130,7 @@ export function MasterDetail({
           }`}
           data-testid="master-detail"
         >
-          <div className={preview ? "min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-0" : "contents"}>
+          <div className={preview ? "flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-0 pt-0" : "contents"}>
             {onClose ? (
               // Sticky, because the case below it is taller than the viewport: a close control that scrolls
               // away is a close control the seller has to scroll back up to find.
@@ -152,12 +152,30 @@ export function MasterDetail({
               </div>
             ) : null}
             {detail}
+            {/* <b>The action follows the content, and pins only when the content runs past it</b> (product-owner
+                decision, 2026-09-26). It was a `shrink-0` footer outside the scroller, so it sat on the floor of
+                the column whatever was above it: measured at 1440×900 with the preview's content ending at y≈470,
+                the button stood at 846 with ~370px of nothing between — and this round's compression made that
+                gap bigger, not smaller. Neither reference docks anything: Linear's Peek card sizes to its content
+                and Intercom's Details rail ends where its rows end.
+
+                `sticky bottom-0` does not move an element in a container that does not overflow, so a short
+                preview gets the button right under the last line, and a long one gets exactly the old behaviour —
+                the button riding the bottom edge while the case scrolls under it. The bar keeps its own surface
+                and a hairline above it so the content cannot read as sitting on top of the button, and it is
+                inside the scroller now, which is why the negative margins put it back out to the column edges.
+                One action, unchanged: the preview still carries no control that decides anything. */}
+            {preview && paneFooter ? (
+              <div className="sticky bottom-0 -mx-6 mt-7 px-6 pb-6" data-testid="pane-footer">
+                {/* No rule above it. A hairline is right for a bar bolted to the floor of the column and wrong
+                    for one that follows the content: over a short preview it drew a divider with nothing under
+                    it. The fade does the only job the rule did — saying that content is passing underneath —
+                    and it is invisible against plain surface, which is the state a short preview is in. */}
+                <div aria-hidden="true" className="pointer-events-none -mt-6 h-6 bg-gradient-to-t from-surface to-transparent" />
+                <div className="bg-surface pt-1">{paneFooter}</div>
+              </div>
+            ) : null}
           </div>
-          {preview && paneFooter ? (
-            <div className="shrink-0 border-t border-line bg-surface px-6 py-3" data-testid="pane-footer">
-              {paneFooter}
-            </div>
-          ) : null}
         </aside>
       ) : null}
     </div>

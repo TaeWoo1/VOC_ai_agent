@@ -1,4 +1,5 @@
-import { REASON, reasonOfCase, sourceLabel, waitSince, DRAFT_UNSENT, type Reason } from "./copy/customerOps";
+import { REASON, channelShort, reasonOfCase, sourceLabel, waitSince, DRAFT_UNSENT, type Reason } from "./copy/customerOps";
+import { onlySharedWord } from "./sharedWord";
 import { subjectFallback } from "./customerOperations";
 import { isOldBacklog as isOldInquiryBacklog } from "./inquiryWorkspace";
 import type { CustomerOperationsDecisionRow, CustomerOperationsHome } from "./customerOperationsTypes";
@@ -52,6 +53,23 @@ export interface HomeWorkRow {
   subjectId: string;
   /** For an inquiry row, the work item its response panel is addressed by. */
   workItemId: string | null;
+  /**
+   * The channel's short name, for a row that has one — <b>carried, never parsed back out of {@link source}</b>,
+   * for the same reason {@link rating} is.
+   *
+   * <p>The list caption composes 「모두 쿠팡 ★1 리뷰」 out of three pieces it was handed. Taking the channel back
+   * out of 「쿠팡 리뷰」 would mean splitting a string this file produced on the assumption that the noun is the
+   * last token — a parse of our own output, which is the second source of truth this row refuses everywhere else.
+   */
+  channel: string | null;
+  /**
+   * The star rating, for a row that has one — <b>carried, never parsed back out of {@link source}</b>.
+   *
+   * <p>The inbox reading draws it in the row's right-hand column, beside the wait, and `source` is the composed
+   * string 「쿠팡 리뷰」 that stands on the left. Splitting 「쿠팡 리뷰 ★1」 apart at render time is the second
+   * source of truth this file refuses everywhere else; the number is right here on the view that made the row.
+   */
+  rating: number | null;
 }
 
 export interface HomeWork {
@@ -86,7 +104,9 @@ export function caseWorkRow(row: CustomerOperationsDecisionRow): HomeWorkRow {
   return {
     key: `case:${row.caseId}`,
     reason,
-    source: sourceLabel(row.channelNameKo, row.subjectKind, row.rating),
+    source: sourceLabel(row.channelNameKo, row.subjectKind),
+    channel: channelShort(row.channelNameKo),
+    rating: row.rating ?? null,
     title: row.title?.trim() || row.summary || subjectFallback(row.subjectKind),
     line: line || null,
     since: row.openedAt,
@@ -130,7 +150,9 @@ export function mergeHomeWork(
     byOwner.set(owner, {
       key: `review:${row.reviewId}`,
       reason: REASON.review,
-      source: sourceLabel(row.channelCode, "REVIEW", row.rating),
+      source: sourceLabel(row.channelCode, "REVIEW"),
+      channel: channelShort(row.channelCode),
+      rating: row.rating ?? null,
       title: row.quote?.trim() || "본문 없는 리뷰",
       line: row.productName,
       since: row.occurredOn,
@@ -158,7 +180,9 @@ export function mergeHomeWork(
       byOwner.set(owner, {
         key: `review:${item.reviewId}`,
         reason: awaiting ? REASON.approve : REASON.draft,
-        source: sourceLabel(item.channelCode ?? account.channelCode, "REVIEW", item.rating),
+        source: sourceLabel(item.channelCode ?? account.channelCode, "REVIEW"),
+        channel: channelShort(item.channelCode ?? account.channelCode),
+        rating: item.rating ?? null,
         title: item.safePreview?.trim() || "본문 없는 리뷰",
         line: [awaiting ? `초안 있음 · ${DRAFT_UNSENT}` : "대응 필요로 정함 · 답변 초안 없음", item.productName]
           .filter(Boolean)
@@ -183,6 +207,8 @@ export function mergeHomeWork(
       key: `inquiry:${row.inquiryId}`,
       reason: REASON.reply,
       source: sourceLabel(row.channelCode ?? row.channelNameKo, "INQUIRY"),
+      channel: channelShort(row.channelCode ?? row.channelNameKo),
+      rating: null,
       title: row.title?.trim() || row.snippet?.trim() || subjectFallback("INQUIRY"),
       line: row.hasDraft ? `초안 있음 · ${DRAFT_UNSENT}` : "답변 초안 없음",
       since: row.receivedAt,
@@ -223,6 +249,36 @@ export function mergeHomeWork(
  */
 export function isOldBacklog(row: HomeWorkRow, now: Date): boolean {
   return row.since != null && isOldInquiryBacklog({ receivedAt: row.since }, now);
+}
+
+/**
+ * <b>What every row in this list says identically</b> — the facts that therefore distinguish nothing.
+ *
+ * <p>`lib/sharedWord.ts` states the rule and why (a word carried by every row is a fact about the LIST). This
+ * names the three fields a work row can repeat: the reason, where it came from, and the rating. On the measured
+ * org all five rows read 「쿠팡 리뷰 ★1」 beside a 「리뷰」 badge — the same two facts drawn ten times down a list
+ * whose content is what the customers wrote, while Linear's equivalent list varies every one of them.
+ *
+ * <p><b>One function, so the caption and the rows cannot disagree.</b> The heading that says it and the row that
+ * drops it ask this of the same population.
+ */
+export function sharedRowFacts(rows: HomeWorkRow[]): {
+  tag: string | null;
+  source: string | null;
+  rating: number | null;
+  channel: string | null;
+  subject: string | null;
+} {
+  const rating = onlySharedWord(rows.map((r) => (r.rating == null ? null : String(r.rating))));
+  return {
+    tag: onlySharedWord(rows.map((r) => r.reason.tag)),
+    source: onlySharedWord(rows.map((r) => r.source)),
+    rating: rating === null ? null : Number(rating),
+    // The two halves `source` is made of, hoisted by the same rule, so the caption can order them its own way
+    // without taking the composed string apart. `source` still decides what the ROWS stop repeating.
+    channel: onlySharedWord(rows.map((r) => r.channel)),
+    subject: onlySharedWord(rows.map((r) => (r.subject === "INQUIRY" ? "문의" : "리뷰"))),
+  };
 }
 
 /** 「교환·환불 1」, 「정보 부족 1」… — the reasons of the rows drawn, in a fixed order, zeros left out. */

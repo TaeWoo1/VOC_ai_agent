@@ -1,4 +1,5 @@
 import { Section, ListBox } from "../../ui/Section";
+import { usePaneDepth } from "../../workspace/CaseLayout";
 import { DECISION_LOG_DISCLOSURE, decisionLogSentence } from "../../../lib/reviewDecision";
 import { kstDate } from "../../../lib/format";
 import type { ReviewDecisionLogEntry } from "../../../lib/types";
@@ -23,11 +24,17 @@ import type { ReviewDecisionLogEntry } from "../../../lib/types";
  * a 「판단 전」 event would put a decision in the trail that nobody made.
  */
 export function DecisionLog({ entries, failed }: { entries: ReviewDecisionLogEntry[]; failed: boolean }) {
+  const preview = usePaneDepth() === "preview";
   if (failed) return null;
 
   const rows = entries
     .map((entry) => ({ entry, sentence: decisionLogSentence(entry) }))
     .filter((row): row is { entry: ReviewDecisionLogEntry; sentence: string } => row.sentence !== null);
+
+  // <b>The preview does not draw the log.</b> Its answer — where this review stands — is one sentence there
+  // (`previewJudgmentSentence`), composed from the same `decisionLogSentence` this block uses, and the whole
+  // trail is one press away on the case the docked action opens.
+  if (preview) return null;
 
   return (
     <Section title="기록" count={rows.length > 0 ? rows.length : null}>

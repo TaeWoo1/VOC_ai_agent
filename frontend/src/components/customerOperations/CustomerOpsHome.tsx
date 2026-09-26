@@ -3,21 +3,44 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { Btn, BtnLink } from "../ui/Btn";
 import { RepeatedProblemList } from "../home/RepeatedProblemList";
 import { MasterDetail, selectionHref, useWideLayout } from "../workspace/MasterDetail";
-import { WorkRows } from "../workspace/WorkRows";
-import { WorkItemPane, paneCarriesOwnAction, workItemFullScreen } from "../workspace/WorkItemPane";
+import { WorkRows, sharedPhrase } from "../workspace/WorkRows";
+import { WorkItemPane, workItemFullScreen } from "../workspace/WorkItemPane";
 import { IssueDetailPanel } from "../memory/IssueDetailPanel";
 import { ReviewCaseView } from "../../pages/app/ReviewReplyTask";
 import { PreparedWorkList } from "../home/PreparedWorkList";
 import { api } from "../../lib/apiClient";
 import { problemLine } from "../../lib/operationsHome";
 import { RESPONSIBILITY_NAME, cadenceLabel, dataTypeKo, kstClock } from "../../lib/customerOperations";
-import { COPY, DRAFT_UNSENT, autoCheckWhat, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
-import { mergeHomeWork, reasonCounts, type HomeWork } from "../../lib/homeWork";
+import { COPY, autoCheckWhat, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
+import { mergeHomeWork, reasonCounts, sharedRowFacts, type HomeWork } from "../../lib/homeWork";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import type { HomePreparedItem, InquiryQueueResponse, OperationsHome, ReviewIssueView, ReviewWorkView } from "../../lib/types";
 
-/** How many rows the list shows before 「+N」. */
-export const HOME_ROWS = 5;
+/**
+ * How many rows the list shows before 「+N」.
+ *
+ * <b>Seven is the smallest viewport's capacity, not this viewport's spare room</b> (product-owner decision,
+ * 2026-09-26). Measured at 1440×900 / 1366×768 / 1152×720 the list always starts at y=119 and a one-line row is
+ * 63px, so seven rows end at 560 and the section under them starts at ≈584 — above the composer dock at every
+ * supported width (824 / 692 / 644). Eight rows fit 1440 more snugly and push 실행 대기 · 반복 문제 below the
+ * fold at the other two, and the emphasis those sections carry IS their being visible. One constant, chosen from
+ * the narrowest case: there is deliberately no measurement, no observer and no per-width branch, because a row
+ * count that is computed is a row count that can break on a width nobody tested.
+ */
+export const HOME_ROWS = 7;
+/**
+ * <b>What the docked link says, by what it opens</b> (product-owner decision, 2026-09-26).
+ *
+ * <p>「처리하기」 had to go for a reason this panel made visible: 「처리 방법 미정」 stands about 150px above the
+ * button, so one screen used 처리 as a noun for the disposition and as a verb on the control beside it, and the
+ * verb read as «press this and it is handled». The review case is where the seller judges — 이 리뷰의 중요도,
+ * 처리 방법 and 조치 기록 are its three controls — so that is what its link says. Everything else gets the plain
+ * navigational verb, because 판단하기 would be a promise about a screen whose job is to prepare an answer.
+ *
+ * <p>No behaviour changed and no destination moved: both strings open exactly what they opened before.
+ */
+const FULL_SCREEN = { review: "전체 화면에서 판단하기", other: "전체 화면에서 열기" } as const;
+
 /** How many queue rows the Home asks for — enough to fold out, bounded. */
 export const HOME_QUEUE_SIZE = 50;
 
@@ -69,11 +92,15 @@ export function CustomerOpsHome({
   const work = mergeHomeWork(co, ops, queue, now, reviewWork);
   const shown = work.rows.slice(0, HOME_ROWS);
   const hidden = work.rows.length - shown.length;
-  const next = co.status === "ACTIVE" ? kstClock(co.nextCheckAt, now) : null;
   const running = co.status === "ACTIVE" || co.status === "PAUSED";
   const wide = selection?.wide ?? false;
   const search = selection?.search ?? "";
   const awaiting = awaitingRows(ops, work);
+  // What every row in the WHOLE list says identically — over `work.rows`, not the five drawn, because this
+  // heading stands beside 「확인할 일 11」 and a 「모두 …」 that covered only the brief would be a claim about
+  // eleven made from five. `WorkRows` is handed the same population and hides exactly what this says.
+  const shared = sharedRowFacts(work.rows);
+  const sharedSaid = sharedPhrase(shared);
 
   async function act(run: () => Promise<unknown>) {
     setBusy(true);
@@ -98,33 +125,55 @@ export function CustomerOpsHome({
   const warnings = [...lastRunLines(co, now), ...warningLines(co, now), ...failedReads(ops, queue)];
 
   return (
-    <div className="space-y-5 pb-2">
+    <div className="space-y-4 pb-2">
+      {/*
+        <b>The morning is a list, so the screen opens on one</b> (reference-based hierarchy v1).
+
+        <p>Between the title and the first row there used to be a bordered band with 「확인할 일 11」 and
+        「실행 대기 없음」 in two 571px cells at 22px/800. Measured against Linear's Triage list and Intercom's
+        Inbox, neither puts a counter card over a work list — the list IS the count, and in our case 실행 대기
+        already had its own section four rows down, so the cell was a second pointer to it. Every fact it carried
+        is still here; it stands in the one quiet status line under the title, where the automation's own state
+        already was. Product-owner decision, 2026-09-25.
+      */}
       <header>
-        <h1 className="text-[25px] font-extrabold leading-tight tracking-tight text-ink">{COPY.homeTitle}</h1>
-        <p className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted">
+        <h1 className="text-[17px] font-bold leading-tight tracking-tight text-ink">{COPY.homeTitle}</h1>
+        <p
+          data-testid="today-status"
+          className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-relaxed text-muted"
+        >
           <span>{kstLongDate(now)}</span>
+          <Sep />
+          {/* The state is a dot and a word, not a filled pill: on a screen whose subject is what the customers
+              wrote, a coloured capsule at the top is the loudest mark for the quietest fact. Same colour, same
+              link, same word. */}
           <Link
             to="/customer-operations"
-            className={`inline-flex items-center gap-1.5 rounded-full py-0.5 pl-2 pr-2.5 text-xs font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 ${pill.cls}`}
+            className="inline-flex items-center gap-1.5 font-medium hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
-            <span aria-hidden="true" className={`h-[7px] w-[7px] rounded-full ${pill.dot}`} />
+            <span aria-hidden="true" className={`h-[6px] w-[6px] rounded-full ${pill.dot}`} />
             {pill.label}
           </Link>
+          {/* <b>Three facts, and the other four moved to the screen that owns the job</b> (product-owner
+              decision, 2026-09-26). Measured, this line was 1,144px of seven facts — and that was its SHORT
+              form: on an org that has checked once, 「첫 확인 전」 expands to 「최근 24시간 자동 확인 N건 · 정리 N ·
+              관찰 N · 초안 N (미발송) · 처리 확인 중 N」, so the real line is eleven facts, and its strongest
+              element (semibold ink) was a caveat about the machine. This line answers 「자동 확인이 돌고 있나」;
+              Home needs that question's conclusion, not its parameters. 확인 주기 · 다음 확인 · 마지막 확인 were
+              already on `/customer-operations`, and the 24-hour tally is now rendered there too — nothing is
+              deleted, one thing moved. What stays: which today it is, whether the list below can be trusted, and
+              실행 대기 — the only fact on this line that is the seller's own work. */}
           {co.status === "ACTIVE" ? (
-            <span className="tabular-nums">
-              {cadenceShort(co.cadenceMinutes)}
-              {next ? ` · 다음 확인 ${next}` : ""}
-            </span>
+            <>
+              <Sep />
+              <AwaitingFact count={awaiting.count} />
+            </>
           ) : null}
         </p>
       </header>
 
       {running && co.status === "ACTIVE" ? (
-        <div className="space-y-3" data-testid="today-summary">
-          {/* The top of the morning is only what the seller can act on: TWO counts (Home v3 — 반복 문제 is a
-              pattern, not work, and stands in its own section below), each one press from its list. What Reviewnary
-              checked is context, so it is one quiet line under them, never a count of the seller's work. */}
-          <TodaySummary work={work} awaiting={awaiting.count} next={next} co={co} />
+        <>
           {warnings.length > 0 ? (
             <ul className="space-y-1.5 rounded-xl bg-[#FFF8EF] px-4 py-3 text-sm text-warn" aria-label="집계에서 빠진 곳">
               {warnings.map((line, i) => (
@@ -134,7 +183,7 @@ export function CustomerOpsHome({
               ))}
             </ul>
           ) : null}
-        </div>
+        </>
       ) : (
         <section
           aria-label={pill.label}
@@ -179,15 +228,39 @@ export function CustomerOpsHome({
 
       {work.rows.length > 0 ? (
         <section aria-label={COPY.listTitle}>
-          <div className="mb-2.5 mt-6">
-            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-              <h2 className="text-[17px] font-bold tracking-tight text-ink">{COPY.listTitle}</h2>
-              <span className="rounded-full bg-[#E6E9ED] px-2 text-xs font-semibold leading-[21px] text-muted">{COPY.listOrder}</span>
-              {/* What the count above is made of, said where the rows are — one sentence, one place. */}
-              <span className="break-keep text-sm text-muted">
+          {/* Count and order on the heading, the way out on the right, one hairline under it — the list header
+              both references draw (Intercom: 「5 Open ⌄」 / 「Newest ⌄」). No box, no pill, no second number: the
+              count lives on the heading of the thing it counts. */}
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-line pb-2">
+            <h2 className="text-sm font-semibold tracking-tight text-ink">
+              {COPY.listTitle}
+              <span className="ml-1.5 font-semibold tabular-nums text-muted">
+                {work.rows.length.toLocaleString("ko-KR")}
+                {work.truncated ? "+" : ""}
+              </span>
+            </h2>
+            <span className="break-keep text-[13px] text-muted">
+              {COPY.listOrder}
+              {/* What every row says identically, said once — instead of twice on each of them. */}
+              {sharedSaid ? ` · ${sharedSaid}` : ""}
+            </span>
+            {/* More than one kind of work waiting: then the mix IS information and the rows keep their badges. */}
+            {!shared.tag ? (
+              <span className="break-keep text-[13px] text-muted">
                 <Items parts={reasonCounts(work.rows)} />
               </span>
-            </div>
+            ) : null}
+            {hidden > 0 || work.truncated ? (
+              <Link
+                to="/customer-operations/cases"
+                className="ml-auto shrink-0 text-[13px] font-semibold text-brand-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                {/* The heading says 11 and the destination shows 11; 「나머지 6건」 made the reader subtract
+                    two numbers to name a set the queue does not draw. When the server said there are more than
+                    it sent, the total is a floor and this says no total at all. */}
+                {work.truncated ? "전체 보기" : `전체 ${work.rows.length.toLocaleString("ko-KR")}건 보기`} →
+              </Link>
+            ) : null}
           </div>
           <WorkRows
             rows={shown}
@@ -197,26 +270,18 @@ export function CustomerOpsHome({
             now={now}
             ariaLabel={COPY.listTitle}
             showBacklogDivider={false}
+            dense
+            sharedOver={work.rows}
+            // The shared facts are on the heading above. What 리뷰 counts here is a rule about the queue, and it
+            // now stands on the queue screen that owns the whole list rather than as a paragraph under a
+            // five-row brief — neither reference puts an explanatory sentence under a work list.
+            captionSaysReason
           />
-          {/* The Home is a briefing, so it is read short on purpose — the rest is the same list, unbriefed, one
-              press away. 「+22」 said there was more without saying more of what. */}
-          {hidden > 0 || work.truncated ? (
-            <p className="mt-2.5 text-sm">
-              <Link
-                to="/customer-operations/cases"
-                className="font-semibold text-brand-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                {hidden > 0 ? `나머지 ${hidden.toLocaleString("ko-KR")}건 모두 보기` : "전체 목록 보기"} →
-              </Link>
-            </p>
-          ) : null}
-          {/* Scope label: what 리뷰 counts here, since the 리뷰 screen's 확인 필요 tab counts something else. */}
-          {reviewWork ? (
-            <p className="mt-1.5 break-keep text-sm text-muted">
-              리뷰는 확인 필요 중 아직 판단하지 않은 것과, 답변하기로 정했지만 아직 승인하지 않은 것을 셉니다.
-            </p>
-          ) : null}
         </section>
+      ) : running && co.status === "ACTIVE" ? (
+        // Nothing waiting is a state, and the list's absence does not state it. 「다음 확인」 is on the status
+        // line above, where it was before this became one line.
+        <p className="break-keep text-sm text-muted">지금 확인할 일이 없습니다.</p>
       ) : null}
 
       <AwaitingExecution awaiting={awaiting} selection={selection} />
@@ -310,24 +375,30 @@ export function TodayWorkspace({
 
   let detail: ReactNode = null;
   let selectedKey: string | null = null;
-  // The pane's one action. Set beside the detail it belongs to, so a pane can never dock a control that
-  // opens something else.
-  // `primary` is a rule, not a per-kind taste: the docked control is solid exactly when the pane offers
-  // nothing else to press. A repeated problem's panel still carries its own 판단과 조치 — it is that
-  // section's workspace, not a preview of a customer waiting — so there the dock is the way out, not the
-  // thing to do, and the pane keeps exactly one solid either way.
-  let open: { to: string; label: string; primary: boolean } | null = null;
+  /**
+   * The pane's one action. Set beside the detail it belongs to, so a pane can never dock a control that opens
+   * something else.
+   *
+   * <b>It is never solid</b> (product-owner decision, 2026-09-26). The rule this replaces — «solid exactly when
+   * the pane offers nothing else to press» — asked the wrong question. What decides a control's weight is what
+   * pressing it DOES, and every one of these navigates: nothing here is spent, approved, sent or recorded. A
+   * full-bleed `brand-700` block was measured as the heaviest element in a 440px panel whose subject is the
+   * customer's own sentence at 22px/800, and neither reference draws anything like it — Linear's Peek carries no
+   * action at all and Intercom's Details rail ends where its rows end. So the field that carried that rule is
+   * gone rather than inverted, and `paneCarriesOwnAction` went with it: answering it was its only job.
+   */
+  let open: { to: string; label: string } | null = null;
   if (wide) {
     const prepared = key?.startsWith(PREPARED) ? ops?.prepared.rows.find((r) => `${PREPARED}${r.id}` === key) : undefined;
     const problem = key?.startsWith(PROBLEM) ? ops?.problems.rows.find((r) => `${PROBLEM}${r.issue.id}` === key) : undefined;
     if (prepared && prepared.kind === "REVIEW_REPLY") {
       selectedKey = key;
       detail = <ReviewCaseView key={key} reviewId={prepared.id} variant="pane" depth="preview" />;
-      open = { to: `/reviews/reply/${prepared.id}?from=work`, label: "전체 화면에서 처리하기", primary: true };
+      open = { to: `/reviews/reply/${prepared.id}?from=work`, label: FULL_SCREEN.review };
     } else if (problem) {
       selectedKey = key;
       detail = <IssueDetailPanel key={key} issue={problem.issue} onIssueChanged={onProblemChanged ?? (() => undefined)} />;
-      open = { to: `/memory/${problem.issue.id}`, label: "근거 전체 보기", primary: false };
+      open = { to: `/memory/${problem.issue.id}`, label: "근거 전체 보기" };
     } else if (key) {
       // Only what the address names. 확인할 일 kept a first-row fallback when this was written; it does not
       // any more (Review Decision UX v3.2), so both screens now answer 「선택 없음」 the same way.
@@ -335,7 +406,7 @@ export function TodayWorkspace({
       if (chosen) {
         selectedKey = chosen.key;
         detail = <WorkItemPane row={chosen} now={now} depth="preview" />;
-        open = { to: workItemFullScreen(chosen), label: "전체 화면에서 처리하기", primary: !paneCarriesOwnAction(chosen) };
+        open = { to: workItemFullScreen(chosen), label: chosen.kind === "REVIEW" ? FULL_SCREEN.review : FULL_SCREEN.other };
       }
     }
   }
@@ -351,7 +422,7 @@ export function TodayWorkspace({
       preview
       paneFooter={
         open ? (
-          <BtnLink to={open.to} variant={open.primary ? "solid" : "outline"} className="w-full">
+          <BtnLink to={open.to} variant="outline" className="w-full text-brand-700">
             {open.label}
           </BtnLink>
         ) : null
@@ -383,91 +454,33 @@ function withoutItem(search: string): string {
 const PREPARED = "prepared:";
 const PROBLEM = "problem:";
 
-/**
- * <b>The two counts the seller can act on this morning</b> (Home v3).
- *
- * <p>확인할 일 is what waits for their decision; 실행 대기 is what they already decided and have not posted. Both are
- * obligations, and both are one press from the list that owns them.
- *
- * <p><b>반복 문제 used to stand here as a third card and does not any more.</b> It is a pattern over many reviews,
- * not another customer waiting — the screen's own section below the list has always said so in words («no verb and
- * no button»), while its presence up here contradicted that by giving it the same weight as work. The count is not
- * hidden and not changed: the section keeps it, and keeps both populations separate.
- */
-function TodaySummary({
-  work,
-  awaiting,
-  next,
-  co,
-}: {
-  work: HomeWork;
-  awaiting: number;
-  next: string | null;
-  co: CustomerOperationsHome;
-}) {
-  const cells: { label: string; value: string; line: ReactNode; to: string }[] = [
-    {
-      label: COPY.listTitle,
-      value: work.rows.length > 0 ? `${work.rows.length.toLocaleString("ko-KR")}${work.truncated ? "+" : ""}` : COPY.none,
-      // The breakdown of this count stands on the heading of the list it breaks down (below), not here:
-      // printed in a 760px column it wrapped to two lines and pushed the first actual row to y=322.
-      line: work.rows.length > 0 ? null : next ? <span>다음 확인 {next}</span> : null,
-      to: "/customer-operations/cases",
-    },
-    {
-      label: "실행 대기",
-      value: awaiting > 0 ? awaiting.toLocaleString("ko-KR") : COPY.none,
-      // 「승인함 · 등록 전」 already stands on that section's own heading, four rows down. Said twice it cost
-      // the summary a line and told the seller nothing the second time.
-      line: null,
-      to: "#실행-대기",
-    },
-  ];
-  // One band, not two blocks (Home v3.1). The counts and the line about what Reviewnary checked were a
-  // 2×1 card plus a paragraph under it — 96px of the fold for four facts, and the reference this round was
-  // read against puts the same kind of summary in a single strip. The facts and their links are unchanged;
-  // 자동 확인 keeps its quieter weight by sitting under a hairline inside the same border, which is also
-  // what keeps it from reading as a third count of the seller's work.
+/** The dot between two facts on the status line. Drawn, never typed, so a wrapped line never starts on one. */
+function Sep() {
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-surface">
-      <ul aria-label="오늘 요약" className="grid grid-cols-1 sm:grid-cols-2">
-        {cells.map((cell, i) => (
-          <li key={cell.label} className={i > 0 ? "border-t border-line sm:border-l sm:border-t-0" : ""}>
-            <Link
-              to={cell.to}
-              className="flex h-full flex-wrap items-baseline gap-x-2.5 gap-y-1 px-5 py-2.5 transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
-            >
-              <span className="text-sm font-semibold text-muted">{cell.label}</span>
-              <span className="text-[22px] font-extrabold leading-tight tracking-tight tabular-nums text-ink">
-                {cell.value}
-                {/^\d/.test(cell.value) ? <span className="ml-0.5 text-sm font-semibold text-muted">건</span> : null}
-              </span>
-              {cell.line ? <span className="w-full break-keep text-sm text-muted">{cell.line}</span> : null}
-            </Link>
-          </li>
-        ))}
-      </ul>
-      <div className="border-t border-line px-5 py-2">
-        <CheckedLine co={co} />
-      </div>
-    </div>
+    <span aria-hidden="true" className="text-[#C9CFD8]">
+      ·
+    </span>
   );
 }
 
-/** What Reviewnary checked in the last 24 hours — context under the counts, never a count of the seller's work. */
-function CheckedLine({ co }: { co: CustomerOperationsHome }) {
-  const cell = doneCell(co);
+/**
+ * <b>실행 대기, on the status line</b> — the count, and nothing built around it.
+ *
+ * <p>It had a 571px cell and a 22px/800 value beside the work the seller has not decided yet; an obligation they
+ * already decided and a number that is usually zero do not earn that. The emphasis for a non-zero count is the
+ * 실행 대기 section further down existing at all — this is the pointer to it, and it is a link only when there
+ * is something to point at. No pill, no fill, no colour.
+ */
+function AwaitingFact({ count }: { count: number }) {
+  if (count === 0) return <span>실행 대기 없음</span>;
   return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-      <span className="font-semibold">{cell.label}</span>
-      <span className="font-semibold text-ink tabular-nums">
-        {cell.value}
-        {"unit" in cell && cell.unit ? cell.unit : ""}
-      </span>
-      {"line" in cell && cell.line ? <span className="flex flex-wrap items-center gap-x-1.5">· {cell.line}</span> : null}
-    </p>
+    <a href="#실행-대기" className="hover:text-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700">
+      실행 대기 <span className="font-semibold tabular-nums text-ink">{count.toLocaleString("ko-KR")}</span>
+    </a>
   );
 }
+
+/** What Reviewnary checked in the last 24 hours — context on the status line, never a count of the seller's work. */
 
 /** The rows of 실행 대기 after the dedupe against 확인할 일, and how many the section stands for in total. */
 function awaitingRows(ops: OperationsHome | null | undefined, work: HomeWork) {
@@ -570,31 +583,7 @@ function Items({ parts }: { parts: React.ReactNode[] }) {
   );
 }
 
-function cadenceShort(minutes: number): string {
-  return minutes > 0 && minutes % 60 === 0 ? `${minutes / 60}시간 주기` : `${minutes}분 주기`;
-}
 
-/**
- * The left cell. 「확인」 counts what was read — never what was processed. It is the last 24 hours, not the last run:
- * a failed latest run does not un-check what earlier runs checked, so the tally stays and the failure is said beside it
- * ({@link lastRunLines}) — what that run could not read is the part the number does not cover.
- */
-function doneCell(co: CustomerOperationsHome) {
-  const label = COPY.checkedLabel;
-  if (!co.lastCheckedAt) return { label, value: COPY.firstCheck, phrase: true };
-  const h = co.handled;
-  const parts: React.ReactNode[] = [
-    `정리 ${h.autoResolved.toLocaleString("ko-KR")}`,
-    `관찰 ${h.monitoring.toLocaleString("ko-KR")}`,
-    <Link key="d" to="/customer-operations" className="font-semibold text-muted underline decoration-[#D5DAE1] underline-offset-4 hover:text-ink">
-      초안 {h.draftsPrepared.toLocaleString("ko-KR")} ({DRAFT_UNSENT})
-    </Link>,
-  ];
-  if (h.verifying > 0) parts.push(`처리 확인 중 ${h.verifying.toLocaleString("ko-KR")}`);
-  return h.checked != null
-    ? { label, value: h.checked.toLocaleString("ko-KR"), unit: "건", line: <Items parts={parts} /> }
-    : { label, value: "확인 완료", phrase: true, line: <Items parts={parts} /> };
-}
 
 /** The latest run failed: the 24-hour tally above stands, and this names the check it does not include. */
 function lastRunLines(co: CustomerOperationsHome, now: Date): React.ReactNode[] {
