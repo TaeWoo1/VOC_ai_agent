@@ -82,6 +82,17 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** One Pulse cell by id, and its three stacked spans — label, value, and what qualifies the value. */
+function cell(line: HTMLElement, id: string): HTMLElement {
+  const el = line.querySelector(`[data-testid="pulse-${id}"]`);
+  if (!el) throw new Error(`no pulse cell: ${id}`);
+  return el as HTMLElement;
+}
+const spans = (line: HTMLElement, id: string) => [...cell(line, id).children] as HTMLElement[];
+const label = (line: HTMLElement, id: string) => spans(line, id)[0]?.textContent ?? null;
+const value = (line: HTMLElement, id: string) => spans(line, id)[1]?.textContent ?? null;
+const note = (line: HTMLElement, id: string) => spans(line, id)[2]?.textContent ?? null;
+
 describe("오늘 들어온 것 — a number only when it is a measured fact", () => {
   it("both lanes fresh: both counts, each with its own noun", async () => {
     draw();
@@ -182,10 +193,17 @@ describe("오늘 들어온 것 — a number only when it is a measured fact", ()
 });
 
 describe("최근 24시간 — what we opened, never what was completed", () => {
-  it("nothing opened: one sentence, not three zeros", async () => {
+  it("nothing opened: one sentence in the value slot, not three zeros", async () => {
     draw(co({ checked: 0, autoResolved: 0, draftsPrepared: 0 }));
     const line = await summary();
-    await waitFor(() => expect(line).toHaveTextContent("최근 24시간 · 새로 확인한 일 없음"));
+    // The dot that used to join these two is gone with the line: 최근 24시간 is now the cell's label and
+    // the sentence is its value, stacked. Asserting the two spans exactly is stronger than a substring of
+    // a flattened line — it fixes which half is the question and which is the answer.
+    await waitFor(() => expect(cell(line, "recent")).toHaveTextContent("최근 24시간 새로 확인한 일 없음"));
+    expect(label(line, "recent")).toBe("최근 24시간");
+    expect(value(line, "recent")).toBe("새로 확인한 일 없음");
+    // And nothing qualifies a sentence: the supporting line is absent, not three zeros.
+    expect(note(line, "recent")).toBeNull();
     expect(line.textContent).not.toMatch(/새로 확인 0/);
   });
 
@@ -243,25 +261,43 @@ describe("the line as a whole", () => {
     expect(text.indexOf("오늘 들어온 것")).toBeLessThan(text.indexOf("최근 24시간"));
   });
 
-  it("is one line of muted 13px text with no box, no tile and no chart", async () => {
+  it("is ONE surface of three labelled cells — never three cards, a tile or a chart", async () => {
     const { container } = draw(co({ checked: 12 }));
     const line = await summary();
-    expect(line.tagName).toBe("P");
-    expect(line.className).toContain("text-[13px]");
-    expect(line.className).toContain("text-muted");
-    expect(line.className).not.toMatch(/border|bg-|rounded|shadow/);
-    // Only the figures take ink and weight; nothing here is a headline number.
-    expect(line.querySelectorAll(".font-semibold.text-ink.tabular-nums").length).toBeGreaterThan(0);
-    expect(line.querySelectorAll("[class*='text-2xl'],[class*='text-xl'],[class*='font-bold']")).toHaveLength(0);
+    // One object. Three cards would be three objects on a screen whose subject is the list below them,
+    // so the surface is the only thing with a fill and the cells carry none.
+    expect(line.className).toContain("grid-cols-3");
+    expect(line.className).toContain("bg-canvas");
+    expect(line.className).not.toMatch(/border|shadow|gradient/);
+    // Whichever cells have a fact to state — this fixture has no work queue, so 확인할 일 is absent by
+    // the same rule that keeps a failed read from printing 「0」.
+    const cells = [...line.querySelectorAll("[data-testid^='pulse-']")] as HTMLElement[];
+    expect(cells.length).toBeGreaterThan(1);
+    for (const c of cells) {
+      expect(c.className).not.toMatch(/border|bg-|rounded|shadow/);
+      // Every label stays muted 13px; only the figures take ink, weight and size.
+      expect(c.className).toContain("text-[13px]");
+      expect(c.className).toContain("text-muted");
+    }
+    expect(line.querySelectorAll(".text-\\[22px\\].font-semibold.text-ink.tabular-nums").length).toBeGreaterThan(0);
+    // Nothing bigger than the figure, and nothing drawn.
+    expect(line.querySelectorAll("[class*='text-2xl'],[class*='text-3xl'],[class*='font-bold']")).toHaveLength(0);
     expect(container.querySelectorAll("svg,canvas")).toHaveLength(0);
   });
 
-  it("the arrows between groups are decoration and are hidden from assistive tech", async () => {
-    draw(co({ checked: 1 }));
+  it("the groups are columns now, so nothing is drawn between them", async () => {
+    draw(co({ checked: 12, autoResolved: 3, draftsPrepared: 2 }));
     const line = await summary();
-    const arrows = [...line.querySelectorAll("span")].filter((el) => el.textContent === "→");
-    expect(arrows.length).toBeGreaterThan(0);
-    for (const arrow of arrows) expect(arrow).toHaveAttribute("aria-hidden", "true");
+    // The arrows joined three groups on one line. Three columns do not need joining, and a divider would
+    // be a drawn line saying what three left-aligned blocks already say.
+    expect([...line.querySelectorAll("span")].filter((el) => el.textContent === "→")).toHaveLength(0);
+    expect(line.className).not.toMatch(/divide-/);
+    // The dots that remain are INSIDE a cell, between two facts of the same kind, and they are still
+    // spelled rather than drawn — a gap between flex children is rendered and never read.
+    const dots = [...line.querySelectorAll("span")].filter((el) => el.textContent === "·");
+    expect(dots.length).toBeGreaterThan(0);
+    for (const dot of dots) expect(dot).toHaveAttribute("aria-hidden", "true");
+    expect(cell(line, "recent")).toHaveTextContent("그중 정리 3 · 초안 준비 2");
   });
 
   it("disappears entirely when nothing in it is true", async () => {

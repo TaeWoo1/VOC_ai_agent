@@ -29,16 +29,36 @@ import type {
  *
  * <b>Seven is the smallest viewport's capacity, not this viewport's spare room</b> (product-owner decision,
  * 2026-09-26). Eight rows fit 1440 more snugly and push 실행 대기 · 반복 문제 below the fold at the other two,
- * and the emphasis those sections carry IS their being visible. One constant, chosen from the narrowest case:
- * there is deliberately no measurement, no observer and no per-width branch, because a row count that is
- * computed is a row count that can break on a width nobody tested.
+ * and the emphasis those sections carry IS their being visible.
  *
- * <p>Re-measured after the summary line landed (2026-09-26): at 1440×900 / 1366×768 / 1152×720 the list now
- * starts at y=137 and seven rows end at 585 — the line cost 25px and every row still lands whole, with the
- * composer at 838 / 706 / 658. The narrowest case keeps 73px of clear space below the last row, which is why
- * the constant did not have to move.
+ * <p><b>Then the Pulse took the room seven depended on</b> (product-owner decision, 2026-09-26). Measured at
+ * 1152×720: the list's own scroller ends at y=631 and seven rows used to end at 585 — 46px of slack. The Pulse
+ * is 100px where the line it replaced was 21px, so the list now starts at y=227 instead of 145 and a seventh
+ * row would end at 668 — <b>37px past the bottom of the scroller that holds it</b>. Seven and the Pulse are not
+ * both true there, so the narrow case shows six, ending at 605 with 26px to spare. <b>A row is either whole or
+ * absent</b>: the alternative was leaving the seventh clipped, and a row you can read the top of is a row the
+ * screen is pretending to show. At 1440×900 nothing changed — seven rows end at 668 with the composer at 838.
+ *
+ * <p>The constant below still means what it meant — the capacity of the widest case, and the number every
+ * other surface reasons about. What is new is that the <i>visible</i> limit is its own named function of the
+ * layout, not a second constant and not a measurement: {@link visibleHomeRows}. It reuses the side preview's
+ * 1200 breakpoint rather than inventing one, because that is the width at which this column stops being the
+ * whole page, and a row count that disagrees with the layout it sits in is the bug this replaces.
  */
 export const HOME_ROWS = 7;
+/**
+ * The visible limit below 1200 — where the Pulse leaves room for six whole rows and not a seventh.
+ * It is not a second capacity: `HOME_ROWS` is still what 「+N」 counts against and what the queue screen holds.
+ */
+export const HOME_ROWS_NARROW = 6;
+/**
+ * How many rows this width can show whole. `wide` is the side preview's own answer ({@link useWideLayout}),
+ * so the two never disagree; an environment that cannot measure says narrow, which is the safe direction —
+ * it under-fills a wide screen instead of clipping a narrow one.
+ */
+export function visibleHomeRows(wide: boolean): number {
+  return wide ? HOME_ROWS : HOME_ROWS_NARROW;
+}
 /**
  * <b>What the docked link says, by what it opens</b> (product-owner decision, 2026-09-26).
  *
@@ -107,15 +127,18 @@ export function CustomerOpsHome({
   const [error, setError] = useState<string | null>(null);
 
   const work = mergeHomeWork(co, ops, queue, now, reviewWork);
-  const shown = work.rows.slice(0, HOME_ROWS);
+  // The row limit asks the layout, not the caller: `selection` is absent on pages that do not select in
+  // place, and defaulting to narrow there would drop a row on a 1440 screen that has the space.
+  const roomy = useWideLayout();
+  const shown = work.rows.slice(0, visibleHomeRows(roomy));
   const hidden = work.rows.length - shown.length;
   const running = co.status === "ACTIVE" || co.status === "PAUSED";
   const wide = selection?.wide ?? false;
   const search = selection?.search ?? "";
   const awaiting = awaitingRows(ops, work);
-  // What every row in the WHOLE list says identically — over `work.rows`, not the five drawn, because this
-  // heading stands beside 「확인할 일 11」 and a 「모두 …」 that covered only the brief would be a claim about
-  // eleven made from five. `WorkRows` is handed the same population and hides exactly what this says.
+  // What every row in the WHOLE list says identically — over `work.rows`, not the six or seven drawn, because
+  // this heading stands under the Pulse's 「확인할 일 11」 and a 「모두 …」 that covered only what is drawn would
+  // be a claim about eleven made from six. `WorkRows` is handed the same population and hides exactly this.
   const shared = sharedRowFacts(work.rows);
   const sharedSaid = sharedPhrase(shared);
 
@@ -250,7 +273,7 @@ export function CustomerOpsHome({
               both references draw (Intercom: 「5 Open ⌄」 / 「Newest ⌄」). No box, no pill, no second number: the
               count lives on the heading of the thing it counts. */}
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-line pb-2">
-            {/* The count moved one line up, onto the summary's 「지금 볼 것」 (2026-09-26). It is the same
+            {/* The count is the Pulse's, one line up, under this same word (2026-09-26). It is the same
                 number from the same `work`, and drawing it in both places put the same fact 12px from
                 itself. The heading keeps what is only the list's: its order and its way out. */}
             <h2 className="text-sm font-semibold tracking-tight text-ink">{COPY.listTitle}</h2>
@@ -270,10 +293,12 @@ export function CustomerOpsHome({
                 to="/customer-operations/cases"
                 className="ml-auto shrink-0 text-[13px] font-semibold text-brand-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
               >
-                {/* The heading says 11 and the destination shows 11; 「나머지 6건」 made the reader subtract
-                    two numbers to name a set the queue does not draw. When the server said there are more than
-                    it sent, the total is a floor and this says no total at all. */}
-                {work.truncated ? "전체 보기" : `전체 ${work.rows.length.toLocaleString("ko-KR")}건 보기`} →
+                {/* <b>The link is a destination, not a count</b> (product-owner decision, 2026-09-26). It said
+                    「전체 11건 보기」 while the Pulse two lines above said 확인할 일 11 — the same number twice on
+                    one screen, and the one down here had to go quiet when the server sent a floor instead of a
+                    total, so the same control changed its shape for a reason no seller could see. The total is
+                    the Pulse's, in one form, including 「N+」; this says where it goes. */}
+                전체 보기 →
               </Link>
             ) : null}
           </div>
@@ -486,20 +511,43 @@ function Sep() {
 }
 
 /**
- * <b>오늘 들어온 것 → 지금 볼 것 → 최근 24시간</b> — one muted line above the inbox.
+ * The name of the surface for a reader who cannot see the three columns. It names the surface, not the
+ * work: 확인할 일 is the cell's label and the section's heading below, and this is the band they sit in.
+ */
+const PULSE_LABEL = "오늘 운영 현황";
+
+/**
+ * <b>Operational Pulse — 오늘 들어온 것 · 확인할 일 · 최근 24시간</b>, one surface above the inbox.
  *
- * <p>The contract is `docs/pilot_usage_loop_v1.md` §8: <b>no new read</b> (every value comes from the
- * five the Home already makes), no KPI card, no tile, no chart. Only the numbers take ink and weight;
- * every label stays muted, so the line sits below the customers' sentences in the hierarchy rather
- * than above them.
+ * <p>The data contract is `docs/pilot_usage_loop_v1.md` §8 and it does not move here: <b>no new read</b>
+ * (every value comes from the five the Home already makes), no KPI card, no tile, no chart.
  *
- * <p><b>The three groups are not three counts of the same kind.</b> The first is a measured day, the
- * second is now, the third is a window on cases we opened — which is why each group carries its own
- * lead word instead of a shared heading that would make one window true of all three.
+ * <p><b>Why it stopped being a line</b> (product-owner decision, 2026-09-26). Measured, the 13px muted
+ * line was the status line's second row — same font-size, same colour, same line-height, 4px under it —
+ * so a seller read it as more date metadata and the screen answered 「오늘 운영이 어떻게 흐르고 있나」 in
+ * the type of a caption. The figures now take 22px/600 ink; the labels stay 13px muted. <b>The emphasis
+ * is the number</b> — never the label, never the surface.
  *
- * <p>A group that has nothing true to say renders nothing. That is not tidiness: an inflow read that
- * failed, a job that is not running, and an org with no window yet are three different silences, and
- * none of them is 「0」.
+ * <p><b>One surface, not three cards.</b> Three cards are three objects, and the screen's subject is the
+ * list below them. A neutral fill instead of a border, because on this white page a hairline is the
+ * louder of the two per unit of information carried; no shadow, no gradient, no icon, no chart. The
+ * columns are separated by whitespace alone — a divider would be a fourth and fifth drawn line to say
+ * what three left-aligned blocks already say.
+ *
+ * <p><b>The three cells are not three counts of the same kind.</b> The first is a measured day, the
+ * second is now, the third is a window on cases we opened — which is why each carries its own lead word
+ * instead of one heading that would make a single window true of all three. Zendesk's Agent Home rail
+ * does exactly this and for the same reason: 「This week」 and 「60 days」 stand under each statistic's own
+ * name rather than over the group.
+ *
+ * <p>The second cell says <b>확인할 일</b> — the same canonical noun as the section heading below it,
+ * because it is the same set counted once. A second name (「지금 확인할 것」) would have split one meaning
+ * into two words twelve pixels apart, and the total now lives here alone: the list's way out says
+ * 「전체 보기」 and names no number.
+ *
+ * <p>A cell with nothing true to say renders nothing, and when no cell has, neither does the surface.
+ * That is not tidiness: an inflow read that failed, a job that is not running, and an org with no window
+ * yet are three different silences, and none of them is 「0」.
  */
 function OperationsSummary({
   inflow,
@@ -513,16 +561,14 @@ function OperationsSummary({
   awaiting: number | null;
   recent: ReturnType<typeof recentDay>;
 }) {
-  const groups: ReactNode[] = [];
+  const cells: ReactNode[] = [];
 
   if (inflow) {
-    groups.push(
-      <>
-        {INFLOW_WORD.lead}
-        <Dot />
+    cells.push(
+      <Cell key="inflow" id="inflow" label={INFLOW_WORD.lead}>
         {/* Neither lane could be vouched for: one sentence, not the same five syllables twice. */}
         {inflow.reviews.kind === "UNQUALIFIED" && inflow.inquiries.kind === "UNQUALIFIED" ? (
-          INFLOW_WORD.bothUnqualified
+          <State>{INFLOW_WORD.bothUnqualified}</State>
         ) : (
           <>
             <Inflow fact={inflow.reviews} word={INFLOW_WORD.reviews} unqualified={INFLOW_WORD.reviewsUnqualified} />
@@ -539,92 +585,137 @@ function OperationsSummary({
             {INFLOW_WORD.exampleData}
           </>
         ) : null}
-      </>,
+      </Cell>,
     );
   }
 
-  if (work.rows.length > 0) {
-    groups.push(
-      <>
-        {/* Every separator and lead word is a real text node, not a drawn gap: the space between two
-            flex children is rendered, never read, and a screen reader would say 「확인할 일4」. */}
-        {COPY.listTitle}{" "}
-        <span className="font-semibold tabular-nums text-ink">
-          {work.rows.length.toLocaleString("ko-KR")}
-          {/* The server said there are more than it sent, so this total is a floor — the same 「+」 the
-              heading used to carry, and the exit link still refuses to name a total at all. */}
-          {work.truncated ? "+" : ""}
-        </span>
-        {awaiting === null ? null : (
-          <>
-            <Dot />
-            <AwaitingFact count={awaiting} />
-          </>
-        )}
-      </>,
+  // The canonical deduped count, and 실행 대기 under it — what the seller already decided and has not
+  // finished. With nothing waiting and nothing pending this cell has no fact of its own and is absent;
+  // it does not print a 0 assembled from reads that may not have landed.
+  if (work.rows.length > 0 || (awaiting ?? 0) > 0) {
+    cells.push(
+      <Cell key="work" id="work" label={COPY.listTitle} note={awaiting === null ? null : <AwaitingFact count={awaiting} />}>
+        {/* The server said there are more than it sent, so this total is a floor. */}
+        <Big value={work.rows.length} suffix={work.truncated ? "+" : ""} />
+      </Cell>,
     );
-  } else if (awaiting !== null && awaiting > 0) {
-    groups.push(<AwaitingFact count={awaiting} />);
   }
 
   if (recent) {
-    groups.push(
-      <>
-        {RECENT_WORD.lead}
-        <Dot />
+    cells.push(
+      <Cell
+        key="recent"
+        id="recent"
+        label={RECENT_WORD.lead}
+        note={
+          recent.checked === 0 ? null : (
+            <>
+              <Figure word={RECENT_WORD.autoResolved} value={recent.autoResolved} small />
+              <Dot />
+              <Figure word={RECENT_WORD.draftsPrepared} value={recent.draftsPrepared} small />
+            </>
+          )
+        }
+      >
         {recent.checked === 0 ? (
-          RECENT_WORD.none
+          <State>{RECENT_WORD.none}</State>
         ) : (
-          <>
-            <Figure word={RECENT_WORD.checked} value={recent.checked} />
-            <Dot />
-            <Figure word={RECENT_WORD.autoResolved} value={recent.autoResolved} />
-            <Dot />
-            <Figure word={RECENT_WORD.draftsPrepared} value={recent.draftsPrepared} />
-          </>
+          <Figure word={RECENT_WORD.checked} value={recent.checked} />
         )}
-      </>,
+      </Cell>,
     );
   }
 
-  if (groups.length === 0) return null;
+  if (cells.length === 0) return null;
   return (
-    <p
+    <section
       data-testid="today-summary"
-      className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-relaxed text-muted"
+      aria-label={PULSE_LABEL}
+      className="mt-2 grid grid-cols-3 items-start gap-x-8 rounded-xl bg-canvas px-6 py-3.5"
     >
-      {groups.map((group, i) => (
-        <Fragment key={i}>
-          {i > 0 ? (
-            <span aria-hidden="true" className="text-[#C9CFD8]">
-              &rarr;
-            </span>
-          ) : null}
-          <span>{group}</span>
-        </Fragment>
-      ))}
+      {cells}
+    </section>
+  );
+}
+
+/**
+ * One column: the question, the figure, and what qualifies the figure.
+ *
+ * <p><b>One paragraph, three stacked spans</b> — not three paragraphs. The label and its figure are one
+ * fact and are read as one; between block children of a paragraph the separating space is a real text
+ * node, so a screen reader says 「확인할 일 4」 and not 「확인할 일4」. That is the same rule the dots inside
+ * a cell follow, and the reason the old line spelled its separators instead of drawing them.
+ *
+ * <p>The value line fixes its line box at 28px so a cell whose value is a 15px state sentence sits on the
+ * same baseline as a cell whose value is a 22px number — the row of figures has to read as a row.
+ * `min-w-0` lets a long value wrap inside its third instead of pushing the grid; it may never clip, which
+ * is why the atoms carry `whitespace-nowrap` and the separators between them do not.
+ */
+function Cell({ id, label, note, children }: { id: string; label: string; note?: ReactNode; children: ReactNode }) {
+  return (
+    <p data-testid={`pulse-${id}`} className="min-w-0 break-keep text-[13px] text-muted">
+      <span className="block leading-[18px]">{label}</span>{" "}
+      <span className="mt-0.5 block leading-7">{children}</span>
+      {note ? (
+        <>
+          {" "}
+          <span className="mt-0.5 block leading-[19px]">{note}</span>
+        </>
+      ) : null}
     </p>
   );
 }
 
 /** One inflow metric: the number when it is a measured fact, the collection state when it is not. */
 function Inflow({ fact, word, unqualified }: { fact: InflowFact; word: string; unqualified: string }) {
-  if (fact.kind === "UNQUALIFIED") return <span>{unqualified}</span>;
+  if (fact.kind === "UNQUALIFIED") return <State>{unqualified}</State>;
   return <Figure word={word} value={fact.value} />;
 }
 
-/** Label muted, number ink — the only emphasis this line is allowed. */
-function Figure({ word, value }: { word: string; value: number }) {
+/**
+ * <b>미관측은 숫자가 아니고, 사고도 아니다.</b> It stands in the value slot so the cell keeps its shape,
+ * at 15px — below a figure, above a caption — and in the ordinary muted ink. No warn colour, no icon, no
+ * tint: 「아직 확인하지 못했다」 is a smaller claim than the numbers beside it, and a band that turns
+ * orange the moment a channel is quiet trains a seller to stop reading the band.
+ */
+function State({ children }: { children: ReactNode }) {
+  return <span className="whitespace-nowrap text-[15px] leading-7 text-muted">{children}</span>;
+}
+
+/** The figure itself — the only ink and the only weight this surface spends. */
+function Big({ value, suffix = "" }: { value: number; suffix?: string }) {
   return (
-    <span>
-      {word} <span className="font-semibold tabular-nums text-ink">{value.toLocaleString("ko-KR")}</span>
+    <span className="text-[22px] font-semibold leading-7 tabular-nums text-ink">
+      {value.toLocaleString("ko-KR")}
+      {suffix}
     </span>
   );
 }
 
 /**
- * The separator inside one group. The spaces are text, not layout: this line's copy is pinned as
- * 「최근 24시간 · 새로 확인한 일 없음」 and a gap drawn between two boxes does not spell that.
+ * Label muted, number ink. `small` is the supporting line, where the figure keeps the ink and the weight
+ * but not the size — 그중 정리 and 초안 준비 qualify 새로 확인, and a qualifier at the size of the thing it
+ * qualifies is a second headline.
+ *
+ * <p>The word and its number are one unwrappable atom: a line that breaks between 리뷰 and 6 has moved a
+ * number away from the noun it counts.
+ */
+function Figure({ word, value, small = false }: { word: string; value: number; small?: boolean }) {
+  return (
+    <span className="whitespace-nowrap">
+      {word}{" "}
+      {small ? (
+        <span className="font-semibold tabular-nums text-ink">{value.toLocaleString("ko-KR")}</span>
+      ) : (
+        <Big value={value} />
+      )}
+    </span>
+  );
+}
+
+/**
+ * The separator inside one cell. The spaces are text, not layout: the space between two flex children is
+ * rendered, never read, and a screen reader would say 「리뷰6」.
  */
 function Dot() {
   return (
@@ -638,7 +729,7 @@ function Dot() {
 }
 
 /**
- * <b>실행 대기, on the status line</b> — the count, and nothing built around it.
+ * <b>실행 대기</b> — the count, and nothing built around it.
  *
  * <p>It had a 571px cell and a 22px/800 value beside the work the seller has not decided yet; an obligation they
  * already decided and a number that is usually zero do not earn that. The emphasis for a non-zero count is the
@@ -653,9 +744,6 @@ function AwaitingFact({ count }: { count: number }) {
     </a>
   );
 }
-
-/** What Reviewnary checked in the last 24 hours — context on the status line, never a count of the seller's work. */
-
 /** The rows of 실행 대기 after the dedupe against 확인할 일, and how many the section stands for in total. */
 function awaitingRows(ops: OperationsHome | null | undefined, work: HomeWork) {
   const prepared = ops?.prepared;

@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/apiClient", () => ({ api, getToken: () => null }));
 
-import { CustomerOpsHome, HOME_ROWS, coHomeApplies } from "./CustomerOpsHome";
+import { CustomerOpsHome, HOME_ROWS, HOME_ROWS_NARROW, coHomeApplies, visibleHomeRows } from "./CustomerOpsHome";
 import { mergeHomeWork } from "../../lib/homeWork";
 import { waitLabel } from "../../lib/copy/customerOps";
 
@@ -581,21 +581,28 @@ describe("오늘 — an inbox, not a dashboard", () => {
     } as never;
   }
 
-  it("the summary is a line, never the counter band that was removed", async () => {
+  it("the summary is one surface of three cells, never the counter band that was removed", async () => {
     const { container } = draw();
     await screen.findByTestId("today-status");
-    // <b>The band stays gone</b> — what returned is one muted line, not the card it replaced
-    // (product-owner decision, 2026-09-26). The band had this name; nothing may take it back.
+    // <b>The band stays gone</b> — what stands here is a Pulse, not the card it replaced (product-owner
+    // decision, 2026-09-26). The band had this name and its own counter cells; nothing may take either back.
     expect(screen.queryByLabelText("오늘 요약")).toBeNull();
     const summary = await screen.findByTestId("today-summary");
-    // No box of its own: no border, no fill, no radius, no shadow — the three things a tile has.
-    expect(summary.className).not.toMatch(/border|bg-|rounded|shadow/);
+    // ONE object: the surface carries the fill, and no cell inside it carries a box of its own.
+    expect(summary.className).toContain("grid-cols-3");
+    expect(summary.className).toContain("bg-canvas");
+    expect(summary.className).not.toMatch(/border|shadow|gradient/);
+    // Whichever cells have a fact: this fixture makes no overview read, so 오늘 들어온 것 is absent rather
+    // than 「0」 — the grid still reserves its three columns, which is why the row of figures stays a row.
+    const cells = [...summary.querySelectorAll("[data-testid^='pulse-']")] as HTMLElement[];
+    expect(cells.length).toBeGreaterThan(0);
+    for (const cell of cells) expect(cell.className).not.toMatch(/border|bg-|rounded|shadow/);
     expect(summary.querySelectorAll("[class*='rounded'],[class*='border'],[class*='shadow']")).toHaveLength(0);
-    // No figure type. The line is 13px like the status line above it; the customers' sentences below
-    // are the largest thing on this screen and nothing here competes with them.
-    expect(summary.className).toContain("text-[13px]");
-    expect(summary.querySelectorAll("[class*='text-[1'][class*='px]']")).toHaveLength(0);
-    // And no chart, by construction: nothing is drawn.
+    // The figure is 22px and nothing on this surface is larger — the customers' sentences below stay the
+    // subject of the screen, and the band is read before them, not instead of them.
+    expect(summary.querySelectorAll("[class*='text-[22px]']").length).toBeGreaterThan(0);
+    expect(summary.querySelectorAll("[class*='text-2xl'],[class*='text-3xl'],[class*='font-bold']")).toHaveLength(0);
+    // And no chart, no icon, by construction: nothing is drawn.
     expect(container.querySelectorAll("svg")).toHaveLength(0);
   });
 
@@ -625,12 +632,64 @@ describe("오늘 — an inbox, not a dashboard", () => {
     }));
     api.getInquiryQueueStrict.mockResolvedValue(queue({ content: [...queue().content, ...extra] as never }));
     draw();
-    // <b>The link names the whole list, not the remainder</b> (product-owner decision, 2026-09-26). The heading
-    // says the total and the queue screen draws the total; 「나머지 N건」 made the reader subtract two numbers to
-    // name a set that nothing renders.
-    const more = await screen.findByRole("link", { name: /전체 \d+건 보기/ });
+    // <b>The link is a destination and names no number</b> (product-owner decision, 2026-09-26). The total is
+    // the Pulse's, once, in one form including 「N+」; saying it again here put the same fact twice on one screen
+    // and made the control change its wording for a reason no seller could see.
+    const more = await screen.findByRole("link", { name: "전체 보기 →" });
     expect(more).toHaveAttribute("href", "/customer-operations/cases");
+    expect(more.textContent).not.toMatch(/\d/);
+    // The Pulse still owns it, and still marks a floor as a floor.
+    expect(screen.getByTestId("pulse-work")).toHaveTextContent(/확인할 일 \d/);
     const firstRow = screen.getByText("뚜껑이 깨져서 왔어요");
     expect(more.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+/**
+ * <b>The Pulse took the room the seventh row depended on</b> (product-owner decision, 2026-09-26).
+ *
+ * <p>Measured at 1152×720: the list's scroller ends at y=631 and seven rows used to end at 585 — 46px of slack
+ * against a band that costs 91px. Seven and the Pulse are not both true there. What these pin is which of the
+ * two gave way and how: <b>a row is whole or it is absent</b>, and the visible limit is a named function of the
+ * layout rather than a measurement taken at render time.
+ */
+describe("visible rows — the Pulse's cost, paid in whole rows", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.getInquiryQueueStrict.mockResolvedValue(queue());
+  });
+
+  it("is a pure function of the layout, and the narrow answer is one row shorter", () => {
+    expect(visibleHomeRows(true)).toBe(HOME_ROWS);
+    expect(visibleHomeRows(false)).toBe(HOME_ROWS_NARROW);
+    // Not a second capacity: `HOME_ROWS` is still what the wide case shows and what 「+N」 counts against.
+    expect(HOME_ROWS_NARROW).toBe(HOME_ROWS - 1);
+  });
+
+  it("an environment that cannot measure says narrow — it under-fills a wide screen, it never clips a narrow one", async () => {
+    // jsdom answers `matches: false` to every width query, which is the same answer a server render gives.
+    // The safe direction is the short one: a missing row is visibly missing, a clipped row pretends to be there.
+    const extra = Array.from({ length: HOME_ROWS + 4 }, (_, i) => ({
+      workItemId: `w-${i + 40}`, inquiryId: `i-${i + 40}`, sellerAccountId: "a", channelId: "ch", channelCode: "CAFE24",
+      channelNameKo: "카페24", productId: null, productName: null, phase: "OPEN", status: "UNANSWERED",
+      title: `줄 세우기 ${i + 1}`, snippet: null, receivedAt: `2026-09-16T04:${10 + i}:00Z`, hasDraft: false,
+    }));
+    api.getInquiryQueueStrict.mockResolvedValue(queue({ content: [...queue().content, ...extra] as never }));
+    draw();
+    // Both the section and its list carry the canonical noun, which is the point of the naming decision;
+    // the rows are the list's.
+    const list = (await screen.findAllByLabelText("확인할 일")).find((el) => el.tagName === "UL");
+    await waitFor(() => expect(list?.querySelectorAll("li").length).toBe(HOME_ROWS_NARROW));
+  });
+
+  it("the way out says where it goes and names no number, floor or not", async () => {
+    // The total is the Pulse's, in one form. This link used to say 「전체 11건 보기」 and fall silent on 「N+」,
+    // so the same control changed its wording for a reason no seller could see.
+    api.getInquiryQueueStrict.mockResolvedValue(queue({ totalElements: 80 }));
+    draw();
+    const more = await screen.findByRole("link", { name: "전체 보기 →" });
+    expect(more).toHaveAttribute("href", "/customer-operations/cases");
+    expect(more.textContent).not.toMatch(/\d/);
+    expect(screen.getByTestId("pulse-work")).toHaveTextContent("확인할 일 4+");
   });
 });
