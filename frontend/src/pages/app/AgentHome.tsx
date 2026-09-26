@@ -357,7 +357,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
   );
 
   const lead = coHome ? (
-    <CustomerOpsHome co={coHome} ops={home} now={now} onChanged={() => void loadCo()} />
+    <CustomerOpsHome co={coHome} ops={home} now={now} onChanged={() => void loadCo()} metrics={data?.metrics ?? null} />
   ) : co === undefined && firstUse?.kind === "WORKING" ? (
     // The job's read has not landed: draw nothing in its place rather than the other Home for a moment.
     <h1 className="sr-only">{COPY.homeTitle}</h1>
@@ -387,6 +387,7 @@ export function AgentHome({ now = new Date() }: { now?: Date }) {
                 now={now}
                 onChanged={() => void loadCo()}
                 onProblemChanged={onProblemChanged}
+                metrics={data?.metrics ?? null}
                 dock={dock}
               />
             )

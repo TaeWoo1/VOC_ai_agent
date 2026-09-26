@@ -13,19 +13,30 @@ import { problemLine } from "../../lib/operationsHome";
 import { RESPONSIBILITY_NAME, cadenceLabel, dataTypeKo, kstClock } from "../../lib/customerOperations";
 import { COPY, autoCheckWhat, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts, sharedRowFacts, type HomeWork } from "../../lib/homeWork";
+import { INFLOW_WORD, RECENT_WORD, recentDay, todayInflow, type InflowFact } from "../../lib/homeSummary";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
-import type { HomePreparedItem, InquiryQueueResponse, OperationsHome, ReviewIssueView, ReviewWorkView } from "../../lib/types";
+import type {
+  HomePreparedItem,
+  InquiryQueueResponse,
+  OperationsHome,
+  OperationsMetrics,
+  ReviewIssueView,
+  ReviewWorkView,
+} from "../../lib/types";
 
 /**
  * How many rows the list shows before 「+N」.
  *
  * <b>Seven is the smallest viewport's capacity, not this viewport's spare room</b> (product-owner decision,
- * 2026-09-26). Measured at 1440×900 / 1366×768 / 1152×720 the list always starts at y=119 and a one-line row is
- * 63px, so seven rows end at 560 and the section under them starts at ≈584 — above the composer dock at every
- * supported width (824 / 692 / 644). Eight rows fit 1440 more snugly and push 실행 대기 · 반복 문제 below the
- * fold at the other two, and the emphasis those sections carry IS their being visible. One constant, chosen from
- * the narrowest case: there is deliberately no measurement, no observer and no per-width branch, because a row
- * count that is computed is a row count that can break on a width nobody tested.
+ * 2026-09-26). Eight rows fit 1440 more snugly and push 실행 대기 · 반복 문제 below the fold at the other two,
+ * and the emphasis those sections carry IS their being visible. One constant, chosen from the narrowest case:
+ * there is deliberately no measurement, no observer and no per-width branch, because a row count that is
+ * computed is a row count that can break on a width nobody tested.
+ *
+ * <p>Re-measured after the summary line landed (2026-09-26): at 1440×900 / 1366×768 / 1152×720 the list now
+ * starts at y=137 and seven rows end at 585 — the line cost 25px and every row still lands whole, with the
+ * composer at 838 / 706 / 658. The narrowest case keeps 73px of clear space below the last row, which is why
+ * the constant did not have to move.
  */
 export const HOME_ROWS = 7;
 /**
@@ -67,6 +78,7 @@ export function CustomerOpsHome({
   ops,
   now = new Date(),
   onChanged,
+  metrics,
   sharedQueue,
   sharedReviewWork,
   selection,
@@ -75,6 +87,11 @@ export function CustomerOpsHome({
   ops: OperationsHome | null | undefined;
   now?: Date;
   onChanged: () => void;
+  /**
+   * The overview read the page around this list already made (`getOverviewStrict(7)`). Only the summary
+   * line reads it, and only to answer 「오늘 들어온 것」 — a failed read is `null` and says nothing.
+   */
+  metrics?: OperationsMetrics | null;
   /** The queue read, when the page around this list already made it (the 오늘 workspace needs the same rows). */
   sharedQueue?: { value: InquiryQueueResponse | null | undefined };
   /** The review half of 확인할 일, when the page around this list already read it. */
@@ -160,16 +177,17 @@ export function CustomerOpsHome({
               관찰 N · 초안 N (미발송) · 처리 확인 중 N」, so the real line is eleven facts, and its strongest
               element (semibold ink) was a caveat about the machine. This line answers 「자동 확인이 돌고 있나」;
               Home needs that question's conclusion, not its parameters. 확인 주기 · 다음 확인 · 마지막 확인 were
-              already on `/customer-operations`, and the 24-hour tally is now rendered there too — nothing is
-              deleted, one thing moved. What stays: which today it is, whether the list below can be trusted, and
-              실행 대기 — the only fact on this line that is the seller's own work. */}
-          {co.status === "ACTIVE" ? (
-            <>
-              <Sep />
-              <AwaitingFact count={awaiting.count} />
-            </>
-          ) : null}
+              already on `/customer-operations` — nothing was deleted, one thing moved. What stays on THIS line is
+              the frame the rest of the screen is read inside: which today it is, and whether the list below can
+              be trusted. The operational figures — including 실행 대기 — are the summary's, one line down, where
+              each one stands beside the question it answers. */}
         </p>
+        <OperationsSummary
+          inflow={todayInflow(metrics, now)}
+          work={work}
+          awaiting={co.status === "ACTIVE" ? awaiting.count : null}
+          recent={recentDay(co)}
+        />
       </header>
 
       {running && co.status === "ACTIVE" ? (
@@ -232,13 +250,10 @@ export function CustomerOpsHome({
               both references draw (Intercom: 「5 Open ⌄」 / 「Newest ⌄」). No box, no pill, no second number: the
               count lives on the heading of the thing it counts. */}
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-line pb-2">
-            <h2 className="text-sm font-semibold tracking-tight text-ink">
-              {COPY.listTitle}
-              <span className="ml-1.5 font-semibold tabular-nums text-muted">
-                {work.rows.length.toLocaleString("ko-KR")}
-                {work.truncated ? "+" : ""}
-              </span>
-            </h2>
+            {/* The count moved one line up, onto the summary's 「지금 볼 것」 (2026-09-26). It is the same
+                number from the same `work`, and drawing it in both places put the same fact 12px from
+                itself. The heading keeps what is only the list's: its order and its way out. */}
+            <h2 className="text-sm font-semibold tracking-tight text-ink">{COPY.listTitle}</h2>
             <span className="break-keep text-[13px] text-muted">
               {COPY.listOrder}
               {/* What every row says identically, said once — instead of twice on each of them. */}
@@ -354,12 +369,18 @@ export function TodayWorkspace({
   now = new Date(),
   onChanged,
   onProblemChanged,
+  metrics,
   dock,
 }: {
   co: CustomerOperationsHome;
   ops: OperationsHome | null | undefined;
   now?: Date;
   onChanged: () => void;
+  /**
+   * The overview read the page around this list already made (`getOverviewStrict(7)`). Only the summary
+   * line reads it, and only to answer 「오늘 들어온 것」 — a failed read is `null` and says nothing.
+   */
+  metrics?: OperationsMetrics | null;
   /** A repeated problem changed state in the pane — the list beside it must say so at once. */
   onProblemChanged?: (next: ReviewIssueView) => void;
   dock: ReactNode;
@@ -434,6 +455,7 @@ export function TodayWorkspace({
           ops={ops}
           now={now}
           onChanged={onChanged}
+          metrics={metrics}
           sharedQueue={{ value: queue }}
           sharedReviewWork={{ value: reviewWork }}
           selection={{ wide, selectedKey, search: location.search }}
@@ -460,6 +482,158 @@ function Sep() {
     <span aria-hidden="true" className="text-[#C9CFD8]">
       ·
     </span>
+  );
+}
+
+/**
+ * <b>오늘 들어온 것 → 지금 볼 것 → 최근 24시간</b> — one muted line above the inbox.
+ *
+ * <p>The contract is `docs/pilot_usage_loop_v1.md` §8: <b>no new read</b> (every value comes from the
+ * five the Home already makes), no KPI card, no tile, no chart. Only the numbers take ink and weight;
+ * every label stays muted, so the line sits below the customers' sentences in the hierarchy rather
+ * than above them.
+ *
+ * <p><b>The three groups are not three counts of the same kind.</b> The first is a measured day, the
+ * second is now, the third is a window on cases we opened — which is why each group carries its own
+ * lead word instead of a shared heading that would make one window true of all three.
+ *
+ * <p>A group that has nothing true to say renders nothing. That is not tidiness: an inflow read that
+ * failed, a job that is not running, and an org with no window yet are three different silences, and
+ * none of them is 「0」.
+ */
+function OperationsSummary({
+  inflow,
+  work,
+  awaiting,
+  recent,
+}: {
+  inflow: ReturnType<typeof todayInflow>;
+  work: HomeWork;
+  /** `null` when the job is not running — 실행 대기 is a fact about a job that is looking. */
+  awaiting: number | null;
+  recent: ReturnType<typeof recentDay>;
+}) {
+  const groups: ReactNode[] = [];
+
+  if (inflow) {
+    groups.push(
+      <>
+        {INFLOW_WORD.lead}
+        <Dot />
+        {/* Neither lane could be vouched for: one sentence, not the same five syllables twice. */}
+        {inflow.reviews.kind === "UNQUALIFIED" && inflow.inquiries.kind === "UNQUALIFIED" ? (
+          INFLOW_WORD.bothUnqualified
+        ) : (
+          <>
+            <Inflow fact={inflow.reviews} word={INFLOW_WORD.reviews} unqualified={INFLOW_WORD.reviewsUnqualified} />
+            <Dot />
+            <Inflow fact={inflow.inquiries} word={INFLOW_WORD.inquiries} unqualified={INFLOW_WORD.inquiriesUnqualified} />
+          </>
+        )}
+        {/* Real counts of rows the product manufactured about itself. Shown, never unlabelled — and the
+            label only where there is a figure to label: with both lanes withheld it would qualify
+            nothing and read as a state of its own. */}
+        {inflow.exampleData && (inflow.reviews.kind === "COUNT" || inflow.inquiries.kind === "COUNT") ? (
+          <>
+            <Dot />
+            {INFLOW_WORD.exampleData}
+          </>
+        ) : null}
+      </>,
+    );
+  }
+
+  if (work.rows.length > 0) {
+    groups.push(
+      <>
+        {/* Every separator and lead word is a real text node, not a drawn gap: the space between two
+            flex children is rendered, never read, and a screen reader would say 「확인할 일4」. */}
+        {COPY.listTitle}{" "}
+        <span className="font-semibold tabular-nums text-ink">
+          {work.rows.length.toLocaleString("ko-KR")}
+          {/* The server said there are more than it sent, so this total is a floor — the same 「+」 the
+              heading used to carry, and the exit link still refuses to name a total at all. */}
+          {work.truncated ? "+" : ""}
+        </span>
+        {awaiting === null ? null : (
+          <>
+            <Dot />
+            <AwaitingFact count={awaiting} />
+          </>
+        )}
+      </>,
+    );
+  } else if (awaiting !== null && awaiting > 0) {
+    groups.push(<AwaitingFact count={awaiting} />);
+  }
+
+  if (recent) {
+    groups.push(
+      <>
+        {RECENT_WORD.lead}
+        <Dot />
+        {recent.checked === 0 ? (
+          RECENT_WORD.none
+        ) : (
+          <>
+            <Figure word={RECENT_WORD.checked} value={recent.checked} />
+            <Dot />
+            <Figure word={RECENT_WORD.autoResolved} value={recent.autoResolved} />
+            <Dot />
+            <Figure word={RECENT_WORD.draftsPrepared} value={recent.draftsPrepared} />
+          </>
+        )}
+      </>,
+    );
+  }
+
+  if (groups.length === 0) return null;
+  return (
+    <p
+      data-testid="today-summary"
+      className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-relaxed text-muted"
+    >
+      {groups.map((group, i) => (
+        <Fragment key={i}>
+          {i > 0 ? (
+            <span aria-hidden="true" className="text-[#C9CFD8]">
+              &rarr;
+            </span>
+          ) : null}
+          <span>{group}</span>
+        </Fragment>
+      ))}
+    </p>
+  );
+}
+
+/** One inflow metric: the number when it is a measured fact, the collection state when it is not. */
+function Inflow({ fact, word, unqualified }: { fact: InflowFact; word: string; unqualified: string }) {
+  if (fact.kind === "UNQUALIFIED") return <span>{unqualified}</span>;
+  return <Figure word={word} value={fact.value} />;
+}
+
+/** Label muted, number ink — the only emphasis this line is allowed. */
+function Figure({ word, value }: { word: string; value: number }) {
+  return (
+    <span>
+      {word} <span className="font-semibold tabular-nums text-ink">{value.toLocaleString("ko-KR")}</span>
+    </span>
+  );
+}
+
+/**
+ * The separator inside one group. The spaces are text, not layout: this line's copy is pinned as
+ * 「최근 24시간 · 새로 확인한 일 없음」 and a gap drawn between two boxes does not spell that.
+ */
+function Dot() {
+  return (
+    <>
+      {" "}
+      <span aria-hidden="true" className="text-[#C9CFD8]">
+        &middot;
+      </span>{" "}
+    </>
   );
 }
 

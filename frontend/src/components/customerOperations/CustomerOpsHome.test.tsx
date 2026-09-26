@@ -215,16 +215,22 @@ describe("CustomerOpsHome", () => {
     expect(status).not.toHaveTextContent("초안 9");
     expect(status).not.toHaveTextContent("다음 확인");
     expect(status).not.toHaveTextContent("주기");
-    // 실행 대기 stays a fact and a pointer — never a cell beside the work, and never a pill.
-    expect(within(status).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "#실행-대기");
+    // 실행 대기 stays a fact and a pointer — never a cell beside the work, and never a pill. It sits on the
+    // summary line now (with 「지금 볼 것」, which is what it qualifies), not on the date line.
+    const summary = await screen.findByTestId("today-summary");
+    expect(within(summary).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "#실행-대기");
+    expect(within(status).queryByRole("link", { name: /실행 대기/ })).toBeNull();
     // A dot and a word, not a filled capsule: nothing on this line has both a pill radius and pill padding.
     expect(status.querySelectorAll("[class*='rounded-full'][class*='px-']")).toHaveLength(0);
     // 반복 문제 is a pattern, not a customer waiting: not up here, and not hidden either.
     expect(within(status).queryByRole("link", { name: /반복 문제/ })).toBeNull();
     expect(screen.getByRole("link", { name: /반복 문제 전체 보기/ })).toHaveAttribute("href", "/memory");
-    // The count lives on the heading of the thing it counts, with the order and the breakdown beside it.
+    // <b>The count moved up one line</b> (product-owner decision, 2026-09-26): it is 「지금 볼 것」 of the
+    // summary, and the heading no longer repeats it 12px below. Same number, same `work`, one place.
+    await waitFor(() => expect(summary).toHaveTextContent("확인할 일 4"));
     const heading = await screen.findByRole("heading", { name: /확인할 일/ });
-    await waitFor(() => expect(heading).toHaveTextContent("4"));
+    expect(heading).not.toHaveTextContent("4");
+    // What is only the list's stays on the list: its order and its breakdown.
     expect(heading.parentElement).toHaveTextContent(/교환·환불 1 ?·정보 부족 1 ?·답변 필요 1 ?·리뷰 1/);
     await expectNoAxeViolations(container);
   });
@@ -274,16 +280,16 @@ describe("CustomerOpsHome", () => {
     await waitFor(() => expect(gaps).toHaveTextContent("문의 목록 읽기 실패 · 부분 집계"));
     expect(gaps).not.toHaveTextContent("리뷰 목록 읽기 실패");
     // c-1, c-2 and the review — what loaded, with no 「+」.
-    const heading = screen.getByRole("heading", { name: /확인할 일/ });
-    expect(heading).toHaveTextContent("3");
-    expect(heading).not.toHaveTextContent("3+");
+    const summary = screen.getByTestId("today-summary");
+    expect(summary).toHaveTextContent("확인할 일 3");
+    expect(summary).not.toHaveTextContent("3+");
   });
 
   it("「N+」 only when a read reports more than it returned", async () => {
     api.getInquiryQueueStrict.mockResolvedValue(queue({ totalElements: 80 }));
     draw();
-    const heading = await screen.findByRole("heading", { name: /확인할 일/ });
-    await waitFor(() => expect(heading).toHaveTextContent("4+"));
+    const summary = await screen.findByTestId("today-summary");
+    await waitFor(() => expect(summary).toHaveTextContent("확인할 일 4+"));
     expect(screen.queryByLabelText("집계에서 빠진 곳")).toBeNull();
   });
 
@@ -575,26 +581,36 @@ describe("오늘 — an inbox, not a dashboard", () => {
     } as never;
   }
 
-  it("draws no summary card over the list, at any count", async () => {
-    draw();
+  it("the summary is a line, never the counter band that was removed", async () => {
+    const { container } = draw();
     await screen.findByTestId("today-status");
-    // The band had this name; nothing replaced it, and nothing may.
+    // <b>The band stays gone</b> — what returned is one muted line, not the card it replaced
+    // (product-owner decision, 2026-09-26). The band had this name; nothing may take it back.
     expect(screen.queryByLabelText("오늘 요약")).toBeNull();
-    expect(screen.queryByTestId("today-summary")).toBeNull();
+    const summary = await screen.findByTestId("today-summary");
+    // No box of its own: no border, no fill, no radius, no shadow — the three things a tile has.
+    expect(summary.className).not.toMatch(/border|bg-|rounded|shadow/);
+    expect(summary.querySelectorAll("[class*='rounded'],[class*='border'],[class*='shadow']")).toHaveLength(0);
+    // No figure type. The line is 13px like the status line above it; the customers' sentences below
+    // are the largest thing on this screen and nothing here competes with them.
+    expect(summary.className).toContain("text-[13px]");
+    expect(summary.querySelectorAll("[class*='text-[1'][class*='px]']")).toHaveLength(0);
+    // And no chart, by construction: nothing is drawn.
+    expect(container.querySelectorAll("svg")).toHaveLength(0);
   });
 
   it("실행 대기 0 is a quiet fact and not a control — there is nothing to point at", async () => {
     draw(co(), noAwaiting());
-    const status = await screen.findByTestId("today-status");
-    expect(status).toHaveTextContent("실행 대기 없음");
-    expect(within(status).queryByRole("link", { name: /실행 대기/ })).toBeNull();
+    const summary = await screen.findByTestId("today-summary");
+    expect(summary).toHaveTextContent("실행 대기 없음");
+    expect(within(summary).queryByRole("link", { name: /실행 대기/ })).toBeNull();
   });
 
   it("실행 대기 > 0 stays on the same line and becomes the pointer to its own section", async () => {
     draw();
-    const status = await screen.findByTestId("today-status");
-    expect(within(status).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "#실행-대기");
-    expect(status).toHaveTextContent("실행 대기 2");
+    const summary = await screen.findByTestId("today-summary");
+    expect(within(summary).getByRole("link", { name: /실행 대기/ })).toHaveAttribute("href", "#실행-대기");
+    expect(summary).toHaveTextContent("실행 대기 2");
     // Promotion is the section existing, not a cell up here.
     expect(screen.getByRole("heading", { name: "실행 대기" })).toBeTruthy();
   });
