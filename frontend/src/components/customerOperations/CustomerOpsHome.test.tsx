@@ -598,9 +598,12 @@ describe("오늘 — an inbox, not a dashboard", () => {
     expect(cells.length).toBeGreaterThan(0);
     for (const cell of cells) expect(cell.className).not.toMatch(/border|bg-|rounded|shadow/);
     expect(summary.querySelectorAll("[class*='rounded'],[class*='border'],[class*='shadow']")).toHaveLength(0);
-    // The figure is 22px and nothing on this surface is larger — the customers' sentences below stay the
-    // subject of the screen, and the band is read before them, not instead of them.
-    expect(summary.querySelectorAll("[class*='text-[22px]']").length).toBeGreaterThan(0);
+    // Every cell answers its question at the same 20px, number or sentence, and nothing on this surface is
+    // larger — the customers' sentences below stay the subject of the screen, and the band is read before
+    // them, not instead of them. The band is also only as wide as what it holds: page-wide, the three
+    // columns stood 344px apart and stopped reading as one summary.
+    expect(summary.className).toContain("max-w-3xl");
+    for (const cell of cells) expect((cell.children[1] as HTMLElement).className).toContain("text-[20px]");
     expect(summary.querySelectorAll("[class*='text-2xl'],[class*='text-3xl'],[class*='font-bold']")).toHaveLength(0);
     // And no chart, no icon, by construction: nothing is drawn.
     expect(container.querySelectorAll("svg")).toHaveLength(0);

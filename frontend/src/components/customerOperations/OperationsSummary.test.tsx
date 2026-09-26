@@ -279,19 +279,48 @@ describe("the line as a whole", () => {
       expect(c.className).toContain("text-[13px]");
       expect(c.className).toContain("text-muted");
     }
-    expect(line.querySelectorAll(".text-\\[22px\\].font-semibold.text-ink.tabular-nums").length).toBeGreaterThan(0);
-    // Nothing bigger than the figure, and nothing drawn.
+    // <b>The state line is one size whatever it holds</b> (product-owner decision, 2026-09-26, from the
+    // rendered screen). This fixture states one cell's answer as a number and another's as a sentence, and
+    // both are 20px: a band that grows only when the answer is a number shrinks exactly when the seller
+    // needs to notice something. What separates them is ink — reserved for a measured figure — and never size.
+    const states = cells.map((c) => c.children[1] as HTMLElement);
+    expect(states.length).toBeGreaterThan(1);
+    for (const state of states) expect(state.className).toContain("text-[20px]");
+    expect(line.querySelectorAll(".font-semibold.tabular-nums.text-ink").length).toBeGreaterThan(0);
+    // Nothing bigger than the state line, and nothing drawn.
     expect(line.querySelectorAll("[class*='text-2xl'],[class*='text-3xl'],[class*='font-bold']")).toHaveLength(0);
     expect(container.querySelectorAll("svg,canvas")).toHaveLength(0);
   });
 
-  it("the groups are columns now, so nothing is drawn between them", async () => {
+  it("names itself with a heading, and is that heading — not a second string beside it", async () => {
+    draw(co({ checked: 12 }));
+    const line = await summary();
+    const named = line.getAttribute("aria-labelledby");
+    expect(named).toBeTruthy();
+    const heading = document.getElementById(named as string) as HTMLElement;
+    // A visible name, so the thing a seller points at and the thing a screen reader announces are one
+    // string. The heading carries no window word: the three columns hold three different windows, and a
+    // 「오늘」 over the group would make the 24-hour one read as today's.
+    expect(heading.tagName).toBe("H2");
+    expect(heading.textContent).toBe("운영 현황");
+    expect(heading.textContent).not.toMatch(/오늘|24시간/);
+    expect(line.getAttribute("aria-label")).toBeNull();
+  });
+
+  it("the columns are ruled by the surface, never boxed one by one", async () => {
     draw(co({ checked: 12, autoResolved: 3, draftsPrepared: 2 }));
     const line = await summary();
-    // The arrows joined three groups on one line. Three columns do not need joining, and a divider would
-    // be a drawn line saying what three left-aligned blocks already say.
+    // The arrows joined three groups on one line. Columns do not need joining — but measured at 1440 the
+    // whitespace alone left 307px of ink at a 344px pitch, and three items that far apart are three items.
+    // So the surface rules between its own columns: two hairlines in the line colour, and still not one
+    // edge, fill or radius around any cell (product-owner decision, 2026-09-26). Zendesk's Agent Home
+    // statistics card does exactly this, and nobody reads those three figures as three cards.
     expect([...line.querySelectorAll("span")].filter((el) => el.textContent === "→")).toHaveLength(0);
-    expect(line.className).not.toMatch(/divide-/);
+    expect(line.className).toContain("divide-x");
+    expect(line.className).toContain("divide-line");
+    for (const c of line.querySelectorAll("[data-testid^='pulse-']")) {
+      expect((c as HTMLElement).className).not.toMatch(/border|bg-|rounded|shadow/);
+    }
     // The dots that remain are INSIDE a cell, between two facts of the same kind, and they are still
     // spelled rather than drawn — a gap between flex children is rendered and never read.
     const dots = [...line.querySelectorAll("span")].filter((el) => el.textContent === "·");

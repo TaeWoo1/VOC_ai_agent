@@ -13,7 +13,7 @@ import { problemLine } from "../../lib/operationsHome";
 import { RESPONSIBILITY_NAME, cadenceLabel, dataTypeKo, kstClock } from "../../lib/customerOperations";
 import { COPY, autoCheckWhat, channelShort, failureShort, kstLongDate } from "../../lib/copy/customerOps";
 import { mergeHomeWork, reasonCounts, sharedRowFacts, type HomeWork } from "../../lib/homeWork";
-import { INFLOW_WORD, RECENT_WORD, recentDay, todayInflow, type InflowFact } from "../../lib/homeSummary";
+import { INFLOW_WORD, RECENT_WORD, recentDay, todayInflow } from "../../lib/homeSummary";
 import type { CustomerOperationsHome } from "../../lib/customerOperationsTypes";
 import type {
   HomePreparedItem,
@@ -33,11 +33,13 @@ import type {
  *
  * <p><b>Then the Pulse took the room seven depended on</b> (product-owner decision, 2026-09-26). Measured at
  * 1152×720: the list's own scroller ends at y=631 and seven rows used to end at 585 — 46px of slack. The Pulse
- * is 100px where the line it replaced was 21px, so the list now starts at y=227 instead of 145 and a seventh
- * row would end at 668 — <b>37px past the bottom of the scroller that holds it</b>. Seven and the Pulse are not
- * both true there, so the narrow case shows six, ending at 605 with 26px to spare. <b>A row is either whole or
- * absent</b>: the alternative was leaving the seventh clipped, and a row you can read the top of is a row the
- * screen is pretending to show. At 1440×900 nothing changed — seven rows end at 668 with the composer at 838.
+ * and its heading are 118px where the line they replaced was 21px, so the first row now starts at y=246 instead
+ * of 145 and a seventh row would end at 687 — <b>56px past the bottom of the scroller that holds it</b>. Seven
+ * and the Pulse are not both true there, so the narrow case shows six, ending at 624 with 7px to spare.
+ * <b>A row is either whole or absent</b>: the alternative was leaving the seventh clipped, and a row you can
+ * read the top of is a row the screen is pretending to show. At 1440×900 nothing changed — seven rows end at
+ * 688 with 151px of clearance to the composer. The numbers above are re-measured against the band as shipped,
+ * not against the first cut of it.
  *
  * <p>The constant below still means what it meant — the capacity of the widest case, and the number every
  * other surface reasons about. What is new is that the <i>visible</i> limit is its own named function of the
@@ -511,10 +513,23 @@ function Sep() {
 }
 
 /**
- * The name of the surface for a reader who cannot see the three columns. It names the surface, not the
- * work: 확인할 일 is the cell's label and the section's heading below, and this is the band they sit in.
+ * <b>The band's own name, and the heading a seller reads above it.</b>
+ *
+ * <p><b>현황, and not 오늘 현황</b> — a one-word deviation from the wire, for the reason this module already
+ * gives twice. The three columns hold three different windows: 오늘 들어온 것 is a KST day, 확인할 일 is now,
+ * 최근 24시간 is a rolling window on cases we opened. A heading that says 오늘 puts one window over all three
+ * and makes the third one read as today's — which is the exact move `homeSummary.recentDay` refuses when it
+ * keeps `monitoring`/`verifying` out of a windowed group. 운영 is the noun that is true of all three, and it
+ * carries no window at all. It also stops the page from saying 오늘 twice in 60px; the tie to the title is
+ * the heading's position under it, not a repeated word. <b>Flipping it back is one string</b> if the product
+ * owner would rather have the repetition than the neutral noun.
+ *
+ * <p>It is the surface's accessible name too (`aria-labelledby`), not a second string beside a visual one:
+ * a surface with a visible heading and a different `aria-label` has two names, and only one of them is
+ * the one people quote to each other.
  */
-const PULSE_LABEL = "오늘 운영 현황";
+const PULSE_LABEL = "운영 현황";
+const PULSE_HEADING_ID = "today-pulse-heading";
 
 /**
  * <b>Operational Pulse — 오늘 들어온 것 · 확인할 일 · 최근 24시간</b>, one surface above the inbox.
@@ -525,20 +540,37 @@ const PULSE_LABEL = "오늘 운영 현황";
  * <p><b>Why it stopped being a line</b> (product-owner decision, 2026-09-26). Measured, the 13px muted
  * line was the status line's second row — same font-size, same colour, same line-height, 4px under it —
  * so a seller read it as more date metadata and the screen answered 「오늘 운영이 어떻게 흐르고 있나」 in
- * the type of a caption. The figures now take 22px/600 ink; the labels stay 13px muted. <b>The emphasis
- * is the number</b> — never the label, never the surface.
+ * the type of a caption.
  *
- * <p><b>One surface, not three cards.</b> Three cards are three objects, and the screen's subject is the
- * list below them. A neutral fill instead of a border, because on this white page a hairline is the
- * louder of the two per unit of information carried; no shadow, no gradient, no icon, no chart. The
- * columns are separated by whitespace alone — a divider would be a fourth and fifth drawn line to say
- * what three left-aligned blocks already say.
+ * <p><b>And why the promotion was then re-cut</b> (product-owner decision, same day, from the rendered
+ * screen). Four things were measured wrong on the first cut and all four have the same cause — <b>only a
+ * number was treated as a value</b>. At 1440 the surface was 1,144px wide and carried 307px of ink: three
+ * items at a 344px pitch, which is a row of three unrelated things, not one overview. The middle cell was a
+ * bare 「11」 at 22px beside two cells whose value line was 13px text, so the screen had exactly one figure
+ * and it read as a lone KPI. 「수집 상태 확인 필요」 and 「새로 확인한 일 없음」 sat in a 29px line box at
+ * caption size — the two states a seller most needs to see at a glance were the quietest text in the band.
  *
- * <p><b>The three cells are not three counts of the same kind.</b> The first is a measured day, the
- * second is now, the third is a window on cases we opened — which is why each carries its own lead word
- * instead of one heading that would make a single window true of all three. Zendesk's Agent Home rail
- * does exactly this and for the same reason: 「This week」 and 「60 days」 stand under each statistic's own
- * name rather than over the group.
+ * <p>So the rule here is now one rule: <b>every cell has the same three tiers — 질문 / 지금 상태 / 그 상태를
+ * 한정하는 사실 — and the middle tier is one type size whatever it holds.</b> A count and a withheld count are
+ * both answers to 「오늘 들어온 것」; a band that grows to 20px only when the answer is a number is a band that
+ * shrinks precisely when the seller needs to notice something. What still separates them is <b>ink</b>: a
+ * measured figure is ink and semibold, and every other word on that line — the unit nouns and the state
+ * sentences — is the ordinary muted weight. No warn colour, no icon, no tint: 「아직 확인하지 못했다」 is a
+ * smaller claim than the numbers beside it, and a band that turns orange when a channel is quiet trains a
+ * seller to stop reading the band.
+ *
+ * <p><b>One surface, not three cards</b> — and the surface is now the width of what it holds (`max-w-3xl`)
+ * rather than the width of the page. The columns are thirds of 768px, so the pitch is 240px against ~175px
+ * of ink instead of 344px against 116px, and the two hairlines between them are the cheapest way to say
+ * 「these three belong to one reading」. Zendesk's Agent Home statistics card does exactly this at exactly
+ * this scale: a heading, a narrow container, even columns, and a hairline between each figure — and nobody
+ * reads those three as three cards. No shadow, no gradient, no icon, no chart, and the cells themselves
+ * carry no fill, border or radius of their own.
+ *
+ * <p><b>The three cells are not three counts of the same kind.</b> The first is a measured day, the second
+ * is now, the third is a window on cases we opened — which is why each carries its own lead word instead of
+ * one heading that would make a single window true of all three. Zendesk does this too, and for the same
+ * reason: 「This week」 and 「60 days」 stand under each statistic's own name rather than over the group.
  *
  * <p>The second cell says <b>확인할 일</b> — the same canonical noun as the section heading below it,
  * because it is the same set counted once. A second name (「지금 확인할 것」) would have split one meaning
@@ -564,27 +596,30 @@ function OperationsSummary({
   const cells: ReactNode[] = [];
 
   if (inflow) {
+    // Neither lane could be vouched for: one sentence in the state slot, not the same five syllables twice.
+    const blind = inflow.reviews.kind === "UNQUALIFIED" && inflow.inquiries.kind === "UNQUALIFIED";
+    // What we did measure is the state; what we could not measure qualifies it. With one lane current and
+    // one not, the seller's 「오늘 들어온 것」 is the number we actually have — and the lane we are missing is
+    // still named, on the line whose job is naming what limits the figure above it. It is never a 0.
+    const counted = [
+      inflow.reviews.kind === "COUNT" ? <Figure key="r" word={INFLOW_WORD.reviews} value={inflow.reviews.value} /> : null,
+      inflow.inquiries.kind === "COUNT" ? <Figure key="i" word={INFLOW_WORD.inquiries} value={inflow.inquiries.value} /> : null,
+    ];
+    const withheld = [
+      inflow.reviews.kind === "UNQUALIFIED" ? <span key="r">{INFLOW_WORD.reviewsUnqualified}</span> : null,
+      inflow.inquiries.kind === "UNQUALIFIED" ? <span key="i">{INFLOW_WORD.inquiriesUnqualified}</span> : null,
+    ];
+    // Real counts of rows the product manufactured about itself. Shown, never unlabelled — and the label
+    // only where there is a figure to label: with both lanes withheld it would qualify nothing.
+    const example = inflow.exampleData && !blind ? <span key="x">{INFLOW_WORD.exampleData}</span> : null;
     cells.push(
-      <Cell key="inflow" id="inflow" label={INFLOW_WORD.lead}>
-        {/* Neither lane could be vouched for: one sentence, not the same five syllables twice. */}
-        {inflow.reviews.kind === "UNQUALIFIED" && inflow.inquiries.kind === "UNQUALIFIED" ? (
-          <State>{INFLOW_WORD.bothUnqualified}</State>
-        ) : (
-          <>
-            <Inflow fact={inflow.reviews} word={INFLOW_WORD.reviews} unqualified={INFLOW_WORD.reviewsUnqualified} />
-            <Dot />
-            <Inflow fact={inflow.inquiries} word={INFLOW_WORD.inquiries} unqualified={INFLOW_WORD.inquiriesUnqualified} />
-          </>
-        )}
-        {/* Real counts of rows the product manufactured about itself. Shown, never unlabelled — and the
-            label only where there is a figure to label: with both lanes withheld it would qualify
-            nothing and read as a state of its own. */}
-        {inflow.exampleData && (inflow.reviews.kind === "COUNT" || inflow.inquiries.kind === "COUNT") ? (
-          <>
-            <Dot />
-            {INFLOW_WORD.exampleData}
-          </>
-        ) : null}
+      <Cell
+        key="inflow"
+        id="inflow"
+        label={INFLOW_WORD.lead}
+        note={blind ? null : dotted([...withheld, example])}
+      >
+        {blind ? <State>{INFLOW_WORD.bothUnqualified}</State> : dotted(counted)}
       </Cell>,
     );
   }
@@ -595,8 +630,10 @@ function OperationsSummary({
   if (work.rows.length > 0 || (awaiting ?? 0) > 0) {
     cells.push(
       <Cell key="work" id="work" label={COPY.listTitle} note={awaiting === null ? null : <AwaitingFact count={awaiting} />}>
-        {/* The server said there are more than it sent, so this total is a floor. */}
-        <Big value={work.rows.length} suffix={work.truncated ? "+" : ""} />
+        {/* The server said there are more than it sent, so this total is a floor — 「11+」 건. The unit is
+            what stops the state slot from being a naked number: every other cell answers its question in
+            words, and 11 alone answered it in the vocabulary of a dashboard tile. */}
+        <Big value={work.rows.length} suffix={work.truncated ? "+" : ""} unit={COUNT_UNIT} />
       </Cell>,
     );
   }
@@ -609,91 +646,121 @@ function OperationsSummary({
         label={RECENT_WORD.lead}
         note={
           recent.checked === 0 ? null : (
-            <>
-              <Figure word={RECENT_WORD.autoResolved} value={recent.autoResolved} small />
-              <Dot />
-              <Figure word={RECENT_WORD.draftsPrepared} value={recent.draftsPrepared} small />
-            </>
+            dotted([
+              <Figure key="a" word={RECENT_WORD.autoResolved} value={recent.autoResolved} small />,
+              <Figure key="d" word={RECENT_WORD.draftsPrepared} value={recent.draftsPrepared} small />,
+            ])
           )
         }
       >
-        {recent.checked === 0 ? (
-          <State>{RECENT_WORD.none}</State>
-        ) : (
-          <Figure word={RECENT_WORD.checked} value={recent.checked} />
-        )}
+        {/* Nothing opened in the window is this cell's state, so it is stated at the size of a state — the
+            same size 「새로 확인 8」 would be. It says only what `RECENT_WORD.none` has always said. */}
+        {recent.checked === 0 ? <State>{RECENT_WORD.none}</State> : <Figure word={RECENT_WORD.checked} value={recent.checked} />}
       </Cell>,
     );
   }
 
   if (cells.length === 0) return null;
   return (
-    <section
-      data-testid="today-summary"
-      aria-label={PULSE_LABEL}
-      className="mt-2 grid grid-cols-3 items-start gap-x-8 rounded-xl bg-canvas px-6 py-3.5"
-    >
-      {cells}
-    </section>
+    <div className="mt-2.5">
+      {/* Small, but ink and semibold against the muted labels below it: the band needs a name for the same
+          reason its columns do, and 13px is the size at which a name sits over a group without competing
+          with the page title. */}
+      <h2 id={PULSE_HEADING_ID} className="text-[13px] font-semibold leading-tight text-ink">
+        {PULSE_LABEL}
+      </h2>
+      <section
+        data-testid="today-summary"
+        aria-labelledby={PULSE_HEADING_ID}
+        className="mt-1.5 grid max-w-3xl grid-cols-3 divide-x divide-line rounded-xl bg-canvas px-6 py-3.5"
+      >
+        {cells}
+      </section>
+    </div>
   );
 }
 
+/** 건 — the unit 확인할 일 is counted in everywhere else on this screen, including the list's own heading. */
+const COUNT_UNIT = "건";
+
 /**
- * One column: the question, the figure, and what qualifies the figure.
+ * Facts of one cell, separated by a dot that is a real text node. Absent facts take their separator with
+ * them, so a caller writes the facts and never the punctuation between them.
+ */
+function dotted(parts: ReactNode[]): ReactNode {
+  const kept = parts.filter(Boolean);
+  // Nothing to state is not an empty line: an empty note span would still take its top margin and would
+  // still put a space into what a screen reader reads out.
+  if (kept.length === 0) return null;
+  return kept.map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 ? <Dot /> : null}
+      {part}
+    </Fragment>
+  ));
+}
+
+/**
+ * One column: the question, the state, and what qualifies the state.
  *
  * <p><b>One paragraph, three stacked spans</b> — not three paragraphs. The label and its figure are one
  * fact and are read as one; between block children of a paragraph the separating space is a real text
- * node, so a screen reader says 「확인할 일 4」 and not 「확인할 일4」. That is the same rule the dots inside
- * a cell follow, and the reason the old line spelled its separators instead of drawing them.
+ * node, so a screen reader says 「확인할 일 11건」 and not 「확인할 일11건」. That is the same rule the dots
+ * inside a cell follow, and the reason the old line spelled its separators instead of drawing them.
  *
- * <p>The value line fixes its line box at 28px so a cell whose value is a 15px state sentence sits on the
- * same baseline as a cell whose value is a 22px number — the row of figures has to read as a row.
- * `min-w-0` lets a long value wrap inside its third instead of pushing the grid; it may never clip, which
+ * <p>The state line is 20px and fixes its line box at 28px, so a cell whose state is a sentence sits on
+ * exactly the baseline of a cell whose state is a number — the row of states has to read as a row.
+ * `min-w-0` lets a long state wrap inside its third instead of pushing the grid; it may never clip, which
  * is why the atoms carry `whitespace-nowrap` and the separators between them do not.
+ *
+ * <p>The horizontal padding is what the hairline divides: the first cell keeps the surface's own left edge
+ * and the last one its right, so the band has one inset and the two rules sit midway between neighbours.
  */
 function Cell({ id, label, note, children }: { id: string; label: string; note?: ReactNode; children: ReactNode }) {
   return (
-    <p data-testid={`pulse-${id}`} className="min-w-0 break-keep text-[13px] text-muted">
+    <p
+      data-testid={`pulse-${id}`}
+      className="min-w-0 break-keep px-6 text-[13px] text-muted first:pl-0 last:pr-0"
+    >
       <span className="block leading-[18px]">{label}</span>{" "}
-      <span className="mt-0.5 block leading-7">{children}</span>
+      <span className="mt-0.5 block text-[20px] leading-[26px]">{children}</span>
       {note ? (
         <>
           {" "}
-          <span className="mt-0.5 block leading-[19px]">{note}</span>
+          <span className="mt-0.5 block text-[13px] leading-[19px]">{note}</span>
         </>
       ) : null}
     </p>
   );
 }
 
-/** One inflow metric: the number when it is a measured fact, the collection state when it is not. */
-function Inflow({ fact, word, unqualified }: { fact: InflowFact; word: string; unqualified: string }) {
-  if (fact.kind === "UNQUALIFIED") return <State>{unqualified}</State>;
-  return <Figure word={word} value={fact.value} />;
+/**
+ * <b>미관측은 숫자가 아니고, 사고도 아니다.</b> It stands in the state slot at the state slot's size, because
+ * 「아직 확인하지 못했다」 is this column's answer today and the band exists to be read at a glance. What it
+ * does not take is the ink and the weight: those mark a measured figure, and this is the absence of one.
+ */
+function State({ children }: { children: ReactNode }) {
+  return <span className="whitespace-nowrap font-medium text-muted">{children}</span>;
 }
 
 /**
- * <b>미관측은 숫자가 아니고, 사고도 아니다.</b> It stands in the value slot so the cell keeps its shape,
- * at 15px — below a figure, above a caption — and in the ordinary muted ink. No warn colour, no icon, no
- * tint: 「아직 확인하지 못했다」 is a smaller claim than the numbers beside it, and a band that turns
- * orange the moment a channel is quiet trains a seller to stop reading the band.
+ * The figure itself — the only ink and the only weight this surface spends. The unit rides with it so a
+ * line can never break between a number and the thing it counts.
  */
-function State({ children }: { children: ReactNode }) {
-  return <span className="whitespace-nowrap text-[15px] leading-7 text-muted">{children}</span>;
-}
-
-/** The figure itself — the only ink and the only weight this surface spends. */
-function Big({ value, suffix = "" }: { value: number; suffix?: string }) {
+function Big({ value, suffix = "", unit }: { value: number; suffix?: string; unit?: string }) {
   return (
-    <span className="text-[22px] font-semibold leading-7 tabular-nums text-ink">
-      {value.toLocaleString("ko-KR")}
-      {suffix}
+    <span className="whitespace-nowrap">
+      <span className="font-semibold tabular-nums text-ink">
+        {value.toLocaleString("ko-KR")}
+        {suffix}
+      </span>
+      {unit}
     </span>
   );
 }
 
 /**
- * Label muted, number ink. `small` is the supporting line, where the figure keeps the ink and the weight
+ * Noun muted, number ink. `small` is the supporting line, where the figure keeps the ink and the weight
  * but not the size — 그중 정리 and 초안 준비 qualify 새로 확인, and a qualifier at the size of the thing it
  * qualifies is a second headline.
  *
